@@ -4,13 +4,16 @@ server:
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Taipei&characterEncoding=utf8&createDatabaseIfNotExist=true
+    url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true
     username: root
     password: root
   jpa:
-    hibernate:
-      ddl-auto: update
+    hibernate.ddl-auto: none
+    open-in-view: false
+    properties.hibernate.format_sql: true
     show-sql: true
+    properties:
+      hibernate.jdbc.time_zone: UTC   # 告訴 Hibernate：用 UTC 與 DB 溝通
 
   data:
     redis:
@@ -25,5 +28,8 @@ management:
 app:
   google:
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}" # 用環境變數覆蓋
+  auth:
+    access-ttl-sec: 900        # 15 分
+    refresh-ttl-sec: 2592000   # 30 天
   security:
     allow-origins: "*"   # 開發期先全開，正式環境請收斂
