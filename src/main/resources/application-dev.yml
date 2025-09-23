@@ -1,35 +1,63 @@
 server:
   port: 8080
   address: 0.0.0.0
+
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true
     username: root
     password: root
+
   jpa:
-    hibernate.ddl-auto: none
+    hibernate:
+      ddl-auto: none             # 無自動建表；請用 Flyway/Liquibase
     open-in-view: false
-    properties.hibernate.format_sql: true
     show-sql: true
     properties:
-      hibernate.jdbc.time_zone: UTC   # 告訴 Hibernate：用 UTC 與 DB 溝通
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC         # 與 DB 溝通用 UTC
 
   data:
     redis:
       host: localhost
       port: 6379
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: st9360606@gmail.com
+    password: "tdukpsqbydqqzujd" # ← 刪除多餘空白並加引號
+    properties:
+      mail.transport.protocol: smtp
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true   # 建議加上
+      mail.smtp.connectiontimeout: 5000   # (ms) 避免連線卡死
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+    default-encoding: UTF-8
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info
+
 app:
   google:
-    web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}" # 用環境變數覆蓋
+    web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
   auth:
-    access-ttl-sec: 900        # 15 分
-    refresh-ttl-sec: 2592000   # 30 天
+    access-ttl-sec: 900
+    refresh-ttl-sec: 2592000
   security:
-    allow-origins: "*"   # 開發期先全開，正式環境請收斂
+    allow-origins: "*"
+  email:
+    enabled: true
+    otp-length: 4
+    ttl-minutes: 10
+    # 若使用 Gmail SMTP，from 最好等於 username；否則容易被覆寫或遭拒收
+    sender: "st9360606@gmail.com"
+    # 若要用自家網域 no-reply@bitecal.app，建議改用 SendGrid/SES 並設定 SPF/DKIM/DMARC
