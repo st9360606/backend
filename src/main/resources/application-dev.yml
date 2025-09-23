@@ -28,8 +28,9 @@ spring:
   mail:
     host: smtp.gmail.com
     port: 587
+    test-connection: true
     username: st9360606@gmail.com
-    password: "tdukpsqbydqqzujd" # ← 刪除多餘空白並加引號
+    password: tdukpsqbydqqzujd # ← 刪除多餘空白並加引號
     properties:
       mail.transport.protocol: smtp
       mail.smtp.auth: true

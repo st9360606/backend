@@ -14,17 +14,21 @@ public class User {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name="google_sub", unique = true) // 允許為 null
+    @Column(name = "google_sub", nullable = false, unique = true)
     private String googleSub;
 
     @Column private String email;
     @Column private String name;
     @Column private String picture;
 
-    @Column(name="created_at", nullable = false, columnDefinition="timestamp default current_timestamp")
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
-    @Column(name="updated_at", nullable = false, columnDefinition="timestamp default current_timestamp on update current_timestamp")
+
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
     @Column(name="last_login_at")
     private Instant lastLoginAt;
 

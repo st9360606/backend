@@ -12,7 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
-
+import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -70,36 +70,40 @@ public class EmailAuthService {
     }
 
     /** ✅ 推薦用的四參數版本（Controller 會呼叫這個） */
+    @Transactional
     public AuthResponse verify(VerifyRequest req, String deviceId, String ip, String ua) {
-        var now = Instant.now();
-        var email = req.email().trim().toLowerCase();
+        final Instant now = Instant.now();
+        final String email = req.email().trim().toLowerCase();
 
+        // 1) 取未失效、未使用的最新驗證碼
         var latest = codes.findLatestActive(email, now)
                 .orElseThrow(() -> new IllegalArgumentException("No active code"));
 
-        latest.setAttemptCnt((latest.getAttemptCnt()==null?0:latest.getAttemptCnt()) + 1);
+        // 2) 記一次嘗試（先寫入，以便統計/風控）
+        latest.setAttemptCnt((latest.getAttemptCnt() == null ? 0 : latest.getAttemptCnt()) + 1);
         codes.save(latest);
 
+        // 3) 校驗驗證碼
         if (!latest.getCodeHash().equals(sha256(req.code()))) {
             throw new IllegalArgumentException("Invalid code");
         }
+
+        // 4) 標記已使用
         latest.setConsumedAt(now);
         codes.save(latest);
 
-        // upsert user by email
+        // 5) 以 email upsert 使用者（只 save 一次）
         User user = users.findByEmail(email).orElseGet(() -> {
-            var u = new User();
+            User u = new User();
             u.setEmail(email);
-            u.setName(null);
-            u.setPicture(null);
-            u.setLastLoginAt(now);
-            return users.save(u);
+            return u;
         });
+        // 如有從其他來源帶入的 name/picture，可在此條件覆寫
         user.setLastLoginAt(now);
-        users.save(user);
+        user = users.save(user);
 
-        // 透過你的 TokenService 發 token（依你的回傳型別調整）
-        var pair = tokens.issue(user, deviceId, ip, ua); // 假設回傳有 accessToken()/refreshToken()
+        // 6) 發 Token（依你的 TokenService 回傳型別）
+        var pair = tokens.issue(user, deviceId, ip, ua);
 
         return new AuthResponse(
                 pair.accessToken(),
