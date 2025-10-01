@@ -9,10 +9,13 @@ import com.calai.backend.auth.entity.User;         // ← 確認這是你專案�
 import com.calai.backend.auth.repo.EmailLoginCodeRepository;
 import com.calai.backend.auth.repo.UserRepo;      // ← 確認這是你專案中 Repo 的正確路徑
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -20,6 +23,8 @@ import java.util.Random;
 
 @Service
 public class EmailAuthService {
+
+    private static final String PURPOSE_LOGIN = "LOGIN";
 
     private final EmailLoginCodeRepository codes;
     private final UserRepo users;
@@ -46,18 +51,29 @@ public class EmailAuthService {
     @Value("${app.auth.access-ttl-sec:900}") long accessTtlSeconds;
     @Value("${app.auth.refresh-ttl-sec:2592000}") long refreshTtlSeconds;
 
+    /**
+     * 發送登入驗證碼：
+     * 1) 先把所有仍有效的舊碼「consume」掉
+     * 2) 產出新碼、存 DB、寄出
+     */
+    @Transactional
     public StartResponse start(StartRequest req, String ip, String ua) {
         if (!enabled) return new StartResponse(false);
 
         String email = req.email().trim().toLowerCase();
+        Instant now = Instant.now();
+
+        // 先失效舊碼（避免同時存在多筆有效碼）
+        codes.consumeAllActive(email, PURPOSE_LOGIN, now);
+
+        // 產生新碼並存 DB
         String code = genCode(otpLen);
         String hash = sha256(code);
 
-        var now = Instant.now();
         var ent = new EmailLoginCode();
         ent.setEmail(email);
         ent.setCodeHash(hash);
-        ent.setPurpose("LOGIN");
+        ent.setPurpose(PURPOSE_LOGIN);
         ent.setCreatedAt(now);
         ent.setExpiresAt(now.plusSeconds(ttlMin * 60L));
         ent.setAttemptCnt(0);
@@ -65,44 +81,46 @@ public class EmailAuthService {
         ent.setUserAgent(ua);
         codes.save(ent);
 
+        // 寄信
         sendEmail(email, code);
+
         return new StartResponse(true);
     }
 
-    /** ✅ 推薦用的四參數版本（Controller 會呼叫這個） */
+    /** ✅ 推薦用的四參數版本（Controller 呼叫這個） */
     @Transactional
     public AuthResponse verify(VerifyRequest req, String deviceId, String ip, String ua) {
         final Instant now = Instant.now();
         final String email = req.email().trim().toLowerCase();
 
-        // 1) 取未失效、未使用的最新驗證碼
-        var latest = codes.findLatestActive(email, now)
-                .orElseThrow(() -> new IllegalArgumentException("No active code"));
+        // 1) 只取最新一筆有效的驗證碼
+        var latest = codes.findFirstByEmailAndPurposeAndConsumedAtIsNullAndExpiresAtGreaterThanEqualOrderByIdDesc(
+                        email, PURPOSE_LOGIN, now)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Code expired or not found"));
 
-        // 2) 記一次嘗試（先寫入，以便統計/風控）
+        // 2) 記一次嘗試
         latest.setAttemptCnt((latest.getAttemptCnt() == null ? 0 : latest.getAttemptCnt()) + 1);
         codes.save(latest);
 
-        // 3) 校驗驗證碼
+        // 3) 比對
         if (!latest.getCodeHash().equals(sha256(req.code()))) {
-            throw new IllegalArgumentException("Invalid code");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid code");
         }
 
-        // 4) 標記已使用
+        // 4) 成功：標記已使用，避免再次使用
         latest.setConsumedAt(now);
         codes.save(latest);
 
-        // 5) 以 email upsert 使用者（只 save 一次）
+        // 5) upsert 使用者
         User user = users.findByEmail(email).orElseGet(() -> {
             User u = new User();
             u.setEmail(email);
             return u;
         });
-        // 如有從其他來源帶入的 name/picture，可在此條件覆寫
         user.setLastLoginAt(now);
         user = users.save(user);
 
-        // 6) 發 Token（依你的 TokenService 回傳型別）
+        // 6) 發 Token
         var pair = tokens.issue(user, deviceId, ip, ua);
 
         return new AuthResponse(
@@ -115,7 +133,7 @@ public class EmailAuthService {
         );
     }
 
-    /** ✅ 相容用的一參數版本（若其他地方仍舊只傳 VerifyRequest，也能編過） */
+    /** ✅ 相容用的一參數版本（若其他地方仍只傳 VerifyRequest） */
     public AuthResponse verify(VerifyRequest req) {
         return verify(req, null, null, null);
     }
@@ -124,7 +142,7 @@ public class EmailAuthService {
     private static String genCode(int len) {
         var r = new Random();
         StringBuilder sb = new StringBuilder(len);
-        for (int i=0;i<len;i++) sb.append((char)('0'+ r.nextInt(10)));
+        for (int i = 0; i < len; i++) sb.append((char) ('0' + r.nextInt(10)));
         return sb.toString();
     }
 
