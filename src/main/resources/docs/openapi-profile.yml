@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  title: BiteCal Profile API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /api/v1/users/me/profile:
+    get:
+      summary: Get my onboarding profile
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '404': { description: Not registered }
+    put:
+      summary: Upsert my onboarding profile
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertProfileRequest' }
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        gender: { type: string, nullable: true }
+        age: { type: integer, nullable: true }
+        heightCm: { type: number, format: double, nullable: true }
+        weightKg: { type: number, format: double, nullable: true }
+        exerciseLevel: { type: string, nullable: true }
+        goal: { type: string, nullable: true }
+        targetWeightKg: { type: number, format: double, nullable: true }
+        referralSource: { type: string, nullable: true }
+        locale: { type: string, nullable: true }
+    UpsertProfileRequest:
+      allOf: [ { $ref: '#/components/schemas/UserProfile' } ]

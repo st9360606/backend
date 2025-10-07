@@ -30,7 +30,7 @@ spring:
     port: 587
     test-connection: true
     username: st9360606@gmail.com
-    password:
+    password: tdukpsqbydqqzujd
     properties:
       mail.transport.protocol: smtp
       mail.smtp.auth: true
