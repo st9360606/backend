@@ -1,5 +1,5 @@
 package com.calai.backend.auth.entity;
 
-public enum Provider {
+public enum AuthProvider  {
     GOOGLE, EMAIL, APPLE
 }

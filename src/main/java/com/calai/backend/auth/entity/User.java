@@ -8,28 +8,34 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.Instant;
 
 @Data
-@Table(name = "users")
 @Entity
+@Table(
+        name = "users",
+        uniqueConstraints = {
+                // email 視為唯一（配合下方我們會把 email 統一 lower-case）
+                @UniqueConstraint(name = "ux_users_email", columnNames = {"email"})
+        }
+)
 public class User {
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "google_sub", nullable = false, unique = true)
+    // Google 的 subject，保留唯一
+    @Column(name = "google_sub", unique = true)
     private String googleSub;
 
-    @Column private String email;
+    // 把 email 視為唯一、不可為空（若你 DB 目前允許 null，先清理/補上再上線）
+    @Column(name = "email", nullable = false, unique = true, length = 320)
+    private String email;
+
     @Column private String name;
     @Column private String picture;
 
-    // ★ 新增：登入提供者
+    // 登入來源（資料表若已經有 provider 欄位，這裡就正好對上）
     @Enumerated(EnumType.STRING)
-    @Column(name = "provider")
-    private Provider provider;
-
-    // ★ 新增：Email 是否已驗證
-    @Column(name = "email_verified")
-    private Boolean emailVerified;
+    @Column(name = "provider", length = 20)
+    private AuthProvider provider;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -41,4 +47,9 @@ public class User {
 
     @Column(name="last_login_at")
     private Instant lastLoginAt;
+
+    /** 統一以小寫寫入，避免大小寫造成重複帳號 */
+    public void setEmail(String email) {
+        this.email = (email == null) ? null : email.trim().toLowerCase();
+    }
 }

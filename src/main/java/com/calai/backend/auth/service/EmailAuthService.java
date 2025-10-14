@@ -5,7 +5,7 @@ import com.calai.backend.auth.dto.StartRequest;
 import com.calai.backend.auth.dto.StartResponse;
 import com.calai.backend.auth.dto.VerifyRequest;
 import com.calai.backend.auth.email.EmailLoginCode;
-import com.calai.backend.auth.entity.Provider;
+import com.calai.backend.auth.entity.AuthProvider;
 import com.calai.backend.auth.entity.User;
 import com.calai.backend.auth.repo.EmailLoginCodeRepository;
 import com.calai.backend.auth.repo.UserRepo;
@@ -56,13 +56,13 @@ public class EmailAuthService {
     public StartResponse start(StartRequest req, String ip, String ua) {
         if (!enabled) return new StartResponse(false);
 
-        String email = req.email().trim().toLowerCase();
-        Instant now = Instant.now();
+        final String email = req.email().trim().toLowerCase();
+        final Instant now = Instant.now();
 
         codes.consumeAllActive(email, PURPOSE_LOGIN, now);
 
-        String code = genCode(otpLen);
-        String hash = sha256(code);
+        final String code = genCode(otpLen);
+        final String hash = sha256(code);
 
         var ent = new EmailLoginCode();
         ent.setEmail(email);
@@ -79,7 +79,6 @@ public class EmailAuthService {
         return new StartResponse(true);
     }
 
-    /** 推薦用：含裝置/IP/UA */
     @Transactional
     public AuthResponse verify(VerifyRequest req, String deviceId, String ip, String ua) {
         final Instant now = Instant.now();
@@ -99,25 +98,14 @@ public class EmailAuthService {
         latest.setConsumedAt(now);
         codes.save(latest);
 
-        // upsert 使用者
-        User user = users.findByEmail(email).orElseGet(() -> {
+        // 以 email 取回既有帳號（若先用 Google 註冊，也會找到同一筆）
+        User user = users.findByEmailIgnoreCase(email).orElseGet(() -> {
             User u = new User();
             u.setEmail(email);
-            // ★ 新用戶：預設為 EMAIL 並標記已驗證
-            u.setProvider(Provider.EMAIL);
-            u.setEmailVerified(Boolean.TRUE);
             return u;
         });
 
-        // ★ 既有用戶：若 provider 尚未設置才補為 EMAIL；不覆蓋 GOOGLE/APPLE
-        if (user.getProvider() == null) {
-            user.setProvider(Provider.EMAIL);
-        }
-        // ★ 用 email 驗證碼登入視為已驗證
-        if (user.getEmailVerified() == null || !user.getEmailVerified()) {
-            user.setEmailVerified(Boolean.TRUE);
-        }
-
+        user.setProvider(AuthProvider.EMAIL); // 標記本次登入來源
         user.setLastLoginAt(now);
         user = users.save(user);
 
@@ -133,15 +121,12 @@ public class EmailAuthService {
         );
     }
 
-    /** 相容舊呼叫 */
-    public AuthResponse verify(VerifyRequest req) {
-        return verify(req, null, null, null);
-    }
+    public AuthResponse verify(VerifyRequest req) { return verify(req, null, null, null); }
 
-    // ===== helpers =====
+    // helpers
     private static String genCode(int len) {
         var r = new Random();
-        StringBuilder sb = new StringBuilder(len);
+        var sb = new StringBuilder(len);
         for (int i = 0; i < len; i++) sb.append((char) ('0' + r.nextInt(10)));
         return sb.toString();
     }
@@ -150,10 +135,12 @@ public class EmailAuthService {
         try {
             var md = MessageDigest.getInstance("SHA-256");
             byte[] d = md.digest(s.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder();
+            var hex = new StringBuilder();
             for (byte b : d) hex.append(String.format("%02x", b));
             return hex.toString();
-        } catch (Exception e) { throw new RuntimeException(e); }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void sendEmail(String to, String code) {
