@@ -6,8 +6,9 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
+
 @Data
-@Table(name = "users") // ← 綁定既有資料表
+@Table(name = "users")
 @Entity
 public class User {
 
@@ -21,6 +22,15 @@ public class User {
     @Column private String name;
     @Column private String picture;
 
+    // ★ 新增：登入提供者
+    @Enumerated(EnumType.STRING)
+    @Column(name = "provider")
+    private Provider provider;
+
+    // ★ 新增：Email 是否已驗證
+    @Column(name = "email_verified")
+    private Boolean emailVerified;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -31,7 +41,4 @@ public class User {
 
     @Column(name="last_login_at")
     private Instant lastLoginAt;
-
-    // ======= getters & setters =======
-
 }

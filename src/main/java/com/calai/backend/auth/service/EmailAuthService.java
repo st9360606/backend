@@ -5,9 +5,10 @@ import com.calai.backend.auth.dto.StartRequest;
 import com.calai.backend.auth.dto.StartResponse;
 import com.calai.backend.auth.dto.VerifyRequest;
 import com.calai.backend.auth.email.EmailLoginCode;
-import com.calai.backend.auth.entity.User;         // ← 確認這是你專案中 User 的正確路徑
+import com.calai.backend.auth.entity.Provider;
+import com.calai.backend.auth.entity.User;
 import com.calai.backend.auth.repo.EmailLoginCodeRepository;
-import com.calai.backend.auth.repo.UserRepo;      // ← 確認這是你專案中 Repo 的正確路徑
+import com.calai.backend.auth.repo.UserRepo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.SimpleMailMessage;
@@ -29,7 +30,7 @@ public class EmailAuthService {
     private final EmailLoginCodeRepository codes;
     private final UserRepo users;
     private final JavaMailSender mail;
-    private final TokenService tokens;            // ← 你的 TokenService
+    private final TokenService tokens;
 
     public EmailAuthService(
             EmailLoginCodeRepository codes,
@@ -51,11 +52,6 @@ public class EmailAuthService {
     @Value("${app.auth.access-ttl-sec:900}") long accessTtlSeconds;
     @Value("${app.auth.refresh-ttl-sec:2592000}") long refreshTtlSeconds;
 
-    /**
-     * 發送登入驗證碼：
-     * 1) 先把所有仍有效的舊碼「consume」掉
-     * 2) 產出新碼、存 DB、寄出
-     */
     @Transactional
     public StartResponse start(StartRequest req, String ip, String ua) {
         if (!enabled) return new StartResponse(false);
@@ -63,10 +59,8 @@ public class EmailAuthService {
         String email = req.email().trim().toLowerCase();
         Instant now = Instant.now();
 
-        // 先失效舊碼（避免同時存在多筆有效碼）
         codes.consumeAllActive(email, PURPOSE_LOGIN, now);
 
-        // 產生新碼並存 DB
         String code = genCode(otpLen);
         String hash = sha256(code);
 
@@ -81,46 +75,52 @@ public class EmailAuthService {
         ent.setUserAgent(ua);
         codes.save(ent);
 
-        // 寄信
         sendEmail(email, code);
-
         return new StartResponse(true);
     }
 
-    /** ✅ 推薦用的四參數版本（Controller 呼叫這個） */
+    /** 推薦用：含裝置/IP/UA */
     @Transactional
     public AuthResponse verify(VerifyRequest req, String deviceId, String ip, String ua) {
         final Instant now = Instant.now();
         final String email = req.email().trim().toLowerCase();
 
-        // 1) 只取最新一筆有效的驗證碼
         var latest = codes.findFirstByEmailAndPurposeAndConsumedAtIsNullAndExpiresAtGreaterThanEqualOrderByIdDesc(
-                        email, PURPOSE_LOGIN, now)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Code expired or not found"));
+                email, PURPOSE_LOGIN, now
+        ).orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Code expired or not found"));
 
-        // 2) 記一次嘗試
         latest.setAttemptCnt((latest.getAttemptCnt() == null ? 0 : latest.getAttemptCnt()) + 1);
         codes.save(latest);
 
-        // 3) 比對
         if (!latest.getCodeHash().equals(sha256(req.code()))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid code");
         }
 
-        // 4) 成功：標記已使用，避免再次使用
         latest.setConsumedAt(now);
         codes.save(latest);
 
-        // 5) upsert 使用者
+        // upsert 使用者
         User user = users.findByEmail(email).orElseGet(() -> {
             User u = new User();
             u.setEmail(email);
+            // ★ 新用戶：預設為 EMAIL 並標記已驗證
+            u.setProvider(Provider.EMAIL);
+            u.setEmailVerified(Boolean.TRUE);
             return u;
         });
+
+        // ★ 既有用戶：若 provider 尚未設置才補為 EMAIL；不覆蓋 GOOGLE/APPLE
+        if (user.getProvider() == null) {
+            user.setProvider(Provider.EMAIL);
+        }
+        // ★ 用 email 驗證碼登入視為已驗證
+        if (user.getEmailVerified() == null || !user.getEmailVerified()) {
+            user.setEmailVerified(Boolean.TRUE);
+        }
+
         user.setLastLoginAt(now);
         user = users.save(user);
 
-        // 6) 發 Token
         var pair = tokens.issue(user, deviceId, ip, ua);
 
         return new AuthResponse(
@@ -133,7 +133,7 @@ public class EmailAuthService {
         );
     }
 
-    /** ✅ 相容用的一參數版本（若其他地方仍只傳 VerifyRequest） */
+    /** 相容舊呼叫 */
     public AuthResponse verify(VerifyRequest req) {
         return verify(req, null, null, null);
     }
