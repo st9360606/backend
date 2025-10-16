@@ -6,7 +6,7 @@ import com.calai.backend.auth.dto.StartResponse;
 import com.calai.backend.auth.dto.VerifyRequest;
 import com.calai.backend.auth.email.EmailLoginCode;
 import com.calai.backend.auth.entity.AuthProvider;
-import com.calai.backend.auth.entity.User;
+import com.calai.backend.users.entity.User;
 import com.calai.backend.auth.repo.EmailLoginCodeRepository;
 import com.calai.backend.auth.repo.UserRepo;
 import org.springframework.beans.factory.annotation.Value;

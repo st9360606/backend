@@ -1,5 +1,6 @@
 package com.calai.backend.auth.entity;
 
+import com.calai.backend.users.entity.User;
 import jakarta.persistence.*;
 import lombok.Data;
 

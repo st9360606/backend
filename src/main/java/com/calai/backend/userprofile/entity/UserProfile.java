@@ -1,6 +1,6 @@
 package com.calai.backend.userprofile.entity;
 
-import com.calai.backend.auth.entity.User;
+import com.calai.backend.users.entity.User;
 import jakarta.persistence.*;
 import lombok.Data;
 

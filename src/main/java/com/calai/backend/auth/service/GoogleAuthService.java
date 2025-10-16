@@ -3,7 +3,7 @@ package com.calai.backend.auth.service;
 import com.calai.backend.auth.dto.AuthResponse;
 import com.calai.backend.auth.dto.GoogleSignInExchangeRequest;
 import com.calai.backend.auth.entity.AuthProvider;
-import com.calai.backend.auth.entity.User;
+import com.calai.backend.users.entity.User;
 import com.calai.backend.auth.repo.UserRepo;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;

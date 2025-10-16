@@ -1,6 +1,6 @@
 package com.calai.backend.auth.security;
 
-import com.calai.backend.auth.entity.User;
+import com.calai.backend.users.entity.User;
 import com.calai.backend.auth.service.TokenService;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;

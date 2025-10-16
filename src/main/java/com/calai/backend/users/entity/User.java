@@ -1,5 +1,6 @@
-package com.calai.backend.auth.entity;
+package com.calai.backend.users.entity;
 
+import com.calai.backend.auth.entity.AuthProvider;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
