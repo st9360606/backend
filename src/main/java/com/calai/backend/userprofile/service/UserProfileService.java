@@ -1,11 +1,11 @@
 package com.calai.backend.userprofile.service;
 
 import com.calai.backend.auth.repo.UserRepo;
-import com.calai.backend.userprofile.common.Units;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.entity.UserProfile;
 import com.calai.backend.userprofile.repo.UserProfileRepository;
+import com.calai.backend.users.entity.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +17,25 @@ public class UserProfileService {
     public UserProfileService(UserProfileRepository repo, UserRepo users) {
         this.repo = repo;
         this.users = users;
+    }
+
+    /** 首次登入或缺資料時：確保至少有一筆最小 Profile（避免前端先遇到 404/401） */
+    @Transactional
+    public UserProfile ensureDefault(User u) {
+        return repo.findByUserId(u.getId()).orElseGet(() -> {
+            var np = new UserProfile();
+            np.setUser(u);                 // @MapsId: 以 user.id 當 user_id
+            // 這裡只給安全預設；不要亂填身高體重避免造成 UI 誤導
+            // 可選：np.setLocale("en");
+            return repo.save(np);
+        });
+    }
+
+    /** 以 userId 確保存在（便於只拿到 id 的情境） */
+    @Transactional
+    public UserProfile ensureDefault(Long userId) {
+        var u = users.findById(userId).orElseThrow();
+        return ensureDefault(u);
     }
 
     @Transactional(readOnly = true)
@@ -33,7 +52,7 @@ public class UserProfileService {
 
     /**
      * 建立或更新使用者的 Profile。
-     * 除身高/體重採專屬規則（兩制同步/清空），其他欄位維持「非 null 才覆寫」。
+     * 身高/體重採兩制同步規則；其他欄位維持「非 null 才覆寫」。
      */
     @Transactional
     public UserProfileDto upsert(Long userId, UpsertProfileRequest r) {
@@ -44,9 +63,8 @@ public class UserProfileService {
             return np;
         });
 
-        // -------------- 在身高 --------------
+        // -------------- 身高 --------------
         if (r.heightFeet() != null && r.heightInches() != null) {
-            // 英制 + 公制（若沒帶 cm 就由 ft/in 算）
             p.setHeightFeet(r.heightFeet());
             p.setHeightInches(r.heightInches());
             Double cm = (r.heightCm() != null)
@@ -54,22 +72,19 @@ public class UserProfileService {
                     : com.calai.backend.userprofile.common.Units.feetInchesToCm(r.heightFeet(), r.heightInches());
             p.setHeightCm(cm);
         } else if (r.heightCm() != null) {
-            // 只有 cm，並清空英制
             p.setHeightCm(r.heightCm());
             p.setHeightFeet(null);
             p.setHeightInches(null);
         }
 
-        // -------------- 在體重 --------------
+        // -------------- 體重 --------------
         if (r.weightLbs() != null) {
-            // lbs + kg（若沒帶 kg 就由 lbs 算）
             p.setWeightLbs(r.weightLbs());
             Double kg = (r.weightKg() != null)
                     ? r.weightKg()
                     : com.calai.backend.userprofile.common.Units.lbsToKg(r.weightLbs());
             p.setWeightKg(kg);
         } else if (r.weightKg() != null) {
-            // 只有 kg，並清空 lbs
             p.setWeightKg(r.weightKg());
             p.setWeightLbs(null);
         }

@@ -9,6 +9,7 @@ import com.calai.backend.auth.entity.AuthProvider;
 import com.calai.backend.users.entity.User;
 import com.calai.backend.auth.repo.EmailLoginCodeRepository;
 import com.calai.backend.auth.repo.UserRepo;
+import com.calai.backend.userprofile.service.UserProfileService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.SimpleMailMessage;
@@ -31,17 +32,20 @@ public class EmailAuthService {
     private final UserRepo users;
     private final JavaMailSender mail;
     private final TokenService tokens;
+    private final UserProfileService profiles; // ★ 新增
 
     public EmailAuthService(
             EmailLoginCodeRepository codes,
             UserRepo users,
             JavaMailSender mail,
-            TokenService tokens
+            TokenService tokens,
+            UserProfileService profiles // ★ 新增
     ) {
         this.codes = codes;
         this.users = users;
         this.mail = mail;
         this.tokens = tokens;
+        this.profiles = profiles; // ★ 新增
     }
 
     @Value("${app.email.enabled:true}") boolean enabled;
@@ -98,16 +102,19 @@ public class EmailAuthService {
         latest.setConsumedAt(now);
         codes.save(latest);
 
-        // 以 email 取回既有帳號（若先用 Google 註冊，也會找到同一筆）
+        // 以 email 取回或建立帳號
         User user = users.findByEmailIgnoreCase(email).orElseGet(() -> {
             User u = new User();
             u.setEmail(email);
             return u;
         });
 
-        user.setProvider(AuthProvider.EMAIL); // 標記本次登入來源
+        user.setProvider(AuthProvider.EMAIL);
         user.setLastLoginAt(now);
         user = users.save(user);
+
+        // ★ 登入即確保有一筆最小 Profile（避免前端第一拍遇到 404）
+        profiles.ensureDefault(user);
 
         var pair = tokens.issue(user, deviceId, ip, ua);
 

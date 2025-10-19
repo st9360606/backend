@@ -21,6 +21,7 @@ public class UserProfileController {
     @GetMapping
     public ResponseEntity<UserProfileDto> getMyProfile() {
         Long uid = auth.requireUserId();
+        // 不存在回 404（避免 401 觸發 OkHttp Authenticator 的 refresh 循環）
         if (!svc.exists(uid)) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(svc.getOrThrow(uid));
     }
@@ -31,3 +32,4 @@ public class UserProfileController {
         return svc.upsert(uid, req);
     }
 }
+

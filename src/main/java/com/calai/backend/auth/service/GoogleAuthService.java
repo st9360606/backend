@@ -5,6 +5,7 @@ import com.calai.backend.auth.dto.GoogleSignInExchangeRequest;
 import com.calai.backend.auth.entity.AuthProvider;
 import com.calai.backend.users.entity.User;
 import com.calai.backend.auth.repo.UserRepo;
+import com.calai.backend.userprofile.service.UserProfileService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
@@ -23,14 +24,17 @@ public class GoogleAuthService {
     private final GoogleIdTokenVerifier verifier;
     private final UserRepo userRepo;
     private final TokenService tokenService;
+    private final UserProfileService profiles; // ★ 新增
 
     public GoogleAuthService(
             @Value("${app.google.web-client-id}") String webClientId,
             UserRepo userRepo,
-            TokenService tokenService
+            TokenService tokenService,
+            UserProfileService profiles // ★ 新增
     ) {
         this.userRepo = userRepo;
         this.tokenService = tokenService;
+        this.profiles = profiles; // ★ 新增
         this.verifier = new GoogleIdTokenVerifier
                 .Builder(new NetHttpTransport(), GsonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(webClientId))
@@ -51,7 +55,7 @@ public class GoogleAuthService {
         // 1) 先用 google_sub 找
         User user = userRepo.findByGoogleSub(sub).orElse(null);
 
-        // 2) 找不到時，用 email 合併既有帳號（email 視為同一個人）
+        // 2) 找不到時，用 email 合併既有帳號（email 代表同一個人）
         if (user == null) {
             user = userRepo.findByEmailIgnoreCase(email).orElse(null);
         }
@@ -62,7 +66,7 @@ public class GoogleAuthService {
             user.setEmail(email);
         }
 
-        // 4) 回填/更新資料（把 google_sub 綁上既有帳號）
+        // 4) 回填/更新
         user.setGoogleSub(sub);
         user.setName(name);
         user.setPicture(picture);
@@ -70,6 +74,9 @@ public class GoogleAuthService {
         user.setLastLoginAt(Instant.now());
 
         user = userRepo.save(user);
+
+        // ★ 登入即確保有一筆最小 Profile（避免前端第一拍遇到 404）
+        profiles.ensureDefault(user);
 
         var pair = tokenService.issue(user, deviceId, ip, ua);
         return new AuthResponse(pair.accessToken(), pair.refreshToken());
