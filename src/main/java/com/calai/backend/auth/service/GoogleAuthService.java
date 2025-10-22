@@ -3,6 +3,8 @@ package com.calai.backend.auth.service;
 import com.calai.backend.auth.dto.AuthResponse;
 import com.calai.backend.auth.dto.GoogleSignInExchangeRequest;
 import com.calai.backend.auth.entity.AuthProvider;
+import com.calai.backend.fasting.service.FastingPlanService;
+import com.calai.backend.fasting.support.ClientTimeZoneResolver;
 import com.calai.backend.users.entity.User;
 import com.calai.backend.auth.repo.UserRepo;
 import com.calai.backend.userprofile.service.UserProfileService;
@@ -25,12 +27,16 @@ public class GoogleAuthService {
     private final UserRepo userRepo;
     private final TokenService tokenService;
     private final UserProfileService profiles; // ★ 新增
+    private final FastingPlanService fastingPlans;           // ★ 新增
+    private final ClientTimeZoneResolver tzResolver;         // ★ 新增
 
     public GoogleAuthService(
             @Value("${app.google.web-client-id}") String webClientId,
             UserRepo userRepo,
             TokenService tokenService,
-            UserProfileService profiles // ★ 新增
+            UserProfileService profiles,
+            FastingPlanService fastingPlans,
+            ClientTimeZoneResolver tzResolver // ★ 新增
     ) {
         this.userRepo = userRepo;
         this.tokenService = tokenService;
@@ -39,6 +45,8 @@ public class GoogleAuthService {
                 .Builder(new NetHttpTransport(), GsonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(webClientId))
                 .build();
+        this.fastingPlans = fastingPlans;
+        this.tzResolver = tzResolver;
     }
 
     @Transactional
@@ -77,6 +85,10 @@ public class GoogleAuthService {
 
         // ★ 登入即確保有一筆最小 Profile（避免前端第一拍遇到 404）
         profiles.ensureDefault(user);
+
+        // ★ 新增：建立預設 fasting_plan
+        String clientTz = tzResolver.resolveFromCurrentRequest();
+        fastingPlans.ensureDefaultIfMissing(user.getId(), clientTz);
 
         var pair = tokenService.issue(user, deviceId, ip, ua);
         return new AuthResponse(pair.accessToken(), pair.refreshToken());

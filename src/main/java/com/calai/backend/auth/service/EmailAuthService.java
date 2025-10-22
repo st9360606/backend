@@ -6,6 +6,8 @@ import com.calai.backend.auth.dto.StartResponse;
 import com.calai.backend.auth.dto.VerifyRequest;
 import com.calai.backend.auth.email.EmailLoginCode;
 import com.calai.backend.auth.entity.AuthProvider;
+import com.calai.backend.fasting.service.FastingPlanService;
+import com.calai.backend.fasting.support.ClientTimeZoneResolver;
 import com.calai.backend.users.entity.User;
 import com.calai.backend.auth.repo.EmailLoginCodeRepository;
 import com.calai.backend.auth.repo.UserRepo;
@@ -33,19 +35,25 @@ public class EmailAuthService {
     private final JavaMailSender mail;
     private final TokenService tokens;
     private final UserProfileService profiles; // ★ 新增
+    private final FastingPlanService fastingPlans;            // ★ 新增
+    private final ClientTimeZoneResolver tzResolver;          // ★ 新增
 
     public EmailAuthService(
             EmailLoginCodeRepository codes,
             UserRepo users,
             JavaMailSender mail,
             TokenService tokens,
-            UserProfileService profiles // ★ 新增
+            UserProfileService profiles,
+            FastingPlanService fastingPlans,
+            ClientTimeZoneResolver tzResolver // ★ 新增
     ) {
         this.codes = codes;
         this.users = users;
         this.mail = mail;
         this.tokens = tokens;
         this.profiles = profiles; // ★ 新增
+        this.fastingPlans = fastingPlans;
+        this.tzResolver = tzResolver;
     }
 
     @Value("${app.email.enabled:true}") boolean enabled;
@@ -115,6 +123,10 @@ public class EmailAuthService {
 
         // ★ 登入即確保有一筆最小 Profile（避免前端第一拍遇到 404）
         profiles.ensureDefault(user);
+
+        // 2) ★ 確保 fasting_plan 預設一筆（含時區）
+        String clientTz = tzResolver.resolveFromCurrentRequest();
+        fastingPlans.ensureDefaultIfMissing(user.getId(), clientTz);
 
         var pair = tokens.issue(user, deviceId, ip, ua);
 
