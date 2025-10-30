@@ -180,47 +180,6 @@ public class WorkoutService {
         );
     }
 
-    /** WS3+WS4: /log */
-    @Transactional
-    public LogWorkoutResponse log(LogWorkoutRequest req, ZoneId zone) {
-        Long uid = auth.requireUserId();
-        double userKg = userWeightKgOrThrow(uid);
-
-        WorkoutDictionary dict = dictRepo.findById(req.activityId())
-                .orElseThrow();
-
-        int minutes = req.minutes();
-        int kcal = calcKcal(dict.getMetValue(), userKg, minutes);
-
-        WorkoutSession ws = new WorkoutSession();
-        ws.setUserId(uid);
-        ws.setDictionary(dict);
-        ws.setMinutes(minutes);
-        ws.setKcal(kcal);
-        ws.setStartedAt(Instant.now());
-        sessionRepo.save(ws);
-
-        TodayWorkoutResponse today = buildToday(uid, zone);
-
-        WorkoutSessionDto dto = new WorkoutSessionDto(
-                ws.getId(),
-                dict.getDisplayNameEn(),
-                ws.getMinutes(),
-                ws.getKcal(),
-                ZonedDateTime.ofInstant(ws.getStartedAt(), zone)
-                        .format(DateTimeFormatter.ofPattern("h:mm a"))
-        );
-
-        return new LogWorkoutResponse(dto, today);
-    }
-
-    /** WS4 & Home卡片同步：/today */
-    @Transactional(readOnly = true)
-    public TodayWorkoutResponse today(ZoneId zone) {
-        Long uid = auth.requireUserId();
-        return buildToday(uid, zone);
-    }
-
     /** WS6: 刪除一筆 session -> 回傳今天最新加總，滿足 Play「可刪除健康紀錄」 */
     @Transactional
     public TodayWorkoutResponse deleteSession(Long sessionId, ZoneId zone) {
@@ -248,5 +207,67 @@ public class WorkoutService {
         return new PresetListResponse(list);
     }
 
+    /** 依用戶時區計算 7 天保留的截止點（當地今天 0 點回推 7 天）並清除更舊資料。*/
+    private void purgeOldSessions(Long uid, ZoneId zone) {
+        // 用戶當地的「今天 00:00」
+        Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
+        // 要保留「前 7 天，不含今天」→ 刪除 7 天前 00:00 之前的資料
+        Instant cutoff = todayStart.minus(java.time.Duration.ofDays(7));
+
+        // 只刪「該用戶」且「早於 cutoff」的資料
+        sessionRepo.deleteOlderThan(uid, cutoff);
+    }
+
+    /** WS3+WS4: /log */
+    @Transactional
+    public LogWorkoutResponse log(LogWorkoutRequest req, ZoneId zone) {
+        Long uid = auth.requireUserId();
+        purgeOldSessions(uid, zone); // ★ 先清理
+
+        double userKg = userWeightKgOrThrow(uid);
+        WorkoutDictionary dict = dictRepo.findById(req.activityId()).orElseThrow();
+
+        int minutes = req.minutes();
+        int kcal = calcKcal(dict.getMetValue(), userKg, minutes);
+
+        WorkoutSession ws = new WorkoutSession();
+        ws.setUserId(uid);
+        ws.setDictionary(dict);
+        ws.setMinutes(minutes);
+        ws.setKcal(kcal);
+        ws.setStartedAt(Instant.now());
+        sessionRepo.save(ws);
+
+        TodayWorkoutResponse today = buildToday(uid, zone);
+        return new LogWorkoutResponse(
+                new WorkoutSessionDto(
+                        ws.getId(), dict.getDisplayNameEn(), ws.getMinutes(), ws.getKcal(),
+                        ZonedDateTime.ofInstant(ws.getStartedAt(), zone)
+                                .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+                ),
+                today
+        );
+    }
+
+    /** WS4: /today */
+    @Transactional(readOnly = true)
+    public TodayWorkoutResponse today(ZoneId zone) {
+        Long uid = auth.requireUserId();
+        purgeOldSessions(uid, zone); // ★ 查詢前也清理，確保列表乾淨
+        return buildToday(uid, zone);
+    }
+
+    /**
+     * 依用戶時區清理：保留「前 7 天，不含今天」。
+     * 觸發條件：排程或 Controller 進入點。
+     */
+    @Transactional
+    public void purgeOldSessionsPublic(Long userId, ZoneId zone) {
+        // 用戶當地「今天 00:00」
+        Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
+        // 保留前 7 天，不含今天 → 刪除早於此 cutoff 的資料
+        Instant cutoff = todayStart.minus(Duration.ofDays(7));
+        sessionRepo.deleteOlderThan(userId, cutoff);
+    }
 }
 

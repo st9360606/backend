@@ -12,6 +12,9 @@ import java.time.ZoneId;
 @Service
 public class WaterService {
 
+    // 保留「前 7 天（T-1..T-7）」，刪除 < T-7
+    private static final int DEFAULT_KEEP_DAYS = 7;
+
     private final UserWaterDailyRepository repo;
 
     public WaterService(UserWaterDailyRepository repo) {
@@ -20,11 +23,12 @@ public class WaterService {
 
     /**
      * 取得「今天」的資料。如果沒有，就建立 0。
-     * @param userId 使用者ID (從你的 JWT / SecurityContext 拿)
-     * @param zoneId 使用者時區（例如 Asia/Taipei、America/New_York）
+     * 進入點先「按使用者、按時區」清理 < (today-7) 的資料（保留 T-7）。
      */
     @Transactional
     public WaterDtos.WaterSummaryDto getToday(Long userId, ZoneId zoneId) {
+        cleanupOldForUser(userId, zoneId, DEFAULT_KEEP_DAYS);
+
         LocalDate localDate = LocalDate.now(zoneId);
 
         UserWaterDaily row = repo.findByUserIdAndLocalDate(userId, localDate)
@@ -47,9 +51,12 @@ public class WaterService {
     /**
      * 調整今天的 cups (+1 或 -1)。
      * 後端負責 clamp >=0 並回算 ml / fl_oz。
+     * 進入點同樣採「刪除 < (today-7)」，保留 T-7。
      */
     @Transactional
     public WaterDtos.WaterSummaryDto adjustToday(Long userId, ZoneId zoneId, int cupsDelta) {
+        cleanupOldForUser(userId, zoneId, DEFAULT_KEEP_DAYS);
+
         LocalDate localDate = LocalDate.now(zoneId);
 
         UserWaterDaily row = repo.findByUserIdAndLocalDate(userId, localDate)
@@ -75,12 +82,14 @@ public class WaterService {
     }
 
     /**
-     * 刪除 7 天前(含)更舊的資料，避免表爆炸。
-     * e.g. now=2025-10-25 -> 刪除 local_date < 2025-10-18
+     * 單用戶清理（以使用者時區計算 today）：
+     * 定義：保留 T-1..T-7；刪除 < T-7。
      */
     @Transactional
-    public void cleanupOld(int keepDays) {
-        LocalDate cutoff = LocalDate.now(ZoneId.of("UTC")).minusDays(keepDays);
-        repo.deleteByLocalDateBefore(cutoff);
+    void cleanupOldForUser(Long userId, ZoneId zoneId, int keepDays) {
+        LocalDate today = LocalDate.now(zoneId);
+        LocalDate cutoffExclusive = today.minusDays(keepDays); // T-7
+        // 只刪該 user，且「不含截止日」→ < T-7
+        repo.deleteByUserIdAndLocalDateBefore(userId, cutoffExclusive);
     }
 }

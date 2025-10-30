@@ -2,6 +2,7 @@ package com.calai.backend.workout.repo;
 
 import com.calai.backend.workout.entity.WorkoutSession;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.time.Instant;
@@ -24,4 +25,10 @@ public interface WorkoutSessionRepo extends JpaRepository<WorkoutSession, Long> 
         where ws.id = ?1 and ws.userId = ?2
         """)
     Optional<WorkoutSession> findByIdAndUserId(Long sessionId, Long userId);
+
+    // ★ 依用戶 + 時間點刪除舊資料（供 7 天保留機制）
+    @Modifying
+    @Query("delete from WorkoutSession ws where ws.userId = ?1 and ws.startedAt < ?2")
+    int deleteOlderThan(Long userId, Instant cutoffExclusive);
+
 }
