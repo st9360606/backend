@@ -3,7 +3,7 @@ package com.calai.backend.workout.service;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.userprofile.entity.UserProfile;
 import com.calai.backend.userprofile.repo.UserProfileRepository;
-import com.calai.backend.userprofile.common.Units; // 你後端已有 lbsToKg(...) 等轉換邏輯:contentReference[oaicite:10]{index=10}
+import com.calai.backend.userprofile.common.Units;
 import com.calai.backend.workout.dto.*;
 import com.calai.backend.workout.entity.WorkoutAlias;
 import com.calai.backend.workout.entity.WorkoutDictionary;
@@ -16,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -42,17 +42,18 @@ public class WorkoutService {
         this.auth = auth;
     }
 
+    /* ========= 時間格式：標準 24h，HH:mm（無 am/pm） ========= */
+    private static final DateTimeFormatter TIME_FMT_24 = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH);
+    private static String formatTime24(ZonedDateTime zdt) {
+        return zdt.format(TIME_FMT_24); // 例：00:39、12:00、13:00、23:59
+    }
+    /* ===================================================== */
+
     private double userWeightKgOrThrow(Long uid) {
         UserProfile p = profileRepo.findByUserId(uid)
                 .orElseThrow(() -> new IllegalStateException("PROFILE_NOT_FOUND"));
-
-        // 使用者的體重可能是 kg 或 lbs，兩個欄位在 user_profiles 都有:contentReference[oaicite:11]{index=11}
-        if (p.getWeightKg() != null) {
-            return p.getWeightKg();
-        }
-        if (p.getWeightLbs() != null) {
-            return Units.lbsToKg(p.getWeightLbs());
-        }
+        if (p.getWeightKg() != null) return p.getWeightKg();
+        if (p.getWeightLbs() != null) return Units.lbsToKg(p.getWeightLbs());
         throw new IllegalStateException("WEIGHT_REQUIRED");
     }
 
@@ -63,34 +64,25 @@ public class WorkoutService {
                 .orElse("en");
     }
 
-    // 解析「15 min walking」or「30分鐘 散步」等等
+    // 解析使用者輸入時長
     private static record ParsedInput(String activityText, Integer minutes) {}
 
     private ParsedInput parseUserText(String text, String localeTag) {
-        // 抓分鐘
         Pattern pMin = Pattern.compile("(\\d{1,3})\\s*(min|mins|minute|minutes|phút|分鐘|分|분)",
                 Pattern.CASE_INSENSITIVE);
         Matcher mMin = pMin.matcher(text);
         Integer minutes = null;
-        if (mMin.find()) {
-            minutes = Integer.valueOf(mMin.group(1));
-        }
+        if (mMin.find()) minutes = Integer.valueOf(mMin.group(1));
 
-        // 抓小時
         if (minutes == null) {
             Pattern pHr = Pattern.compile("(\\d{1,2})\\s*(h|hr|hour|hours|giờ|小時|小时|시간)",
                     Pattern.CASE_INSENSITIVE);
             Matcher mHr = pHr.matcher(text);
-            if (mHr.find()) {
-                minutes = Integer.valueOf(mHr.group(1)) * 60;
-            }
+            if (mHr.find()) minutes = Integer.valueOf(mHr.group(1)) * 60;
         }
 
-        if (minutes == null) {
-            return new ParsedInput(null, null); // 直接 fail → Scan Failed
-        }
+        if (minutes == null) return new ParsedInput(null, null);
 
-        // 去掉第一個時間片段，剩下的字串當作活動名稱
         String raw = text;
         raw = mMin.replaceFirst("");
         raw = raw.replaceAll("\\s+", " ").trim();
@@ -100,16 +92,8 @@ public class WorkoutService {
     }
 
     private int calcKcal(double met, double userKg, int minutes) {
-        // 不當醫療建議，只是 estimated calories burned
         double burned = met * userKg * (minutes / 60.0);
         return (int) Math.round(burned);
-    }
-
-    private ZoneId parseZoneOrSystem(String tzHeader) {
-        try {
-            if (tzHeader != null && !tzHeader.isBlank()) return ZoneId.of(tzHeader);
-        } catch (Exception ignored) {}
-        return ZoneId.systemDefault();
     }
 
     private TodayWorkoutResponse buildToday(Long uid, ZoneId zone) {
@@ -118,13 +102,12 @@ public class WorkoutService {
         Instant end = today.plusDays(1).atStartOfDay(zone).toInstant();
 
         var list = sessionRepo.findUserSessionsBetween(uid, start, end);
-
         int total = list.stream().mapToInt(WorkoutSession::getKcal).sum();
 
         var dtos = list.stream().map(ws -> {
             ZonedDateTime zdt = ws.getStartedAt().atZone(zone);
-            String tl = zdt.format(DateTimeFormatter.ofPattern("h:mm a"));
-            String name = ws.getDictionary().getDisplayNameEn(); // TODO: locale aware later
+            String tl = formatTime24(zdt); // ★ 24h 格式
+            String name = ws.getDictionary().getDisplayNameEn(); // TODO: locale aware
             return new WorkoutSessionDto(
                     ws.getId(),
                     name,
@@ -146,24 +129,18 @@ public class WorkoutService {
 
         ParsedInput parsed = parseUserText(textRaw, localeTag);
         if (parsed.activityText() == null || parsed.minutes() == null) {
-            // 時間都抓不到，直接失敗
             return new EstimateResponse("not_found", null, null, null, null);
         }
 
         String phraseLower = parsed.activityText().toLowerCase(Locale.ROOT);
-
-        // 先找已審核的 alias (APPROVED)
         var matchOpt = aliasRepo.findApprovedAlias(phraseLower, localeTag);
         if (matchOpt.isEmpty()) {
-            // WS5: 建一筆 PENDING，管理員之後人工對應 dictionary
             WorkoutAlias pending = new WorkoutAlias();
             pending.setLangTag(localeTag);
             pending.setPhraseLower(phraseLower);
             pending.setStatus("PENDING");
             pending.setCreatedByUser(uid);
-            // dictionary 暫時未知(null)，等審核員手動掛上去再設為 APPROVED
             aliasRepo.save(pending);
-
             return new EstimateResponse("not_found", null, null, null, null);
         }
 
@@ -174,13 +151,13 @@ public class WorkoutService {
         return new EstimateResponse(
                 "ok",
                 dict.getId(),
-                parsed.activityText(), // 保留使用者輸入語言
+                parsed.activityText(),
                 parsed.minutes(),
                 kcal
         );
     }
 
-    /** WS6: 刪除一筆 session -> 回傳今天最新加總，滿足 Play「可刪除健康紀錄」 */
+    /** WS6: 刪除一筆 session */
     @Transactional
     public TodayWorkoutResponse deleteSession(Long sessionId, ZoneId zone) {
         Long uid = auth.requireUserId();
@@ -190,6 +167,7 @@ public class WorkoutService {
         return buildToday(uid, zone);
     }
 
+    /** 提供前端 fallback 計算用戶體重 */
     public double currentUserWeightKg() {
         Long uid = auth.requireUserId();
         return userWeightKgOrThrow(uid);
@@ -217,12 +195,8 @@ public class WorkoutService {
 
     /** 依用戶時區計算 7 天保留的截止點（當地今天 0 點回推 7 天）並清除更舊資料。*/
     private void purgeOldSessions(Long uid, ZoneId zone) {
-        // 用戶當地的「今天 00:00」
         Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
-        // 要保留「前 7 天，不含今天」→ 刪除 7 天前 00:00 之前的資料
-        Instant cutoff = todayStart.minus(java.time.Duration.ofDays(7));
-
-        // 只刪「該用戶」且「早於 cutoff」的資料
+        Instant cutoff = todayStart.minus(Duration.ofDays(7));
         sessionRepo.deleteOlderThan(uid, cutoff);
     }
 
@@ -230,7 +204,7 @@ public class WorkoutService {
     @Transactional
     public LogWorkoutResponse log(LogWorkoutRequest req, ZoneId zone) {
         Long uid = auth.requireUserId();
-        purgeOldSessions(uid, zone); // ★ 先清理
+        purgeOldSessions(uid, zone);
 
         double userKg = userWeightKgOrThrow(uid);
         WorkoutDictionary dict = dictRepo.findById(req.activityId()).orElseThrow();
@@ -247,35 +221,33 @@ public class WorkoutService {
         sessionRepo.save(ws);
 
         TodayWorkoutResponse today = buildToday(uid, zone);
+        String timeLabel = formatTime24(ZonedDateTime.ofInstant(ws.getStartedAt(), zone)); // ★ 24h 格式
+
         return new LogWorkoutResponse(
                 new WorkoutSessionDto(
-                        ws.getId(), dict.getDisplayNameEn(), ws.getMinutes(), ws.getKcal(),
-                        ZonedDateTime.ofInstant(ws.getStartedAt(), zone)
-                                .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+                        ws.getId(),
+                        dict.getDisplayNameEn(),
+                        ws.getMinutes(),
+                        ws.getKcal(),
+                        timeLabel
                 ),
                 today
         );
     }
 
     /** WS4: /today */
-    @Transactional // ← 改這裡：拿掉 readOnly=true
+    @Transactional
     public TodayWorkoutResponse today(ZoneId zone) {
         Long uid = auth.requireUserId();
-        purgeOldSessions(uid, zone); // 這裡會做 delete，所以不可在 readOnly Tx
+        purgeOldSessions(uid, zone);
         return buildToday(uid, zone);
     }
 
-    /**
-     * 依用戶時區清理：保留「前 7 天，不含今天」。
-     * 觸發條件：排程或 Controller 進入點。
-     */
+    /** 可供排程或管理介面手動清理 */
     @Transactional
     public void purgeOldSessionsPublic(Long userId, ZoneId zone) {
-        // 用戶當地「今天 00:00」
         Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
-        // 保留前 7 天，不含今天 → 刪除早於此 cutoff 的資料
         Instant cutoff = todayStart.minus(Duration.ofDays(7));
         sessionRepo.deleteOlderThan(userId, cutoff);
     }
 }
-
