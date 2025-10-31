@@ -1,5 +1,5 @@
 package com.calai.backend.workout.dto;
 
-public record PresetListResponse(
-        java.util.List<PresetWorkoutDto> presets
-) {}
+import java.util.List;
+
+public record PresetListResponse(List<PresetWorkoutDto> presets) {}

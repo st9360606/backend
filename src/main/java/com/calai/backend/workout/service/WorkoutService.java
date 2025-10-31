@@ -190,13 +190,20 @@ public class WorkoutService {
         return buildToday(uid, zone);
     }
 
-    // in WorkoutService
+    public double currentUserWeightKg() {
+        Long uid = auth.requireUserId();
+        return userWeightKgOrThrow(uid);
+    }
+
+    /** WS1: 預設清單（依用戶體重計算 30 分鐘 kcal） */
     @Transactional(readOnly = true)
     public PresetListResponse presets() {
-        double demoWeightKg = 70.0;
-        var all = dictRepo.findAll();
+        Long uid = auth.requireUserId();
+        double userKg = userWeightKgOrThrow(uid);
+
+        var all = dictRepo.findAll(); // List<WorkoutDictionary>
         var list = all.stream().map(d -> {
-            int kcal30 = calcKcal(d.getMetValue(), demoWeightKg, 30);
+            int kcal30 = calcKcal(d.getMetValue(), userKg, 30);
             return new PresetWorkoutDto(
                     d.getId(),
                     d.getDisplayNameEn(),
@@ -204,6 +211,7 @@ public class WorkoutService {
                     d.getIconKey()
             );
         }).toList();
+
         return new PresetListResponse(list);
     }
 
@@ -250,10 +258,10 @@ public class WorkoutService {
     }
 
     /** WS4: /today */
-    @Transactional(readOnly = true)
+    @Transactional // ← 改這裡：拿掉 readOnly=true
     public TodayWorkoutResponse today(ZoneId zone) {
         Long uid = auth.requireUserId();
-        purgeOldSessions(uid, zone); // ★ 查詢前也清理，確保列表乾淨
+        purgeOldSessions(uid, zone); // 這裡會做 delete，所以不可在 readOnly Tx
         return buildToday(uid, zone);
     }
 

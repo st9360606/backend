@@ -182,3 +182,29 @@ CREATE TABLE workout_session
 -- 幫 /today 這類 API 查「這個 user 在 [start,end) 期間的紀錄」
 CREATE INDEX idx_user_time
     ON workout_session (user_id, started_at);
+
+
+
+
+-- 字典（若已存在則略過或更新）
+-- 建議確保有唯一鍵：PRIMARY KEY(id) 以及 UNIQUE(canonical_key)
+INSERT INTO workout_dictionary (id, canonical_key, display_name_en, met_value, icon_key)
+    VALUES
+        (1,  'walking',            'Walking',            3.5, 'walk'),
+        (2,  'running',            'Running',            9.0, 'run'),
+        (3,  'cycling',            'Cycling',            8.0, 'bike'),
+        (4,  'swimming',           'Swimming',           8.0, 'swimming'),
+        (5,  'hiking',             'Hiking',             6.0, 'hiking'),
+        (6,  'aerobic_exercise',   'Aerobic exercise',   8.0, 'aerobic_exercise'),
+        (7,  'strength',           'Strength Training',  4.0, 'strength'),
+        (8,  'weight_training',    'Weight training',    6.0, 'weight_training'),
+        (9,  'basketball',         'Basketball',         8.0, 'basketball'),
+        (10, 'soccer',             'Soccer',             8.0, 'soccer'),
+        (11, 'tennis',             'Tennis',             7.3, 'tennis'),
+        (12, 'yoga',               'Yoga',               3.0, 'yoga')
+        AS new
+ON DUPLICATE KEY UPDATE
+                     canonical_key   = new.canonical_key,
+                     display_name_en = new.display_name_en,
+                     met_value       = new.met_value,
+                     icon_key        = new.icon_key;

@@ -23,13 +23,19 @@ public class WorkoutController {
         return ZoneId.systemDefault();
     }
 
-    /** WS2 */
+    /** WS1: 預設運動清單（每 30 分鐘 kcal 已依用戶體重計算） */
+    @GetMapping("/presets")
+    public PresetListResponse presets() {
+        return svc.presets();
+    }
+
+    /** WS2: 自由文字估算 */
     @PostMapping("/estimate")
     public EstimateResponse estimate(@RequestBody EstimateRequest req) {
         return svc.estimate(req.text());
     }
 
-    /** WS3/WS4 */
+    /** WS3: 寫入一筆運動紀錄（並回傳今天加總） */
     @PostMapping("/log")
     public LogWorkoutResponse log(
             @RequestBody LogWorkoutRequest req,
@@ -38,7 +44,7 @@ public class WorkoutController {
         return svc.log(req, parseZone(tz));
     }
 
-    /** WS4, WS3(Home 卡片同步) */
+    /** WS4: 取得今天摘要（查詢前依用戶時區清理 >7 天舊資料） */
     @GetMapping("/today")
     public TodayWorkoutResponse today(
             @RequestHeader(value = "X-Client-Timezone", required = false) String tz
@@ -46,15 +52,13 @@ public class WorkoutController {
         return svc.today(parseZone(tz));
     }
 
-    /** WS1: 底部預設運動列表 */
-    @GetMapping("/presets")
-    public PresetListResponse presets() {
-        // 簡化：全部 dict 直接丟給前端顯示
-        // （Service 邏輯很單純，可直接搬到這裡或留在 svc）
-        return svc.presets(); // 下面會補 svc.presets()
+    /** 供 App fallback 取得目前用戶體重（kg） */
+    @GetMapping("/me/weight")
+    public WeightDto myWeight() {
+        return new WeightDto(svc.currentUserWeightKg());
     }
 
-    /** WS6: 使用者刪除一筆 session (合規) */
+    /** WS6: 刪除一筆 session（合規）→ 回傳今天最新加總 */
     @DeleteMapping("/{sessionId}")
     public TodayWorkoutResponse deleteSession(
             @PathVariable Long sessionId,
