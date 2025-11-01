@@ -6,3 +6,4 @@ public record PresetWorkoutDto(
         Integer kcalPer30Min,
         String iconKey
 ) {}
+
