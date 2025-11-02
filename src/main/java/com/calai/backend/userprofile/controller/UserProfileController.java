@@ -4,8 +4,12 @@ import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.service.UserProfileService;
+import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.ZoneId;
 
 @RestController
 @RequestMapping("/api/v1/users/me/profile")
@@ -18,18 +22,35 @@ public class UserProfileController {
         this.auth = auth;
     }
 
-    @GetMapping
+    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<UserProfileDto> getMyProfile() {
         Long uid = auth.requireUserId();
-        // 不存在回 404（避免 401 觸發 OkHttp Authenticator 的 refresh 循環）
         if (!svc.exists(uid)) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(svc.getOrThrow(uid));
     }
 
-    @PutMapping
-    public UserProfileDto upsertMyProfile(@RequestBody UpsertProfileRequest req) {
+    @PutMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<UserProfileDto> upsertMyProfile(
+            @Valid @RequestBody UpsertProfileRequest req,
+            @RequestHeader(value = "X-Client-Timezone", required = false) String tzHeader
+    ) {
         Long uid = auth.requireUserId();
-        return svc.upsert(uid, req);
+        String tzToPersist = validateIanaOrNull(tzHeader); // 只接受合法 IANA 時區
+        UserProfileDto dto = (tzToPersist != null)
+                ? svc.upsert(uid, req, tzToPersist)
+                : svc.upsert(uid, req);
+        return ResponseEntity.ok(dto);
+    }
+
+    /** 若 tz 非空且可被 ZoneId 解析，回傳標準化字串；否則回 null（不更新 DB） */
+    private static String validateIanaOrNull(String tz) {
+        if (tz == null || tz.isBlank()) return null;
+        String trimmed = tz.trim();
+        try {
+            // 解析即驗證，並回傳標準 ID（避免大小寫/別名混亂）
+            return ZoneId.of(trimmed).getId();
+        } catch (Exception ex) {
+            return null;
+        }
     }
 }
-

@@ -130,4 +130,13 @@ public class UserProfileService {
                 p.getLocale()
         );
     }
+
+    @Transactional
+    public UserProfileDto upsert(Long userId, UpsertProfileRequest r, String tz) {
+        var dto = upsert(userId, r);
+        repo.findByUserId(userId).ifPresent(p -> {
+            if (tz != null && !tz.isBlank()) { p.setTimezone(tz); repo.save(p); }
+        });
+        return dto;
+    }
 }

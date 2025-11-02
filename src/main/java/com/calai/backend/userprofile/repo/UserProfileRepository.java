@@ -14,12 +14,9 @@ public interface UserProfileRepository extends JpaRepository<UserProfile, Long> 
 
     interface UserTimezoneView {
         Long getId();
-        String getTimezone(); // 例如 "Asia/Taipei"，可能為 null
+        String getTimezone();
     }
 
-    @Query("""
-        select u.userId as id, u.locale as timezone
-        from UserProfile u
-        """)
+    @Query("select u.userId as id, u.timezone as timezone from UserProfile u")
     Page<UserTimezoneView> findAllUserTimezones(Pageable pageable);
 }

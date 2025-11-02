@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8
+    username: root
+    password: root
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  mail:
+    test-connection: false
+
+  data:
+    redis:
+      port: 0
+
+logging.level:
+  com.calai.backend: INFO
+
+app:
+  email:
+    enabled: false

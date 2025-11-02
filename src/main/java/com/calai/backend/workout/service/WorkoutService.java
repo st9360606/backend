@@ -1,24 +1,32 @@
 package com.calai.backend.workout.service;
 
 import com.calai.backend.auth.security.AuthContext;
+import com.calai.backend.userprofile.common.Units;
 import com.calai.backend.userprofile.entity.UserProfile;
 import com.calai.backend.userprofile.repo.UserProfileRepository;
-import com.calai.backend.userprofile.common.Units;
 import com.calai.backend.workout.dto.*;
 import com.calai.backend.workout.entity.WorkoutAlias;
+import com.calai.backend.workout.entity.WorkoutAliasEvent;
 import com.calai.backend.workout.entity.WorkoutDictionary;
 import com.calai.backend.workout.entity.WorkoutSession;
+import com.calai.backend.workout.match.AliasMatcher;
+import com.calai.backend.workout.nlp.Blacklist;
+import com.calai.backend.workout.nlp.DurationParser;
+import com.calai.backend.workout.nlp.Heuristics;
+import com.calai.backend.workout.nlp.TextNorm;
+import com.calai.backend.workout.repo.WorkoutAliasEventRepo;
 import com.calai.backend.workout.repo.WorkoutAliasRepo;
 import com.calai.backend.workout.repo.WorkoutDictionaryRepo;
 import com.calai.backend.workout.repo.WorkoutSessionRepo;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
 
 @Service
 public class WorkoutService {
@@ -27,27 +35,30 @@ public class WorkoutService {
     private final WorkoutSessionRepo sessionRepo;
     private final UserProfileRepository profileRepo;
     private final AuthContext auth;
+    private final WorkoutAliasEventRepo aliasEventRepo;
+    private final RateLimiterService rateLimiter; // ★ 新增
 
     public WorkoutService(
             WorkoutDictionaryRepo dictRepo,
             WorkoutAliasRepo aliasRepo,
             WorkoutSessionRepo sessionRepo,
             UserProfileRepository profileRepo,
-            AuthContext auth
+            AuthContext auth,
+            WorkoutAliasEventRepo aliasEventRepo,
+            RateLimiterService rateLimiter // ★ 新增
     ) {
         this.dictRepo = dictRepo;
         this.aliasRepo = aliasRepo;
         this.sessionRepo = sessionRepo;
         this.profileRepo = profileRepo;
         this.auth = auth;
+        this.aliasEventRepo = aliasEventRepo;
+        this.rateLimiter = rateLimiter; // ★ 新增
     }
 
-    /* ========= 時間格式：標準 24h，HH:mm（無 am/pm） ========= */
+    // ======== 時間標籤（24h） ========
     private static final DateTimeFormatter TIME_FMT_24 = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH);
-    private static String formatTime24(ZonedDateTime zdt) {
-        return zdt.format(TIME_FMT_24); // 例：00:39、12:00、13:00、23:59
-    }
-    /* ===================================================== */
+    private static String formatTime24(ZonedDateTime zdt) { return zdt.format(TIME_FMT_24); }
 
     private double userWeightKgOrThrow(Long uid) {
         UserProfile p = profileRepo.findByUserId(uid)
@@ -64,33 +75,6 @@ public class WorkoutService {
                 .orElse("en");
     }
 
-    // 解析使用者輸入時長
-    private static record ParsedInput(String activityText, Integer minutes) {}
-
-    private ParsedInput parseUserText(String text, String localeTag) {
-        Pattern pMin = Pattern.compile("(\\d{1,3})\\s*(min|mins|minute|minutes|phút|分鐘|分|분)",
-                Pattern.CASE_INSENSITIVE);
-        Matcher mMin = pMin.matcher(text);
-        Integer minutes = null;
-        if (mMin.find()) minutes = Integer.valueOf(mMin.group(1));
-
-        if (minutes == null) {
-            Pattern pHr = Pattern.compile("(\\d{1,2})\\s*(h|hr|hour|hours|giờ|小時|小时|시간)",
-                    Pattern.CASE_INSENSITIVE);
-            Matcher mHr = pHr.matcher(text);
-            if (mHr.find()) minutes = Integer.valueOf(mHr.group(1)) * 60;
-        }
-
-        if (minutes == null) return new ParsedInput(null, null);
-
-        String raw = text;
-        raw = mMin.replaceFirst("");
-        raw = raw.replaceAll("\\s+", " ").trim();
-        if (raw.isBlank()) raw = "workout";
-
-        return new ParsedInput(raw, minutes);
-    }
-
     private int calcKcal(double met, double userKg, int minutes) {
         double burned = met * userKg * (minutes / 60.0);
         return (int) Math.round(burned);
@@ -105,59 +89,168 @@ public class WorkoutService {
         int total = list.stream().mapToInt(WorkoutSession::getKcal).sum();
 
         var dtos = list.stream().map(ws -> {
-            ZonedDateTime zdt = ws.getStartedAt().atZone(zone);
-            String tl = formatTime24(zdt); // ★ 24h 格式
-            String name = ws.getDictionary().getDisplayNameEn(); // TODO: locale aware
-            return new WorkoutSessionDto(
-                    ws.getId(),
-                    name,
-                    ws.getMinutes(),
-                    ws.getKcal(),
-                    tl
-            );
+            String tl = formatTime24(ws.getStartedAt().atZone(zone));
+            String name = ws.getDictionary().getDisplayNameEn(); // TODO: i18n
+            return new WorkoutSessionDto(ws.getId(), name, ws.getMinutes(), ws.getKcal(), tl);
         }).toList();
 
         return new TodayWorkoutResponse(total, dtos);
     }
 
-    /** WS2+WS5: /estimate */
+    /** WS2+WS5: /estimate（A1 + A5 核心） */
     @Transactional
     public EstimateResponse estimate(String textRaw) {
         Long uid = auth.requireUserId();
         double userKg = userWeightKgOrThrow(uid);
         String localeTag = userLocaleOrDefault(uid);
 
-        ParsedInput parsed = parseUserText(textRaw, localeTag);
-        if (parsed.activityText() == null || parsed.minutes() == null) {
+        // 1) 時長解析
+        Integer minutes = DurationParser.parseMinutes(textRaw);
+        if (minutes == null || minutes <= 0) {
             return new EstimateResponse("not_found", null, null, null, null);
         }
 
-        String phraseLower = parsed.activityText().toLowerCase(Locale.ROOT);
-        var matchOpt = aliasRepo.findApprovedAlias(phraseLower, localeTag);
-        if (matchOpt.isEmpty()) {
-            WorkoutAlias pending = new WorkoutAlias();
-            pending.setLangTag(localeTag);
-            pending.setPhraseLower(phraseLower);
-            pending.setStatus("PENDING");
-            pending.setCreatedByUser(uid);
-            aliasRepo.save(pending);
-            return new EstimateResponse("not_found", null, null, null, null);
+        // 2) 活動片語
+        String phraseLower = extractActivityText(textRaw);
+        String norm = TextNorm.normalize(phraseLower);
+
+        // 3) 黑名單（直接 generic）
+        if (Blacklist.containsBad(textRaw, localeTag)) {
+            WorkoutDictionary generic = ensureGeneric();
+            int kcal = calcKcal(generic.getMetValue(), userKg, minutes);
+            saveEvent(uid, localeTag, norm, generic, 0.0, true);
+            return new EstimateResponse("ok", generic.getId(), phraseLower, minutes, kcal);
         }
 
-        var alias = matchOpt.get();
-        WorkoutDictionary dict = alias.getDictionary();
-        int kcal = calcKcal(dict.getMetValue(), userKg, parsed.minutes());
+        // 4) APPROVED alias 直中
+        var matchOpt = aliasRepo.findApprovedAlias(norm, localeTag);
+        if (matchOpt.isPresent()) {
+            var dict = matchOpt.get().getDictionary();
+            int kcal  = calcKcal(dict.getMetValue(), userKg, minutes);
+            saveEvent(uid, localeTag, norm, dict, 1.0, false);
+            return new EstimateResponse("ok", dict.getId(), phraseLower, minutes, kcal);
+        }
 
-        return new EstimateResponse(
-                "ok",
-                dict.getId(),
-                parsed.activityText(),
-                parsed.minutes(),
-                kcal
+        // 5) 相似度 + 同義詞
+        var allDicts = dictRepo.findAll();
+        var matcher = new AliasMatcher(allDicts, builtinSynonyms());
+        var cand = matcher.best(norm, localeTag);
+
+        double autoApprove = AliasMatcher.autoApproveThreshold(localeTag); // ★ 使用方法
+        double medium      = AliasMatcher.mediumThreshold();               // ★ 使用方法
+
+        if (cand != null && cand.score() >= autoApprove) {
+            upsertApprovedAlias(localeTag, norm, cand.dict());
+            int kcal = calcKcal(cand.dict().getMetValue(), userKg, minutes);
+            saveEvent(uid, localeTag, norm, cand.dict(), cand.score(), false);
+            return new EstimateResponse("ok", cand.dict().getId(), phraseLower, minutes, kcal);
+        }
+        if (cand != null && cand.score() >= medium) {
+            int kcal = calcKcal(cand.dict().getMetValue(), userKg, minutes);
+            saveEvent(uid, localeTag, norm, cand.dict(), cand.score(), false);
+            return new EstimateResponse("ok", cand.dict().getId(), phraseLower, minutes, kcal);
+        }
+
+        // 6) 低信心 → Generic 強度詞
+        double met = pickGenericMet(norm);
+        WorkoutDictionary generic = ensureGeneric();
+        int kcal = calcKcal(met, userKg, minutes);
+        saveEvent(uid, localeTag, norm, generic, 0.0, true);
+        return new EstimateResponse("ok", generic.getId(), phraseLower, minutes, kcal);
+    }
+
+    // ===== Helpers =====
+
+    private String extractActivityText(String textRaw) {
+        String s = textRaw;
+        // 展開 1:30 / 1h30
+        s = s.replaceAll("(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})", "$1 h $2 min");
+        s = s.replaceAll("(\\d{1,3})\\s*h\\s*(\\d{1,2})", "$1 h $2 min");
+
+        // 正規化（NFKC/去重音/去標點/轉小寫）
+        s = TextNorm.normalize(s);
+
+        // 注意：這裡的 token 需使用「去重音後」的版本（如 phut/gio）
+        String MIN_UNITS_NORM = "(?:min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
+                + "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|phut|นาที|menit|minit|分|分鐘|分钟|분)";
+        String HR_UNITS_NORM  = "(?:h|hr|hrs|hour|hours|hora|horas|ore|uur|std|stunden|godz|saat|час|часы|ساعة|ساعات|שעה|"
+                + "gio|ชั่วโมง|jam|小时|小時|時間|시간)";
+
+        s = s.replaceAll("(\\d{1,4})\\s*" + MIN_UNITS_NORM, " ");
+        s = s.replaceAll("(\\d{1,3})\\s*" + HR_UNITS_NORM, " ");
+        s = s.replaceAll("\\s+", " ").trim();
+        return s.isBlank() ? "workout" : s;
+    }
+
+
+    private Map<String, List<String>> builtinSynonyms() {
+        return Map.of(
+                "running",  List.of("run","running","jog","慢跑","跑步","ラン","ジョグ","달리기","correr","corrida","кросс"),
+                "walking",  List.of("walk","散步","走路","步行","歩く","걷기","paseo","caminata"),
+                "cycling",  List.of("cycle","bike","biking","騎車","單車","骑车","自転車","자전거","ciclismo","vélo"),
+                "swimming", List.of("swim","游泳","수영","natación","natação")
         );
     }
 
-    /** WS6: 刪除一筆 session */
+    private void upsertApprovedAlias(String lang, String phraseLower, WorkoutDictionary dict) {
+        var existing = aliasRepo.findAnyByLangAndPhrase(lang, phraseLower);
+        if (existing.isPresent()) {
+            WorkoutAlias ali = existing.get();
+            ali.setStatus("APPROVED");
+            ali.setDictionary(dict);
+            ali.setLastSeen(Instant.now());
+            aliasRepo.save(ali);
+            return;
+        }
+        WorkoutAlias ali = new WorkoutAlias();
+        ali.setLangTag(lang);
+        ali.setPhraseLower(phraseLower);
+        ali.setDictionary(dict);
+        ali.setStatus("APPROVED");
+        ali.setLastSeen(Instant.now());
+        try {
+            aliasRepo.save(ali);
+        } catch (DataIntegrityViolationException ex) {
+            // 併發保險：UNIQUE 擋下後改就地升級
+            aliasRepo.findAnyByLangAndPhrase(lang, phraseLower).ifPresent(a -> {
+                a.setStatus("APPROVED");
+                a.setDictionary(dict);
+                a.setLastSeen(Instant.now());
+                aliasRepo.save(a);
+            });
+        }
+    }
+
+    private double pickGenericMet(String norm) {
+        if (Heuristics.CAT_RUN.stream().anyMatch(norm::contains))   return 7.0;
+        if (Heuristics.CAT_CYCLE.stream().anyMatch(norm::contains)) return 6.0;
+        if (Heuristics.CAT_SWIM.stream().anyMatch(norm::contains))  return 7.5;
+        if (Heuristics.INTENSITY_HARD.stream().anyMatch(norm::contains))  return 7.0;
+        if (Heuristics.INTENSITY_LIGHT.stream().anyMatch(norm::contains)) return 3.5;
+        return 5.0;
+    }
+
+    private WorkoutDictionary ensureGeneric() {
+        return dictRepo.findAll().stream()
+                .filter(d -> "other_exercise".equals(d.getCanonicalKey()))
+                .findFirst().orElseThrow();
+    }
+
+    private void saveEvent(Long uid, String lang, String phraseLower,
+                           WorkoutDictionary matched, double score, boolean generic) {
+        // ★ 速率限制：若 24h 內過多，則不寫事件（但估算仍回傳）
+        if (!rateLimiter.allowNewPhrase(uid)) return;
+
+        var e = new WorkoutAliasEvent();
+        e.setUserId(uid);
+        e.setLangTag(lang);
+        e.setPhraseLower(phraseLower);
+        e.setMatchedDict(matched);
+        e.setScore(score);
+        e.setUsedGeneric(generic);
+        aliasEventRepo.save(e);
+    }
+
     @Transactional
     public TodayWorkoutResponse deleteSession(Long sessionId, ZoneId zone) {
         Long uid = auth.requireUserId();
@@ -167,40 +260,29 @@ public class WorkoutService {
         return buildToday(uid, zone);
     }
 
-    /** 提供前端 fallback 計算用戶體重 */
     public double currentUserWeightKg() {
         Long uid = auth.requireUserId();
         return userWeightKgOrThrow(uid);
     }
 
-    /** WS1: 預設清單（依用戶體重計算 30 分鐘 kcal） */
     @Transactional(readOnly = true)
     public PresetListResponse presets() {
         Long uid = auth.requireUserId();
         double userKg = userWeightKgOrThrow(uid);
-
-        var all = dictRepo.findAll(); // List<WorkoutDictionary>
+        var all = dictRepo.findAll();
         var list = all.stream().map(d -> {
             int kcal30 = calcKcal(d.getMetValue(), userKg, 30);
-            return new PresetWorkoutDto(
-                    d.getId(),
-                    d.getDisplayNameEn(),
-                    kcal30,
-                    d.getIconKey()
-            );
+            return new PresetWorkoutDto(d.getId(), d.getDisplayNameEn(), kcal30, d.getIconKey());
         }).toList();
-
         return new PresetListResponse(list);
     }
 
-    /** 依用戶時區計算 7 天保留的截止點（當地今天 0 點回推 7 天）並清除更舊資料。*/
     private void purgeOldSessions(Long uid, ZoneId zone) {
         Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
         Instant cutoff = todayStart.minus(Duration.ofDays(7));
         sessionRepo.deleteOlderThan(uid, cutoff);
     }
 
-    /** WS3+WS4: /log */
     @Transactional
     public LogWorkoutResponse log(LogWorkoutRequest req, ZoneId zone) {
         Long uid = auth.requireUserId();
@@ -221,29 +303,21 @@ public class WorkoutService {
         sessionRepo.save(ws);
 
         TodayWorkoutResponse today = buildToday(uid, zone);
-        String timeLabel = formatTime24(ZonedDateTime.ofInstant(ws.getStartedAt(), zone)); // ★ 24h 格式
+        String timeLabel = formatTime24(ZonedDateTime.ofInstant(ws.getStartedAt(), zone));
 
         return new LogWorkoutResponse(
-                new WorkoutSessionDto(
-                        ws.getId(),
-                        dict.getDisplayNameEn(),
-                        ws.getMinutes(),
-                        ws.getKcal(),
-                        timeLabel
-                ),
+                new WorkoutSessionDto(ws.getId(), dict.getDisplayNameEn(), ws.getMinutes(), ws.getKcal(), timeLabel),
                 today
         );
     }
 
-    /** WS4: /today */
-    @Transactional
+    @Transactional(readOnly = true)
     public TodayWorkoutResponse today(ZoneId zone) {
         Long uid = auth.requireUserId();
         purgeOldSessions(uid, zone);
         return buildToday(uid, zone);
     }
 
-    /** 可供排程或管理介面手動清理 */
     @Transactional
     public void purgeOldSessionsPublic(Long userId, ZoneId zone) {
         Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();

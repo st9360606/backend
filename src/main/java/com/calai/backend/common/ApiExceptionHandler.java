@@ -11,10 +11,14 @@ import java.util.NoSuchElementException;
 public class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, Object>> handleIllegalState(IllegalStateException e) {
-        // 例如 PROFILE_NOT_FOUND / WEIGHT_REQUIRED
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("status", 400, "error", e.getMessage()));
+    public ResponseEntity<Map<String,Object>> handleIllegalState(IllegalStateException ex) {
+        String code = ex.getMessage() == null ? "ILLEGAL_STATE" : ex.getMessage();
+        int status = switch (code) {
+            case "PROFILE_NOT_FOUND" -> 404;
+            case "WEIGHT_REQUIRED"   -> 422;
+            default -> 500;
+        };
+        return ResponseEntity.status(status).body(Map.of("code", code));
     }
 
     @ExceptionHandler(NoSuchElementException.class)

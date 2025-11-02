@@ -3,6 +3,16 @@ server:
   address: 0.0.0.0
 
 spring:
+  task:
+    scheduling:
+      pool:
+        size: 6                 # 由 2 提升到 6：promotion/purge/retention 等可並行
+      thread-name-prefix: "sched-"
+      shutdown:
+        await-termination: true
+        await-termination-period: 30s
+    # 若你偏好全局設定時區（依 Boot 版本），也可加上（仍建議註解端顯式 zone 保險）
+    # time-zone: Asia/Taipei
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true
@@ -45,7 +55,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,scheduledtasks
 
 app:
   google:
@@ -62,3 +72,26 @@ app:
     # 若使用 Gmail SMTP，from 最好等於 username；否則容易被覆寫或遭拒收
     sender: "st9360606@gmail.com"
     # 若要用自家網域 no-reply@bitecal.app，建議改用 SendGrid/SES 並設定 SPF/DKIM/DMARC
+alias:
+  promotion:
+    # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲
+    fixedDelay: "PT72H"
+    initialDelay: "PT5M"
+    windowDays: 30
+    minUsers: 3
+    minCount: 7
+    minMedian: 0.88
+
+  events:
+    purge:
+      enabled: true
+      cron: "0 10 4 * * *"      # 每天 04:10 清一次（可調）
+      retentionDays: 30         # 留存 30 天（promotion 只看 30 天）
+      batchSize: 50000          # 依你資料量調整（1~10萬都可）
+      maxTotalPerRun: 1000000   # 新增：單次 run 總上限
+      pauseMsBetweenBatches: 50 # 新增：批次間暫停，降低鎖壓力
+
+logging:
+  level:
+    org.springframework.scheduling: INFO
+    com.calai.backend.workout.job: INFO

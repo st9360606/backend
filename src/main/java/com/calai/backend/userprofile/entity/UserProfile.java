@@ -3,7 +3,6 @@ package com.calai.backend.userprofile.entity;
 import com.calai.backend.users.entity.User;
 import jakarta.persistence.*;
 import lombok.Data;
-
 import java.time.Instant;
 
 @Data
@@ -23,26 +22,24 @@ public class UserProfile {
     private Integer age;
 
     @Column(name = "height_cm") private Double heightCm;
-
-    // ★ 新增：英制身高
-    @Column(name = "height_feet")   private Short heightFeet;   // 0..8
-    @Column(name = "height_inches") private Short heightInches; // 0..11
+    @Column(name = "height_feet")   private Short heightFeet;
+    @Column(name = "height_inches") private Short heightInches;
 
     @Column(name = "weight_kg") private Double weightKg;
+    @Column(name = "weight_lbs") private Integer weightLbs;
 
-    // ★ 新增：英制體重（現在）
-    @Column(name = "weight_lbs") private Integer weightLbs;     // 40..900
-
-    @Column(name = "exercise_level") private String exerciseLevel;
+    private String exerciseLevel;
     private String goal;
 
     @Column(name = "target_weight_kg") private Double targetWeightKg;
+    @Column(name = "target_weight_lbs") private Integer targetWeightLbs;
 
-    // ★ 新增：英制體重（目標）
-    @Column(name = "target_weight_lbs") private Integer targetWeightLbs; // 40..900
-
-    @Column(name = "referral_source") private String referralSource;
+    private String referralSource;
     private String locale;
+
+    // ★ 新增：使用者時區（例如 "Asia/Taipei"）
+    @Column(name = "timezone")
+    private String timezone;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
