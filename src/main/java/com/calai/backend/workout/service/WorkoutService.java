@@ -18,6 +18,7 @@ import com.calai.backend.workout.repo.WorkoutAliasEventRepo;
 import com.calai.backend.workout.repo.WorkoutAliasRepo;
 import com.calai.backend.workout.repo.WorkoutDictionaryRepo;
 import com.calai.backend.workout.repo.WorkoutSessionRepo;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,9 @@ public class WorkoutService {
     private final AuthContext auth;
     private final WorkoutAliasEventRepo aliasEventRepo;
     private final RateLimiterService rateLimiter; // ★ 新增
+
+    @Value("${workout.estimate.blacklistPolicy:block}")
+    private String blacklistPolicy; // generic（現狀）、block（阻擋）、audit（只記錄與回傳 not_found）
 
     public WorkoutService(
             WorkoutDictionaryRepo dictRepo,
@@ -114,12 +118,31 @@ public class WorkoutService {
         String phraseLower = extractActivityText(textRaw);
         String norm = TextNorm.normalize(phraseLower);
 
-        // 3) 黑名單（直接 generic）
+        // === 3) 黑名單策略 ===
         if (Blacklist.containsBad(textRaw, localeTag)) {
-            WorkoutDictionary generic = ensureGeneric();
-            int kcal = calcKcal(generic.getMetValue(), userKg, minutes);
-            saveEvent(uid, localeTag, norm, generic, 0.0, true);
-            return new EstimateResponse("ok", generic.getId(), phraseLower, minutes, kcal);
+            String reason = Blacklist.matchReason(textRaw, localeTag);
+            switch (blacklistPolicy.toLowerCase(Locale.ROOT)) {
+                case "block": {
+                    // 不回 kcal、不寫事件，直接阻擋
+                    // 你也可以改丟 BizException 由 Controller 轉 422
+                    return new EstimateResponse("blocked", null, phraseLower, minutes, null);
+                }
+                case "audit": {
+                    // 僅寫事件但不回估算（或回 not_found）
+                    // 若要紀錄可選擇 matched=generic，但 usedGeneric=true
+                    WorkoutDictionary generic = ensureGeneric();
+                    saveEvent(uid, localeTag, norm, generic, 0.0, true);
+                    return new EstimateResponse("not_found", null, null, null, null);
+                }
+                case "generic":
+                default: {
+                    // 現狀：導向 generic，照算
+                    WorkoutDictionary generic = ensureGeneric();
+                    int kcal = calcKcal(generic.getMetValue(), userKg, minutes);
+                    saveEvent(uid, localeTag, norm, generic, 0.0, true);
+                    return new EstimateResponse("ok", generic.getId(), phraseLower, minutes, kcal);
+                }
+            }
         }
 
         // 4) APPROVED alias 直中

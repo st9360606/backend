@@ -95,3 +95,7 @@ logging:
   level:
     org.springframework.scheduling: INFO
     com.calai.backend.workout.job: INFO
+
+workout:
+  estimate:
+    blacklistPolicy: block   # 可選：generic（現狀）、block（阻擋）、audit（只記錄與回傳 not_found）
