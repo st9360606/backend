@@ -94,12 +94,17 @@ public class WorkoutService {
 
         var dtos = list.stream().map(ws -> {
             String tl = formatTime24(ws.getStartedAt().atZone(zone));
-            String name = ws.getDictionary().getDisplayNameEn(); // TODO: i18n
+            var dict = ws.getDictionary();
+            // 防禦：舊資料或匯入資料若 displayNameEn 為 null，退回 canonical_key
+            String name = (dict.getDisplayNameEn() != null && !dict.getDisplayNameEn().isBlank())
+                    ? dict.getDisplayNameEn()
+                    : dict.getCanonicalKey().replace('_', ' ');
             return new WorkoutSessionDto(ws.getId(), name, ws.getMinutes(), ws.getKcal(), tl);
         }).toList();
 
         return new TodayWorkoutResponse(total, dtos);
     }
+
 
     /** WS2+WS5: /estimate（A1 + A5 核心） */
     @Transactional
@@ -343,11 +348,11 @@ public class WorkoutService {
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional // ← 改成可寫交易，或直接拿掉註解
     public TodayWorkoutResponse today(ZoneId zone) {
         Long uid = auth.requireUserId();
-        purgeOldSessions(uid, zone);
-        return buildToday(uid, zone);
+        purgeOldSessions(uid, zone);           // 內含 deleteOlderThan（寫入操作）
+        return buildToday(uid, zone);          // 查詢 + 映射
     }
 
     @Transactional
