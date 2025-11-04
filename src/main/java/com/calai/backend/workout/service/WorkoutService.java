@@ -186,19 +186,20 @@ public class WorkoutService {
 
     private String extractActivityText(String textRaw) {
         String s = textRaw;
-        // 展開 1:30 / 1h30
+        // 展開 1:30 / 1h30 → "1 h 30 min"
         s = s.replaceAll("(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})", "$1 h $2 min");
         s = s.replaceAll("(\\d{1,3})\\s*h\\s*(\\d{1,2})", "$1 h $2 min");
 
-        // 正規化（NFKC/去重音/去標點/轉小寫）
+        // 正規化（NFKC / script-aware 去重音 / 去標點 / toLower）
         s = TextNorm.normalize(s);
 
-        // 注意：這裡的 token 需使用「去重音後」的版本（如 phut/gio）
+        // 與 DurationParser 保持一致！
         String MIN_UNITS_NORM = "(?:min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
-                + "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|phut|นาที|menit|minit|分|分鐘|分钟|분)";
+                + "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|phut|นาที|menit|minit|分|分鐘|分钟|分|분|मिनट)";
         String HR_UNITS_NORM  = "(?:h|hr|hrs|hour|hours|hora|horas|ore|uur|std|stunden|godz|saat|час|часы|ساعة|ساعات|שעה|"
-                + "gio|ชั่วโมง|jam|小时|小時|時間|시간)";
+                + "gio|ชั่วโมง|jam|小时|小時|時間|시간|घंटा|घंटे)";
 
+        // 移除時間單位與數字，留下活動片語
         s = s.replaceAll("(\\d{1,4})\\s*" + MIN_UNITS_NORM, " ");
         s = s.replaceAll("(\\d{1,3})\\s*" + HR_UNITS_NORM, " ");
         s = s.replaceAll("\\s+", " ").trim();

@@ -86,7 +86,7 @@ alias:
     purge:
       enabled: true
       cron: "0 10 4 * * *"      # 每天 04:10 清一次（可調）
-      retentionDays: 30         # 留存 30 天（promotion 只看 30 天）
+      retentionDays: 45         # 留存 45 天（promotion 只看 45 天）
       batchSize: 50000          # 依你資料量調整（1~10萬都可）
       maxTotalPerRun: 1000000   # 新增：單次 run 總上限
       pauseMsBetweenBatches: 50 # 新增：批次間暫停，降低鎖壓力

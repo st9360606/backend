@@ -22,7 +22,7 @@ public class WorkoutAliasEventPurgeJob {
     private final JdbcTemplate jdbc;
 
     @Value("${alias.events.purge.enabled:true}") private boolean enabled;
-    @Value("${alias.events.purge.retentionDays:30}") private int retentionDays;
+    @Value("${alias.events.purge.retentionDays:45}") private int retentionDays;
     @Value("${alias.events.purge.batchSize:50000}") private int batchSize;
 
     // 新增：每次 run 的刪除總上限 + 批次之間暫停毫秒

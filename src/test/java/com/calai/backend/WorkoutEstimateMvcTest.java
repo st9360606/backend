@@ -1,4 +1,4 @@
-package com.calai.backend.workout;
+package com.calai.backend;
 
 import com.calai.backend.BackendApplication;
 import com.calai.backend.auth.security.AuthContext;
