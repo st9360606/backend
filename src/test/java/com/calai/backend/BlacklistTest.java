@@ -10,7 +10,8 @@ class BlacklistTest {
     @Test
     void duplicateKeysAreMerged_notThrow() {
         // 只要能觸發類別載入就足以驗證不會因 static map 重複 key 當掉
-        assertTrue(Blacklist.sizeOfLang("it") > 0);
+        assertTrue(Blacklist
+                .sizeOfLang("it") > 0);
         assertTrue(Blacklist.sizeOfLang("nl") > 0);
     }
 

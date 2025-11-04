@@ -9,23 +9,27 @@ import java.util.regex.Pattern;
 public final class DurationParser {
     private DurationParser() {}
 
-    // ========= 正規化後的單位（與 TextNorm.normalize 後的字形相容）=========
+    /* ========= 正規化後的單位 ========= */
+    // 長字優先：分鐘/分钟 放在「分」之前；補上「印地文：मिनट」
     private static final String MIN_UNITS_NORM =
             "(?:min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
-                    +  "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|phut|นาที|menit|minit|分|分鐘|分钟|분|मिनट)";
+                    +  "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|मिनट|phut|นาที|menit|minit|"
+                    +  "分鐘|分钟|分|분)";
 
     private static final String HR_UNITS_NORM  =
             "(?:h|hr|hrs|hour|hours|hora|horas|ore|uur|std|stunden|godz|saat|час|часы|ساعة|ساعات|שעה|"
-                    +  "gio|ชั่วโมง|jam|小时|小時|時間|시간|घंटा|घंटे)";
+                    +  "gio|ชั่วโมง|jam|小时|小時|時間|시간)";
 
     private static final Pattern P_MIN = Pattern.compile("(\\d{1,4})\\s*" + MIN_UNITS_NORM,
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
-    private static final Pattern P_HR  = Pattern.compile("(\\d{1,3})\\s*" + HR_UNITS_NORM,
+
+    private static final Pattern P_HR = Pattern.compile("(\\d{1,3})\\s*" + HR_UNITS_NORM,
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 
-    // ========= 半小時（獨立詞） =========
+    /* ========= 半小時（獨立詞）========= */
     private static final Pattern P_HALF_ALONE = Pattern.compile(
-            "(?:half\\s+(?:an\\s+)?hour\\b"
+            "(?:"
+                    +  "half\\s+(?:an\\s+)?hour\\b"
                     + "|半\\s*(?:個|个)?\\s*(?:小時|小时|鐘頭|鐘|時間)"
                     + "|demi\\s*-?\\s*heure(?:s)?\\b"
                     + "|halbe\\s*stunde\\b"

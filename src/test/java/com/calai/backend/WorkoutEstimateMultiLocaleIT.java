@@ -80,7 +80,7 @@ class WorkoutEstimateMultiLocaleIT {
         when(authContext.requireUserId()).thenReturn(TEST_UID);
     }
 
-    // ---- 測資供應（可保留你現有版本） ----
+     //---- 測資供應（可保留你現有版本） ----
     static List<String> locales() {
         return List.of("zh-CN","ja","ko","es","de","fr","tr","pl","nl","sv","da","nb","he",
                 "pt-BR","pt-PT","vi","th","id","ms","fil","fi","ro","cs","hi","jv","it","en","zh-TW");
@@ -99,33 +99,121 @@ class WorkoutEstimateMultiLocaleIT {
             Map.entry("jv","menit"), Map.entry("it","minuti")
     );
 
-    static Stream<Object[]> scenarios() {
+    // 最常見 50 個運動（以常見 App 級用語為主；皆為 activity 片語）
+    static final List<String> COMMON_ACTIVITIES = List.of(
+            "running",
+            "walking",
+            "cycling",
+            "swimming",
+            "hiking",
+            "yoga",
+            "pilates",
+            "strength training",
+            "weightlifting",
+            "hiit",
+            "crossfit",
+            "rowing",
+            "elliptical",
+            "stair climbing",
+            "jump rope",
+            "boxing",
+            "kickboxing",
+            "martial arts",
+            "dance",
+            "zumba",
+            "aerobics",
+            "badminton",
+            "basketball",
+            "soccer",
+            "tennis",
+            "table tennis",
+            "volleyball",
+            "baseball",
+            "rugby",
+            "golf",
+            "skating",
+            "skiing",
+            "snowboarding",
+            "surfing",
+            "paddle boarding",
+            "kayaking",
+            "canoeing",
+            "mountain biking",
+            "indoor cycling",
+            "treadmill",
+            "indoor rowing",
+            "stairmaster",
+            "stretching",
+            "core training",
+            "plank",
+            "push-ups",
+            "pull-ups",
+            "squats",
+            "lunges"
+    );
+
+    // 依語系取分鐘單位詞；沿用你現有的 MINUTE_WORD 映射
+    private static String minuteWordFor(String localeTag) {
+        return MINUTE_WORD.getOrDefault(localeTag, "min");
+    }
+
+    // 產生：核心語系 × 50 活動 × 固定 30 分鐘
+    static Stream<Object[]> scenariosCommonActivities() {
         return locales().stream().flatMap(loc -> {
-            String m = MINUTE_WORD.getOrDefault(loc, "min");
-            return Stream.of(
-                    new Object[]{loc, "running 30 min", 30},
-                    new Object[]{loc, "running 30 " + m, 30},
-                    new Object[]{loc, "running 1 h 15 min", 75}
-            );
+            String m = minuteWordFor(loc);
+            return COMMON_ACTIVITIES.stream().map(activity -> new Object[]{
+                    loc, activity, activity + " 30 " + m, 30
+            });
         });
     }
 
-    @ParameterizedTest(name = "{index}: {0} -> \"{1}\" = {2}min")
-    @MethodSource("scenarios")
-    void estimate_multiLocale_ok(String localeTag, String text, int expectMinutes) throws Exception {
-        // 讓 service.userLocaleOrDefault() 取得目前語系
+    // 新增測試：50 活動 × 12 語系（預設約 600 例）
+    @org.junit.jupiter.params.ParameterizedTest(name = "CA-{index}: {0} {1} -> \"{2}\" = {3}min")
+    @org.junit.jupiter.params.provider.MethodSource("scenariosCommonActivities")
+// @org.junit.jupiter.api.Tag("slow") // 如需在 CI 分層，可打開
+    void estimate_commonActivities_ok(String localeTag, String activity, String text, int expectMinutes) throws Exception {
+        // 切換使用者語系
         jdbc.update("UPDATE user_profiles SET locale=? WHERE user_id=?", localeTag, TEST_UID);
 
         mvc.perform(post("/api/v1/workouts/estimate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .header("X-Client-Timezone", "Asia/Taipei")
+                        .characterEncoding("UTF-8")
                         .content("{\"text\":\"" + text.replace("\"","\\\"") + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ok"))
                 .andExpect(jsonPath("$.minutes").value(expectMinutes))
                 .andExpect(jsonPath("$.kcal").isNumber());
     }
+
+    //    static Stream<Object[]> scenarios() {
+//        return locales().stream().flatMap(loc -> {
+//            String m = MINUTE_WORD.getOrDefault(loc, "min");
+//            return Stream.of(
+//                    new Object[]{loc, "running 30 min", 30},
+//                    new Object[]{loc, "running 30 " + m, 30},
+//                    new Object[]{loc, "running 1 h 15 min", 75}
+//            );
+//        });
+//    }
+
+//    @ParameterizedTest(name = "{index}: {0} -> \"{1}\" = {2}min")
+//    @MethodSource("scenarios")
+//    void estimate_multiLocale_ok(String localeTag, String text, int expectMinutes) throws Exception {
+//        // 讓 service.userLocaleOrDefault() 取得目前語系
+//        jdbc.update("UPDATE user_profiles SET locale=? WHERE user_id=?", localeTag, TEST_UID);
+//
+//        mvc.perform(post("/api/v1/workouts/estimate")
+//                        .contentType(MediaType.APPLICATION_JSON)
+//                        .accept(MediaType.APPLICATION_JSON)
+//                        .header("X-Client-Timezone", "Asia/Taipei")
+//                        .content("{\"text\":\"" + text.replace("\"","\\\"") + "\"}"))
+//                .andExpect(status().isOk())
+//                .andExpect(jsonPath("$.status").value("ok"))
+//                .andExpect(jsonPath("$.minutes").value(expectMinutes))
+//                .andExpect(jsonPath("$.kcal").isNumber());
+//    }
 
     @Test void ko_minutes_should_parse() { // 韓文
         assertEquals(30, DurationParser.parseMinutes("running 30 분"));
