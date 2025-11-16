@@ -7,11 +7,11 @@ public record UserProfileDto(
         Short heightFeet,          // 新增
         Short heightInches,        // 新增
         Double weightKg,
-        Integer weightLbs,         // 新增
+        Double  weightLbs,          // ★ Integer -> Double
         String exerciseLevel,
         String goal,
         Double targetWeightKg,
-        Integer targetWeightLbs,   // 新增
+        Double  targetWeightLbs,    // ★ Integer -> Double
         String referralSource,
         String locale
 ) {}

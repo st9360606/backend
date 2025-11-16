@@ -26,13 +26,13 @@ public class UserProfile {
     @Column(name = "height_inches") private Short heightInches;
 
     @Column(name = "weight_kg") private Double weightKg;
-    @Column(name = "weight_lbs") private Integer weightLbs;
+    @Column(name = "weight_lbs")private Double weightLbs;        // ★ Integer -> Double
 
     private String exerciseLevel;
     private String goal;
 
     @Column(name = "target_weight_kg") private Double targetWeightKg;
-    @Column(name = "target_weight_lbs") private Integer targetWeightLbs;
+    @Column(name = "target_weight_lbs") private Double targetWeightLbs; // ★ Integer -> Double
 
     private String referralSource;
     private String locale;

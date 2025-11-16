@@ -11,14 +11,14 @@ public record UpsertProfileRequest(
 
         // 現在體重（兩制擇一帶）
         Double  weightKg,
-        Integer weightLbs,         // 新增
+        Double  weightLbs,          // ★ Integer -> Double
 
         String exerciseLevel,
         String goal,
 
         // 目標體重（兩制擇一帶）
         Double  targetWeightKg,
-        Integer targetWeightLbs,   // 新增
+        Double  targetWeightLbs,    // ★ Integer -> Double
 
         String referralSource,
         String locale
