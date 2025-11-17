@@ -84,7 +84,6 @@ public class WeightService {
         return null;
     }
 
-
     public SummaryDto summary(Long uid, LocalDate start, LocalDate end) {
         var goal = profiles.getOrThrow(uid);
         BigDecimal goalKg = goal.targetWeightKg() != null
@@ -125,8 +124,6 @@ public class WeightService {
                 points
         );
     }
-
-
 
     private WeightItemDto toItem(WeightHistory w) {
         return new WeightItemDto(w.getLogDate(), w.getWeightKg(), toLbsInt(w.getWeightKg()), w.getPhotoUrl());
