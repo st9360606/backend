@@ -8,8 +8,8 @@ public record SummaryDto(
         Integer goalLbs,
         BigDecimal currentKg,
         Integer currentLbs,
-        BigDecimal firstWeightKgAllTimeKg,   // ★ 新增：全時段起始體重（kg）
-        double achievedPercent,
+        BigDecimal firstWeightKgAllTimeKg,
+        Double achievedPercent,
         List<WeightItemDto> series
 ) {}
 

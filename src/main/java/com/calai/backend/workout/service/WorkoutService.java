@@ -42,6 +42,12 @@ public class WorkoutService {
     @Value("${workout.estimate.blacklistPolicy:block}")
     private String blacklistPolicy; // generic（現狀）、block（阻擋）、audit（只記錄與回傳 not_found）
 
+    // === ★ 新增：體重 clamp 邊界（跟 UserProfileService 對齊） ===
+    private static final double MIN_WEIGHT_KG  = 20.0d;
+    private static final double MAX_WEIGHT_KG  = 800.0d;
+    private static final double MIN_WEIGHT_LBS = 20.0d;
+    private static final double MAX_WEIGHT_LBS = 1500.0d;
+
     public WorkoutService(
             WorkoutDictionaryRepo dictRepo,
             WorkoutAliasRepo aliasRepo,
@@ -64,11 +70,28 @@ public class WorkoutService {
     private static final DateTimeFormatter TIME_FMT_24 = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH);
     private static String formatTime24(ZonedDateTime zdt) { return zdt.format(TIME_FMT_24); }
 
+    // === ★ 調整：體重取得邏輯，加入 clamp 與 lbs→kg 轉換 ===
     private double userWeightKgOrThrow(Long uid) {
         UserProfile p = profileRepo.findByUserId(uid)
                 .orElseThrow(() -> new IllegalStateException("PROFILE_NOT_FOUND"));
-        if (p.getWeightKg() != null) return p.getWeightKg();
-        if (p.getWeightLbs() != null) return Units.lbsToKg(p.getWeightLbs());
+
+        // 1) 優先使用 kg（視為 canonical；這裡只做 clamp，不改小數位）
+        Double kg = p.getWeightKg();
+        if (kg != null) {
+            kg = Units.clamp(kg, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
+            return kg;
+        }
+
+        // 2) 其次使用 lbs：先 clamp，再由 server 換算成 kg（lbsToKg1 內含 0.1kg 無條件捨去）
+        Double lbs = p.getWeightLbs();
+        if (lbs != null) {
+            lbs = Units.clamp(lbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
+            Double kgFromLbs = Units.lbsToKg(lbs); // lbsToKg1：floor 到 0.1kg
+            kgFromLbs = Units.clamp(kgFromLbs, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
+            return kgFromLbs;
+        }
+
+        // 3) 兩者都沒有 → 視為 profile 不完整
         throw new IllegalStateException("WEIGHT_REQUIRED");
     }
 
@@ -297,9 +320,15 @@ public class WorkoutService {
         return buildToday(uid, zone);
     }
 
+    // === ★ 調整：給 /workouts/me/weight 用的 fallback 專用 API ===
     public double currentUserWeightKg() {
         Long uid = auth.requireUserId();
-        return userWeightKgOrThrow(uid);
+        try {
+            return userWeightKgOrThrow(uid);
+        } catch (IllegalStateException ex) {
+            // PROFILE_NOT_FOUND / WEIGHT_REQUIRED → 回 0.0，讓 App fallback 使用 70kg
+            return 0.0d;
+        }
     }
 
     @Transactional(readOnly = true)
