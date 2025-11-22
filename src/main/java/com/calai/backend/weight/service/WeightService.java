@@ -21,13 +21,94 @@ public class WeightService {
     private final UserProfileService profiles;
 
     private static final BigDecimal MIN_REASONABLE_KG = BigDecimal.valueOf(20);
-    private static final BigDecimal MAX_REASONABLE_KG = BigDecimal.valueOf(500);
+    private static final BigDecimal MAX_REASONABLE_KG = BigDecimal.valueOf(800);
+    private static final BigDecimal MIN_REASONABLE_LBS = BigDecimal.valueOf(40);
+    private static final BigDecimal MAX_REASONABLE_LBS = BigDecimal.valueOf(1000);
     private static final int EARLIEST_SCAN_LIMIT = 10; // 最多往後掃 10 筆
 
     public WeightService(WeightHistoryRepo history, WeightTimeseriesRepo series, UserProfileService profiles) {
         this.history = history;
         this.series = series;
         this.profiles = profiles;
+    }
+
+    /**  FOR 新用戶
+     * - 根據 user_profiles 的體重，在「沒有任何體重紀錄」時建立 baseline。
+     * - 若已存在任一 weight_history，就不動作（idempotent）。
+     * - 若 profile 沒有 weightKg，也不動作。
+     * - log_date 使用當地今天（根據 zone）。
+     */
+    @Transactional
+    public void ensureBaselineFromProfile(Long uid, ZoneId zone) {
+        // 1) 若已有任何 history 記錄，直接跳過（避免舊用戶重建 baseline）
+        var anyHistory = history.findAllByUserDesc(uid, PageRequest.of(0, 1));
+        if (anyHistory != null && !anyHistory.isEmpty()) {
+            return;
+        }
+
+        // 2) 從 profile 拿目前體重（kg / lbs）
+        var profile = profiles.getOrThrow(uid);
+        Double profileKg  = profile.weightKg();
+        Double profileLbs = profile.weightLbs();
+
+        // 至少要有 kg，沒有就不建 baseline
+        if (profileKg == null) {
+            return;
+        }
+
+        // 3) clamp + 0.1 精度處理
+        //    - kg 一定來自 profile
+        //    - lbs：優先用 profile，沒有就用 kg 換算
+        double kgVal = Units.clamp(
+                profileKg,
+                MIN_REASONABLE_KG.doubleValue(),
+                MAX_REASONABLE_KG.doubleValue()
+        );
+
+        double lbsVal;
+        if (profileLbs != null) {
+            // 用戶本來就有存 lbs：尊重使用者輸入，只做 clamp
+            lbsVal = Units.clamp(
+                    profileLbs,
+                    MIN_REASONABLE_LBS.doubleValue(),
+                    MAX_REASONABLE_LBS.doubleValue()
+            );
+        } else {
+            // 舊資料只存 kg：用 kg 統一換算成 lbs 再 clamp
+            double lbsFromKg = Units.kgToLbs1(kgVal); // 你自家的 0.1 lbs 換算規則
+            lbsVal = Units.clamp(
+                    lbsFromKg,
+                    MIN_REASONABLE_LBS.doubleValue(),
+                    MAX_REASONABLE_LBS.doubleValue()
+            );
+        }
+
+        BigDecimal kg  = BigDecimal.valueOf(kgVal).setScale(1, RoundingMode.HALF_UP);
+        BigDecimal lbs = BigDecimal.valueOf(lbsVal).setScale(1, RoundingMode.HALF_UP);
+
+        LocalDate today = LocalDate.now(zone);
+        String tzId = zone.getId();
+
+        // 4) history upsert（當天那一筆，如已有同日紀錄就覆寫）
+        WeightHistory h = history.findByUserIdAndLogDate(uid, today)
+                .orElseGet(WeightHistory::new);
+        h.setUserId(uid);
+        h.setLogDate(today);
+        h.setTimezone(tzId);
+        h.setWeightKg(kg);
+        h.setWeightLbs(lbs);
+        // baseline 不會有照片
+        history.save(h);
+
+        // 5) timeseries upsert（同樣 log_date）
+        WeightTimeseries s = series.findByUserIdAndLogDate(uid, today)
+                .orElseGet(WeightTimeseries::new);
+        s.setUserId(uid);
+        s.setLogDate(today);
+        s.setTimezone(tzId);
+        s.setWeightKg(kg);
+        s.setWeightLbs(lbs);
+        series.save(s);
     }
 
     /** 由 header 解析 IANA 時區，失敗回 UTC（不拒絕請求） */

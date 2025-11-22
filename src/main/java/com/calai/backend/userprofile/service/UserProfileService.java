@@ -23,7 +23,7 @@ public class UserProfileService {
     private static final double MIN_WEIGHT_KG = 20.0d;
     private static final double MAX_WEIGHT_KG = 800.0d;
     private static final double MIN_WEIGHT_LBS = 40.0d;
-    private static final double MAX_WEIGHT_LBS = 900.0d;
+    private static final double MAX_WEIGHT_LBS = 1000.0d;
 
     public UserProfileService(UserProfileRepository repo, UserRepo users) {
         this.repo = repo;

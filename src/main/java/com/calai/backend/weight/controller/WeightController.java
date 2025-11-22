@@ -24,6 +24,17 @@ public class WeightController {
         this.auth = auth; this.svc = svc; this.images = images;
     }
 
+    @PostMapping(value = "/baseline", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> ensureBaseline(
+            @RequestHeader(value = "X-Client-Timezone", required = false) String tzHeader
+    ) {
+        Long uid = auth.requireUserId();
+        var zone = svc.parseZoneOrUtc(tzHeader);
+        svc.ensureBaselineFromProfile(uid, zone);
+        // 沒有內容，只要成功 204 或 200 都可以；這裡用 204 比較語意化
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping(
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
