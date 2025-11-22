@@ -88,9 +88,6 @@ public class WeightService {
         s.setWeightLbs(lbs);
         series.save(s);
 
-        // ★ 每次紀錄體重時，同步更新 user_profiles.current weight
-        profiles.updateCurrentWeight(uid, kg, lbs);
-
         return toItem(h);
     }
 
@@ -195,6 +192,8 @@ public class WeightService {
                 currentKg,
                 currentLbs,
                 startKg,
+                profileCurrentKg,  // ★ 新增：直接帶出 user_profiles 的 weight_kg / weight_lbs
+                profileCurrentLbs,
                 achieved * 100.0,
                 points
         );
