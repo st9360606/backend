@@ -29,14 +29,17 @@ public class WeightController {
             produces = MediaType.APPLICATION_JSON_VALUE
     )
     public ResponseEntity<WeightItemDto> logWeight(
-            @RequestParam("weightKg") BigDecimal weightKg,
-            @RequestParam(value = "logDate", required = false) String logDateStr,
-            @RequestPart(value = "photo", required = false) MultipartFile photo,
+            @RequestParam(value = "weightKg",  required = false) BigDecimal weightKg,
+            @RequestParam(value = "weightLbs", required = false) BigDecimal weightLbs,
+            @RequestParam(value = "logDate",   required = false) String logDateStr,
+            @RequestPart(value = "photo",      required = false) MultipartFile photo,
             @RequestHeader(value = "X-Client-Timezone", required = false) String tzHeader
     ) throws Exception {
         Long uid = auth.requireUserId();
         ZoneId zone = svc.parseZoneOrUtc(tzHeader);
-        LocalDate logDate = (logDateStr != null && !logDateStr.isBlank()) ? LocalDate.parse(logDateStr) : null;
+        LocalDate logDate = (logDateStr != null && !logDateStr.isBlank())
+                ? LocalDate.parse(logDateStr)
+                : null;
 
         // 驗證檔案型別與大小（最大 3MB）
         String photoUrl = null;
@@ -46,11 +49,20 @@ public class WeightController {
             if (!(type.equals("image/jpeg") || type.equals("image/png") || type.equals("image/heic"))) {
                 return ResponseEntity.badRequest().build();
             }
-            String ext = switch (type) { case "image/png" -> "png"; case "image/heic" -> "heic"; default -> "jpg"; };
+            String ext = switch (type) {
+                case "image/png" -> "png";
+                case "image/heic" -> "heic";
+                default -> "jpg";
+            };
             photoUrl = images.save(uid, photo, ext);
         }
 
-        var dto = svc.log(uid, new LogWeightRequest(weightKg, logDate), zone, photoUrl);
+        var dto = svc.log(
+                uid,
+                new LogWeightRequest(weightKg, weightLbs, logDate),
+                zone,
+                photoUrl
+        );
         return ResponseEntity.ok(dto);
     }
 

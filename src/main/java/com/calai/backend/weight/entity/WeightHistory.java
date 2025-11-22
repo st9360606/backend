@@ -25,6 +25,10 @@ public class WeightHistory {
     @Column(name="weight_kg", nullable=false, precision = 6, scale = 1)
     private BigDecimal weightKg;
 
+    /** 同步保存 lbs（保留一位小數） */
+    @Column(name="weight_lbs", nullable=false, precision = 6, scale = 1)
+    private BigDecimal weightLbs;   // ★ 新增欄位對應
+
     /** 使用者當次時區（保存字串，便於稽核/後續修正） */
     @Column(name="timezone", nullable=false, length=64)
     private String timezone;

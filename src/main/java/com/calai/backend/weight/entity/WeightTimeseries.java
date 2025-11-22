@@ -32,6 +32,9 @@ public class WeightTimeseries {
     @Column(name="weight_kg", nullable=false, precision = 6, scale = 1)
     private BigDecimal weightKg;
 
+    @Column(name="weight_lbs", nullable=false, precision = 6, scale = 1)
+    private BigDecimal weightLbs;   // ★ 新增欄位對應
+
     @Column(name="timezone", nullable=false, length=64)
     private String timezone;
 

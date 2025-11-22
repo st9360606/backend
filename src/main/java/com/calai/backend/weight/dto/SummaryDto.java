@@ -5,11 +5,10 @@ import java.util.List;
 
 public record SummaryDto(
         BigDecimal goalKg,
-        Integer goalLbs,
+        BigDecimal goalLbs,              // ★ 原本是 Integer，改成 BigDecimal
         BigDecimal currentKg,
-        Integer currentLbs,
+        BigDecimal currentLbs,           // ★ 原本是 Integer，改成 BigDecimal
         BigDecimal firstWeightKgAllTimeKg,
         Double achievedPercent,
         List<WeightItemDto> series
 ) {}
-

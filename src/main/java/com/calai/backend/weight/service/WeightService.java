@@ -1,5 +1,6 @@
 package com.calai.backend.weight.service;
 
+import com.calai.backend.userprofile.common.Units;
 import com.calai.backend.userprofile.service.UserProfileService;
 import com.calai.backend.weight.dto.*;
 import com.calai.backend.weight.entity.*;
@@ -38,20 +39,57 @@ public class WeightService {
     @Transactional
     public WeightItemDto log(Long uid, LogWeightRequest req, ZoneId zone, String photoUrlIfAny) {
         LocalDate logDate = (req.logDate() != null) ? req.logDate() : LocalDate.now(zone);
-        BigDecimal kg = req.weightKg().setScale(1, RoundingMode.HALF_UP);
+
+        BigDecimal reqKg  = req.weightKg();
+        BigDecimal reqLbs = req.weightLbs();
+
+        if (reqKg == null && reqLbs == null) {
+            throw new IllegalArgumentException("Either weightKg or weightLbs must be provided");
+        }
+
+        // 先統一成 double，再用 Units 做 0.1 精度處理
+        Double kgD  = (reqKg  != null) ? Units.floor(reqKg, 1)  : null;
+        Double lbsD = (reqLbs != null) ? Units.floor(reqLbs, 1) : null;
+
+        if (kgD == null && lbsD != null) {
+            kgD = Units.lbsToKg1(lbsD);   // lbs -> kg (0.1kg)
+        }
+        if (lbsD == null && kgD != null) {
+            lbsD = Units.kgToLbs1(kgD);   // kg -> lbs (0.1lbs)
+        }
+
+        if (kgD == null || lbsD == null) {
+            throw new IllegalStateException("Failed to derive both kg and lbs");
+        }
+
+        BigDecimal kg  = BigDecimal.valueOf(kgD).setScale(1, RoundingMode.HALF_UP);
+        BigDecimal lbs = BigDecimal.valueOf(lbsD).setScale(1, RoundingMode.HALF_UP);
 
         // history upsert
         WeightHistory h = history.findByUserIdAndLogDate(uid, logDate)
                 .orElseGet(WeightHistory::new);
-        h.setUserId(uid); h.setLogDate(logDate); h.setTimezone(zone.getId()); h.setWeightKg(kg);
-        if (photoUrlIfAny != null) h.setPhotoUrl(photoUrlIfAny);  // 有新照片就覆寫
+        h.setUserId(uid);
+        h.setLogDate(logDate);
+        h.setTimezone(zone.getId());
+        h.setWeightKg(kg);
+        h.setWeightLbs(lbs);
+        if (photoUrlIfAny != null) {
+            h.setPhotoUrl(photoUrlIfAny);  // 有新照片就覆寫
+        }
         history.save(h);
 
         // timeseries upsert
         WeightTimeseries s = series.findByUserIdAndLogDate(uid, logDate)
                 .orElseGet(WeightTimeseries::new);
-        s.setUserId(uid); s.setLogDate(logDate); s.setTimezone(zone.getId()); s.setWeightKg(kg);
+        s.setUserId(uid);
+        s.setLogDate(logDate);
+        s.setTimezone(zone.getId());
+        s.setWeightKg(kg);
+        s.setWeightLbs(lbs);
         series.save(s);
+
+        // ★ 每次紀錄體重時，同步更新 user_profiles.current weight
+        profiles.updateCurrentWeight(uid, kg, lbs);
 
         return toItem(h);
     }
@@ -87,54 +125,103 @@ public class WeightService {
     }
 
     public SummaryDto summary(Long uid, LocalDate start, LocalDate end) {
-        var goal = profiles.getOrThrow(uid);
-        BigDecimal goalKg = goal.targetWeightKg() != null
-                ? BigDecimal.valueOf(goal.targetWeightKg())
+        // 先把 user_profiles 撈出來
+        var profile = profiles.getOrThrow(uid);
+
+        BigDecimal goalKg = profile.targetWeightKg() != null
+                ? BigDecimal.valueOf(profile.targetWeightKg())
                 : null;
 
+        BigDecimal goalLbs = profile.targetWeightLbs() != null
+                ? BigDecimal.valueOf(profile.targetWeightLbs())
+                : null;
+
+        BigDecimal profileCurrentKg = profile.weightKg() != null
+                ? BigDecimal.valueOf(profile.weightKg())
+                : null;
+
+        BigDecimal profileCurrentLbs = profile.weightLbs() != null
+                ? BigDecimal.valueOf(profile.weightLbs())
+                : null;
+
+        // 這個 range 的折線資料
         var points = series.findRange(uid, start, end)
                 .stream()
                 .map(this::toItem)
                 .toList();
 
-        // current＝今日或最近一筆
-        var latest = series.findLatest(uid, org.springframework.data.domain.PageRequest.of(0,1));
-        BigDecimal currentKg = latest.isEmpty() ? null : latest.get(0).getWeightKg();
+        // 最新一筆 timeseries（若有）
+        var latestList = series.findLatest(uid, PageRequest.of(0, 1));
 
-        // ★ 新增：從全時段 timeseries 挑選合理的起始體重
+        BigDecimal currentKg = null;
+        BigDecimal currentLbs = null;
+
+        if (!latestList.isEmpty()) {
+            // ★ 有 weight_timeseries：一律吃 DB 的 kg / lbs
+            var latest = latestList.get(0);
+            currentKg = latest.getWeightKg();
+            currentLbs = latest.getWeightLbs();
+        } else {
+            // ★ 沒任何 timeseries：fallback 到 user_profiles
+            currentKg = profileCurrentKg;
+            if (profileCurrentLbs != null) {
+                currentLbs = profileCurrentLbs;
+            } else if (currentKg != null) {
+                // 舊資料只存 kg 的情況：再做一次統一換算（小數一位）
+                double lbs1 = Units.kgToLbs1(currentKg.doubleValue());
+                currentLbs = BigDecimal.valueOf(lbs1)
+                        .setScale(1, RoundingMode.HALF_UP);
+            }
+        }
+
+        // 起始體重仍然掃全時段 timeseries；沒有就 fallback current
         BigDecimal startKg = pickReasonableStartWeight(uid);
         if (startKg == null && currentKg != null) {
-            // fallback：前 N 筆都不合理，就用 current 當起點，避免 front-end 拿不到起始值
             startKg = currentKg;
         }
 
         double achieved = 0d;
         if (goalKg != null && currentKg != null && startKg != null) {
-            // 以「起始體重 → 目標」的距離為分母
             double total = startKg.subtract(goalKg).abs().doubleValue();
-            double now   = currentKg.subtract(goalKg).abs().doubleValue();
-            achieved = (total <= 0.0001)
+            double now = currentKg.subtract(goalKg).abs().doubleValue();
+            achieved = (total <= 1e-4)
                     ? 1.0
                     : Math.max(0, Math.min(1, (total - now) / total));
         }
 
         return new SummaryDto(
-                goalKg, toLbsInt(goalKg),
-                currentKg, toLbsInt(currentKg),
-                startKg,                      // ★ 第 5 個參數：firstWeightKgAllTimeKg
+                goalKg,
+                goalLbs,
+                currentKg,
+                currentLbs,
+                startKg,
                 achieved * 100.0,
                 points
         );
     }
 
     private WeightItemDto toItem(WeightHistory w) {
-        return new WeightItemDto(w.getLogDate(), w.getWeightKg(), toLbsInt(w.getWeightKg()), w.getPhotoUrl());
+        return new WeightItemDto(
+                w.getLogDate(),
+                w.getWeightKg(),
+                w.getWeightLbs(),    // ★ 直接用 DB 欄位
+                w.getPhotoUrl()
+        );
     }
+
     private WeightItemDto toItem(WeightTimeseries w) {
-        return new WeightItemDto(w.getLogDate(), w.getWeightKg(), toLbsInt(w.getWeightKg()), null);
+        return new WeightItemDto(
+                w.getLogDate(),
+                w.getWeightKg(),
+                w.getWeightLbs(),    // ★ 直接用 DB 欄位
+                null
+        );
     }
+
     private Integer toLbsInt(BigDecimal kg) {
         if (kg == null) return null;
-        return BigDecimal.valueOf(kg.doubleValue() * 2.20462262d).setScale(0, RoundingMode.HALF_UP).intValue();
+        return BigDecimal.valueOf(kg.doubleValue() * 2.20462262d)
+                .setScale(0, RoundingMode.HALF_UP)
+                .intValue();
     }
 }

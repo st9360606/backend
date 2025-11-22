@@ -6,7 +6,6 @@ import java.time.LocalDate;
 public record WeightItemDto(
         LocalDate logDate,
         BigDecimal weightKg,
-        Integer weightLbs, // 方便前端直接顯示整數
+        BigDecimal weightLbs,   // ★ 原本 Integer → BigDecimal
         String photoUrl
 ) {}
-

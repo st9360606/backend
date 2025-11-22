@@ -10,6 +10,8 @@ import com.calai.backend.users.entity.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+
 @Service
 public class UserProfileService {
     private final UserProfileRepository repo;
@@ -195,5 +197,34 @@ public class UserProfileService {
             }
         });
         return dto;
+    }
+
+    /**
+     * 從體重紀錄更新目前體重（kg & lbs）。
+     * - 若尚未有 profile，自動建立一筆（沿用 ensureDefault 的行為）。
+     * - 每次寫入 weight 時都會覆寫成「最後一次紀錄」。
+     */
+    @Transactional
+    public void updateCurrentWeight(Long userId, BigDecimal weightKg, BigDecimal weightLbs) {
+        if (weightKg == null && weightLbs == null) return;
+
+        User user = users.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+
+        // 確保最少有一筆 profile
+        UserProfile profile = repo.findByUserId(userId).orElseGet(() -> {
+            UserProfile np = new UserProfile();
+            np.setUser(user);
+            return repo.save(np);
+        });
+
+        if (weightKg != null) {
+            profile.setWeightKg(weightKg.doubleValue());
+        }
+        if (weightLbs != null) {
+            profile.setWeightLbs(weightLbs.doubleValue());
+        }
+
+        repo.save(profile);
     }
 }

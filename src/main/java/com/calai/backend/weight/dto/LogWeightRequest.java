@@ -4,8 +4,9 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 public record LogWeightRequest(
-        /** 若前端傳 lbs，請先轉為 kg 後送來；此欄必填且為 kg */
+        /** 若前端送 lbs 也沒關係，kg & lbs 任一必填，缺一個由後端換算 */
         BigDecimal weightKg,
+        BigDecimal weightLbs,
         /** 可回填過去日期（由 UI 底部日期選擇器） */
         LocalDate logDate
 ) {}
