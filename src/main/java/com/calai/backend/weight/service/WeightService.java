@@ -41,13 +41,15 @@ public class WeightService {
         BigDecimal kg = req.weightKg().setScale(1, RoundingMode.HALF_UP);
 
         // history upsert
-        WeightHistory h = history.findByUserIdAndLogDate(uid, logDate).orElseGet(WeightHistory::new);
+        WeightHistory h = history.findByUserIdAndLogDate(uid, logDate)
+                .orElseGet(WeightHistory::new);
         h.setUserId(uid); h.setLogDate(logDate); h.setTimezone(zone.getId()); h.setWeightKg(kg);
-        if (photoUrlIfAny != null) h.setPhotoUrl(photoUrlIfAny);
+        if (photoUrlIfAny != null) h.setPhotoUrl(photoUrlIfAny);  // 有新照片就覆寫
         history.save(h);
 
         // timeseries upsert
-        WeightTimeseries s = series.findByUserIdAndLogDate(uid, logDate).orElseGet(WeightTimeseries::new);
+        WeightTimeseries s = series.findByUserIdAndLogDate(uid, logDate)
+                .orElseGet(WeightTimeseries::new);
         s.setUserId(uid); s.setLogDate(logDate); s.setTimezone(zone.getId()); s.setWeightKg(kg);
         series.save(s);
 
