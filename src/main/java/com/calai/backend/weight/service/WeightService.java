@@ -172,10 +172,15 @@ public class WeightService {
         return toItem(h);
     }
 
-    public List<WeightItemDto> history7ExcludingToday(Long uid, ZoneId zone) {
-        LocalDate today = LocalDate.now(zone);
-        var list = history.findLatestBeforeToday(uid, today, org.springframework.data.domain.PageRequest.of(0,7));
-        return list.stream().map(this::toItem).toList();
+    /**
+     * ✅ 永遠回「這個 user 最新的 7 筆體重」，只依 logDate 由新到舊排序。
+     * 不再使用 today 過濾，未來若真的有「未來日期」紀錄，也會被視為最新的一筆。
+     */
+    public List<WeightItemDto> history7Latest(Long uid) {
+        var list = history.findAllByUserDesc(uid, PageRequest.of(0, 7));
+        return list.stream()
+                .map(this::toItem)
+                .toList();
     }
 
     /**

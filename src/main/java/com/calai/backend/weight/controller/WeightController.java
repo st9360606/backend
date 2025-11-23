@@ -82,7 +82,8 @@ public class WeightController {
             @RequestHeader(value = "X-Client-Timezone", required = false) String tzHeader
     ) {
         Long uid = auth.requireUserId();
-        var list = svc.history7ExcludingToday(uid, svc.parseZoneOrUtc(tzHeader));
+        // ✅ 這裡不再需要 today / zone 來過濾，只要最新 7 筆
+        var list = svc.history7Latest(uid);
         return ResponseEntity.ok(list);
     }
 

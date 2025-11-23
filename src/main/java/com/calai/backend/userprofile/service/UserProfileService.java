@@ -10,8 +10,6 @@ import com.calai.backend.users.entity.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-
 @Service
 public class UserProfileService {
     private final UserProfileRepository repo;
