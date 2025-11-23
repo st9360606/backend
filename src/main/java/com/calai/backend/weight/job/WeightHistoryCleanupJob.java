@@ -16,15 +16,16 @@ public class WeightHistoryCleanupJob {
     public void cleanup() {
         // Postgres：以窗口函數計算序號，刪除序號>7
         em.createNativeQuery("""
-            with ranked as (
-               select id, user_id, log_date,
-                      row_number() over (partition by user_id order by log_date desc) as rn
-               from weight_history
-               where log_date < current_date
-            )
-            delete from weight_history h
-            using ranked r
-            where h.id = r.id and r.rn > 7
+            WITH ranked AS (
+                SELECT id, user_id, log_date,
+                               ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY log_date DESC) AS rn
+                        FROM weight_history
+                        WHERE log_date < CURRENT_DATE
+                    )
+                    DELETE h
+                    FROM weight_history h
+                    JOIN ranked r ON h.id = r.id
+                    WHERE r.rn > 7;
         """).executeUpdate();
     }
 }

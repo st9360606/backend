@@ -188,7 +188,7 @@ public class WeightService {
      *
      * 規則：
      * - 依 log_date 由小到大，取最早 N 筆。
-     * - 只要遇到第一個 20–500kg 的值，就用它當全時段起點。
+     * - 只要遇到第一個 20–800kg 的值，就用它當全時段起點。
      * - 若前 N 筆都不合理，回傳 null，交由上層 fallback。
      */
     private BigDecimal pickReasonableStartWeight(Long uid) {
@@ -257,19 +257,22 @@ public class WeightService {
             }
         }
 
-        // 起始體重仍然掃全時段 timeseries；沒有就 fallback current
-        BigDecimal startKg = pickReasonableStartWeight(uid);
-        if (startKg == null && currentKg != null) {
-            startKg = currentKg;
-        }
+        // ★ 全期間起點（只看 timeseries）
+        BigDecimal startAllTimeKg = pickReasonableStartWeight(uid);
+
+        // ★ 和前端 computeWeightProgress 一樣的起點 fallback：
+        // 1) 全期間起點（timeseries 第一筆）
+        // 2) user_profiles.weightKg（Onboarding / Profile 當時體重）
+        // 3) currentKg（最後 fallback）
+        BigDecimal startKgForProgress = resolveStartKgForProgress(
+                startAllTimeKg,
+                profileCurrentKg,
+                currentKg
+        );
 
         double achieved = 0d;
-        if (goalKg != null && currentKg != null && startKg != null) {
-            double total = startKg.subtract(goalKg).abs().doubleValue();
-            double now = currentKg.subtract(goalKg).abs().doubleValue();
-            achieved = (total <= 1e-4)
-                    ? 1.0
-                    : Math.max(0, Math.min(1, (total - now) / total));
+        if (goalKg != null && currentKg != null && startKgForProgress != null) {
+            achieved = computeAchievedPercent(startKgForProgress, currentKg, goalKg);
         }
 
         return new SummaryDto(
@@ -277,12 +280,76 @@ public class WeightService {
                 goalLbs,
                 currentKg,
                 currentLbs,
-                startKg,
-                profileCurrentKg,  // ★ 新增：直接帶出 user_profiles 的 weight_kg / weight_lbs
+                startAllTimeKg,   // ★ 對外仍然回「全期間起點」，給前端畫圖使用
+                profileCurrentKg, // ★ user_profiles 的原始體重（可做 UI fallback）
                 profileCurrentLbs,
-                achieved * 100.0,
+                achieved * 100.0, // ★ 0~100，前端除以 100 變成 0~1
                 points
         );
+    }
+
+    /**
+     * 取得「用來算進度」的起點：
+     * 1) 優先使用全期間起點（timeseries 第一筆）
+     * 2) 沒有 timeseries 時，退回 user_profiles.weightKg
+     * 3) 再沒有就退回 currentKg
+     */
+    private BigDecimal resolveStartKgForProgress(
+            BigDecimal startAllTimeKg,
+            BigDecimal profileCurrentKg,
+            BigDecimal currentKg
+    ) {
+        if (startAllTimeKg != null) return startAllTimeKg;
+        if (profileCurrentKg != null) return profileCurrentKg;
+        return currentKg;
+    }
+
+    /**
+     * 與前端 computeWeightProgress 對齊的進度公式：
+     *
+     * 減重： progress = (start - current) / (start - goal)
+     * 增重： progress = (current - start) / (goal - start)
+     *
+     * 並將結果夾在 0.0 ~ 1.0 之間。
+     */
+    private double computeAchievedPercent(
+            BigDecimal startKg,
+            BigDecimal currentKg,
+            BigDecimal goalKg
+    ) {
+        double start   = startKg.doubleValue();
+        double current = currentKg.doubleValue();
+        double goal    = goalKg.doubleValue();
+
+        // 起點與目標幾乎相等：直接視為 100%
+        if (Math.abs(goal - start) < 1e-6) {
+            return 1.0d;
+        }
+
+        final double numerator;
+        final double denominator;
+
+        if (goal < start) {
+            // 減重：目標比起點低
+            numerator = start - current;
+            denominator = start - goal;
+        } else {
+            // 增重：目標比起點高或相同
+            numerator = current - start;
+            denominator = goal - start;
+        }
+
+        if (Math.abs(denominator) < 1e-6) {
+            return 0.0d;
+        }
+
+        double raw = numerator / denominator;
+
+        // 夾在 0~1（避免 -進度或 >100%）
+        if (raw < 0.0d) raw = 0.0d;
+        if (raw > 1.0d) raw = 1.0d;
+
+        return raw;
     }
 
     private WeightItemDto toItem(WeightHistory w) {
