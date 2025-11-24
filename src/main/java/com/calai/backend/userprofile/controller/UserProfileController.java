@@ -1,6 +1,7 @@
 package com.calai.backend.userprofile.controller;
 
 import com.calai.backend.auth.security.AuthContext;
+import com.calai.backend.userprofile.dto.UpdateTargetWeightRequest;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.service.UserProfileService;
@@ -39,6 +40,23 @@ public class UserProfileController {
         UserProfileDto dto = (tzToPersist != null)
                 ? svc.upsert(uid, req, tzToPersist)
                 : svc.upsert(uid, req);
+        return ResponseEntity.ok(dto);
+    }
+
+    /**
+     * 專用更新「目標體重」的端點。
+     * Body 只需要 value + unit（KG 或 LBS），伺服器會自動換算與同步兩制欄位。
+     */
+    @PutMapping(
+            path = "/target-weight",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<UserProfileDto> updateTargetWeight(
+            @Valid @RequestBody UpdateTargetWeightRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        UserProfileDto dto = svc.updateTargetWeight(uid, req);
         return ResponseEntity.ok(dto);
     }
 

@@ -8,9 +8,8 @@ public record SummaryDto(
         BigDecimal goalLbs,              // ★ 原本是 Integer，改成 BigDecimal
         BigDecimal currentKg,
         BigDecimal currentLbs,           // ★ 原本是 Integer，改成 BigDecimal
-        BigDecimal firstWeightKgAllTimeKg,
-        // ★ 新增：來自 user_profiles 的原始體重（current profile weight）
-        BigDecimal profileWeightKg,
+        BigDecimal firstWeightKgAllTime,
+        BigDecimal profileWeightKg,// ★ 新增：來自 user_profiles 的原始體重（current profile weight）
         BigDecimal profileWeightLbs,
         Double achievedPercent,
         List<WeightItemDto> series

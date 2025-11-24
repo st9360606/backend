@@ -2,6 +2,7 @@ package com.calai.backend.userprofile.service;
 
 import com.calai.backend.auth.repo.UserRepo;
 import com.calai.backend.userprofile.common.Units;
+import com.calai.backend.userprofile.dto.UpdateTargetWeightRequest;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.entity.UserProfile;
@@ -162,6 +163,46 @@ public class UserProfileService {
         if (r.goal() != null)           p.setGoal(r.goal());
         if (r.referralSource() != null) p.setReferralSource(r.referralSource());
         if (r.locale() != null)         p.setLocale(r.locale());
+
+        var saved = repo.save(p);
+        return toDto(saved);
+    }
+
+    /**
+     * 單純更新「目標體重」的專用方法。
+     * - value + unit 由前端傳進來（KG 或 LBS）
+     * - 伺服器負責：clamp + 換算 + 無條件捨去到小數第 1 位 + 同步兩制欄位
+     */
+    @Transactional
+    public UserProfileDto updateTargetWeight(Long userId, UpdateTargetWeightRequest r) {
+        if (r == null || r.value() == null || r.unit() == null) {
+            throw new IllegalArgumentException("value and unit are required");
+        }
+
+        var p = repo.findByUserId(userId)
+                .orElseThrow(() -> new IllegalStateException("PROFILE_NOT_FOUND"));
+
+        String unit = r.unit().trim().toUpperCase();
+        Double kgToSave;
+        Double lbsToSave;
+
+        if ("KG".equals(unit)) {
+            // 情境 2：使用者以 kg 輸入
+            kgToSave  = Units.clamp(r.value(), MIN_WEIGHT_KG, MAX_WEIGHT_KG);
+            lbsToSave = Units.kgToLbs1(kgToSave); // 0.1 lbs 無條件捨去
+            lbsToSave = Units.clamp(lbsToSave, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
+        } else if ("LBS".equals(unit)) {
+            // 情境 1：使用者以 lbs 輸入
+            lbsToSave = Units.clamp(r.value(), MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
+            kgToSave  = Units.lbsToKg1(lbsToSave); // 0.1 kg 無條件捨去
+            kgToSave  = Units.clamp(kgToSave, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
+        } else {
+            // 前端請保證只送 KG / LBS，這裡保守一點直接丟錯
+            throw new IllegalArgumentException("unit must be KG or LBS");
+        }
+
+        p.setTargetWeightKg(kgToSave);
+        p.setTargetWeightLbs(lbsToSave);
 
         var saved = repo.save(p);
         return toDto(saved);
