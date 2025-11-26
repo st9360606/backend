@@ -1,9 +1,10 @@
-package com.calai.backend.auth.config;
+package com.calai.backend.config;
 
 import com.calai.backend.auth.security.AccessTokenFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -29,7 +30,12 @@ public class SecurityConfig {
                 .logout(l -> l.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(reg -> reg
+                        // ✅ 公開讀取：體重照片 (只放行 GET)
+                        .requestMatchers(HttpMethod.GET, "/static/weight-photos/**").permitAll()
+
+                        // 你原本放行的
                         .requestMatchers("/auth/**", "/actuator/**").permitAll()
+
                         .anyRequest().authenticated()
                 )
                 // 把我們的 Bearer 過濾器掛進 Security 鏈
@@ -51,5 +57,3 @@ public class SecurityConfig {
         return http.build();
     }
 }
-
-

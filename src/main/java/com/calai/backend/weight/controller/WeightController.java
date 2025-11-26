@@ -57,14 +57,32 @@ public class WeightController {
         if (photo != null && !photo.isEmpty()) {
             if (photo.getSize() > 3 * 1024 * 1024L) return ResponseEntity.badRequest().build();
             String type = photo.getContentType() == null ? "" : photo.getContentType();
-            if (!(type.equals("image/jpeg") || type.equals("image/png") || type.equals("image/heic"))) {
+
+            // ✅ 擴充常見型別，並允許 application/octet-stream（由 ext 推斷）
+            boolean okType = type.equals("image/jpeg")
+                    || type.equals("image/jpg")
+                    || type.equals("image/png")
+                    || type.equals("image/heic")
+                    || type.equals("image/heif")
+                    || type.equals("application/octet-stream");
+
+            if (!okType) {
                 return ResponseEntity.badRequest().build();
             }
-            String ext = switch (type) {
-                case "image/png" -> "png";
-                case "image/heic" -> "heic";
-                default -> "jpg";
-            };
+
+            String ext;
+            if (type.equals("image/png")) ext = "png";
+            else if (type.equals("image/heic")) ext = "heic";
+            else if (type.equals("image/heif")) ext = "heif";
+            else {
+                // jpeg / jpg / octet-stream → 以檔名推斷，推不到就 default jpg
+                String fn = photo.getOriginalFilename() == null ? "" : photo.getOriginalFilename().toLowerCase();
+                if (fn.endsWith(".png")) ext = "png";
+                else if (fn.endsWith(".heic")) ext = "heic";
+                else if (fn.endsWith(".heif")) ext = "heif";
+                else ext = "jpg";
+            }
+
             photoUrl = images.save(uid, photo, ext);
         }
 
