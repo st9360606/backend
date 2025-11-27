@@ -20,4 +20,26 @@ public interface WeightHistoryRepo extends JpaRepository<WeightHistory, Long> {
            """)
     List<WeightHistory> findAllByUserDesc(Long uid, Pageable pageable);
 
+    @Query("""
+        select distinct w.userId
+        from WeightHistory w
+        where w.photoUrl is not null
+    """)
+    List<Long> findUserIdsWithPhotos();
+
+    @Query("""
+        select w
+        from WeightHistory w
+        where w.userId = :uid and w.photoUrl is not null
+        order by w.logDate desc, w.id desc
+    """)
+    List<WeightHistory> findPhotosByUserDesc(Long uid, Pageable pageable);
+
+    @Query("""
+        select w.photoUrl
+        from WeightHistory w
+        where w.photoUrl is not null
+    """)
+    List<String> findAllPhotoUrls();
+
 }

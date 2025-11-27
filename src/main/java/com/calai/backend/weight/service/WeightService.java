@@ -1,35 +1,52 @@
 package com.calai.backend.weight.service;
 
+import com.calai.backend.common.storage.LocalImageStorage;
 import com.calai.backend.userprofile.common.Units;
 import com.calai.backend.userprofile.service.UserProfileService;
-import com.calai.backend.weight.dto.*;
-import com.calai.backend.weight.entity.*;
-import com.calai.backend.weight.repo.*;
+import com.calai.backend.weight.dto.LogWeightRequest;
+import com.calai.backend.weight.dto.SummaryDto;
+import com.calai.backend.weight.dto.WeightItemDto;
+import com.calai.backend.weight.entity.WeightHistory;
+import com.calai.backend.weight.entity.WeightTimeseries;
+import com.calai.backend.weight.repo.WeightHistoryRepo;
+import com.calai.backend.weight.repo.WeightTimeseriesRepo;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.*;
-import java.util.*;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.List;
+
 
 @Service
 public class WeightService {
     private final WeightHistoryRepo history;
     private final WeightTimeseriesRepo series;
     private final UserProfileService profiles;
-
+    private final LocalImageStorage images;
     private static final BigDecimal MIN_REASONABLE_KG = BigDecimal.valueOf(20);
     private static final BigDecimal MAX_REASONABLE_KG = BigDecimal.valueOf(800);
     private static final BigDecimal MIN_REASONABLE_LBS = BigDecimal.valueOf(40);
     private static final BigDecimal MAX_REASONABLE_LBS = BigDecimal.valueOf(1000);
     private static final int EARLIEST_SCAN_LIMIT = 10; // 最多往後掃 10 筆
 
-    public WeightService(WeightHistoryRepo history, WeightTimeseriesRepo series, UserProfileService profiles) {
+    public WeightService(
+            WeightHistoryRepo history,
+            WeightTimeseriesRepo series,
+            UserProfileService profiles,
+            LocalImageStorage images // ✅ constructor 注入
+    ) {
         this.history = history;
         this.series = series;
         this.profiles = profiles;
+        this.images = images;
     }
 
     /**  FOR 新用戶
@@ -376,4 +393,98 @@ public class WeightService {
                 .setScale(0, RoundingMode.HALF_UP)
                 .intValue();
     }
+
+    /** ✅ Controller 改呼叫這個：負責同日覆蓋與刪舊圖 */
+    @Transactional
+    public WeightItemDto logWithPhoto(Long uid, LogWeightRequest req, ZoneId zone, MultipartFile photo) throws IOException {
+        LocalDate logDate = (req.logDate() != null) ? req.logDate() : LocalDate.now(zone);
+
+        // 先找舊的 photoUrl（同一天）
+        String oldUrl = history.findByUserIdAndLogDate(uid, logDate)
+                .map(h -> h.getPhotoUrl())
+                .orElse(null);
+
+        // 先把新圖存到磁碟（避免先刪舊造成資料遺失）
+        String newUrl = null;
+        if (photo != null && !photo.isEmpty()) {
+            validatePhoto(photo);
+            String ext = detectExt(photo);
+            newUrl = images.save(uid, logDate, photo, ext);
+        }
+
+        final String newUrlFinal = newUrl;
+
+        try {
+            // 走你原本的 log（DB upsert）
+            WeightItemDto dto = log(
+                    uid,
+                    new LogWeightRequest(req.weightKg(), req.weightLbs(), logDate),
+                    zone,
+                    newUrlFinal
+            );
+
+            // ✅ 交易成功後：刪舊圖（同日覆蓋）
+            if (newUrlFinal != null && oldUrl != null && !oldUrl.equals(newUrlFinal)) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override public void afterCommit() {
+                        images.deleteByUrlQuietly(oldUrl);
+                    }
+                    @Override public void afterCompletion(int status) {
+                        // 若 rollback：把剛存的新檔刪掉（避免孤兒檔案）
+                        if (status != STATUS_COMMITTED) {
+                            images.deleteByUrlQuietly(newUrlFinal);
+                        }
+                    }
+                });
+            } else if (newUrlFinal != null) {
+                // 沒有舊圖，但 rollback 時仍要清新檔
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override public void afterCompletion(int status) {
+                        if (status != STATUS_COMMITTED) {
+                            images.deleteByUrlQuietly(newUrlFinal);
+                        }
+                    }
+                });
+            }
+
+            return dto;
+        } catch (RuntimeException e) {
+            // 保險：若還沒註冊 sync 或其他例外
+            if (newUrlFinal != null) images.deleteByUrlQuietly(newUrlFinal);
+            throw e;
+        }
+    }
+
+    private void validatePhoto(MultipartFile photo) {
+        if (photo.getSize() > 3 * 1024 * 1024L) {
+            throw new IllegalArgumentException("photo too large");
+        }
+        String type = (photo.getContentType() == null) ? "" : photo.getContentType();
+        boolean okType = type.equals("image/jpeg")
+                || type.equals("image/jpg")
+                || type.equals("image/png")
+                || type.equals("image/heic")
+                || type.equals("image/heif")
+                || type.equals("application/octet-stream");
+        if (!okType) throw new IllegalArgumentException("unsupported photo contentType=" + type);
+    }
+
+    private String detectExt(MultipartFile photo) {
+        String type = (photo.getContentType() == null) ? "" : photo.getContentType();
+
+        if (type.equals("image/png")) return "png";
+        if (type.equals("image/heic")) return "heic";
+        if (type.equals("image/heif")) return "heif";
+
+        // jpeg / jpg / octet-stream → 以檔名推斷，推不到就 jpg
+        String fn = photo.getOriginalFilename() == null ? "" : photo.getOriginalFilename().toLowerCase();
+        if (fn.endsWith(".png")) return "png";
+        if (fn.endsWith(".heic")) return "heic";
+        if (fn.endsWith(".heif")) return "heif";
+        return "jpg";
+    }
+
+
+
+
 }

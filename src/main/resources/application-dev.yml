@@ -72,6 +72,8 @@ app:
     # 若使用 Gmail SMTP，from 最好等於 username；否則容易被覆寫或遭拒收
     sender: "st9360606@gmail.com"
     # 若要用自家網域 no-reply@bitecal.app，建議改用 SendGrid/SES 並設定 SPF/DKIM/DMARC
+  storage:
+    weight-photos-dir: uploads/weight-photos
 alias:
   promotion:
     # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲
