@@ -222,7 +222,10 @@ public class UserProfileService {
                 p.getTargetWeightKg(),
                 p.getTargetWeightLbs(),
                 p.getReferralSource(),
-                p.getLocale()
+                p.getLocale(),
+                p.getTimezone(),
+                p.getCreatedAt(),
+                p.getUpdatedAt()
         );
     }
 
