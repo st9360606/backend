@@ -19,7 +19,7 @@ public record UpsertProfileRequest(
         // 目標體重（兩制擇一帶）
         Double  targetWeightKg,
         Double  targetWeightLbs,    // ★ Integer -> Double
-
+        Integer dailyStepGoal,
         String referralSource,
         String locale
 ) {}

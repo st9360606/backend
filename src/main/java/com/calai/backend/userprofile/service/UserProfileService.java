@@ -23,10 +23,15 @@ public class UserProfileService {
     private static final double MAX_WEIGHT_KG = 800.0d;
     private static final double MIN_WEIGHT_LBS = 40.0d;
     private static final double MAX_WEIGHT_LBS = 1000.0d;
+    private static final int DEFAULT_DAILY_STEP_GOAL = 10000;
 
     public UserProfileService(UserProfileRepository repo, UserRepo users) {
         this.repo = repo;
         this.users = users;
+    }
+
+    private static int clampInt(int v, int min, int max) {
+        return Math.max(min, Math.min(max, v));
     }
 
     /** 首次登入或缺資料時：確保至少有一筆最小 Profile（避免前端先遇到 404/401） */
@@ -35,6 +40,7 @@ public class UserProfileService {
         return repo.findByUserId(u.getId()).orElseGet(() -> {
             var np = new UserProfile();
             np.setUser(u);                 // @MapsId: 以 user.id 當 user_id
+            np.setDailyStepGoal(DEFAULT_DAILY_STEP_GOAL);
             // 這裡只給安全預設；不要亂填身高體重避免造成 UI 誤導
             // 可選：np.setLocale("en");
             return repo.save(np);
@@ -70,6 +76,7 @@ public class UserProfileService {
         var p = repo.findByUserId(userId).orElseGet(() -> {
             var np = new UserProfile();
             np.setUser(u);
+            np.setDailyStepGoal(DEFAULT_DAILY_STEP_GOAL); // ✅ NEW：保證預設
             return np;
         });
 
@@ -164,6 +171,11 @@ public class UserProfileService {
         if (r.referralSource() != null) p.setReferralSource(r.referralSource());
         if (r.locale() != null)         p.setLocale(r.locale());
 
+        if (r.dailyStepGoal() != null) {
+            int goal = clampInt(r.dailyStepGoal(), 0, 200000);
+            p.setDailyStepGoal(goal);
+        }
+
         var saved = repo.save(p);
         return toDto(saved);
     }
@@ -221,6 +233,7 @@ public class UserProfileService {
                 p.getGoal(),
                 p.getTargetWeightKg(),
                 p.getTargetWeightLbs(),
+                p.getDailyStepGoal(),
                 p.getReferralSource(),
                 p.getLocale(),
                 p.getTimezone(),

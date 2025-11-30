@@ -14,6 +14,7 @@ public record UserProfileDto(
         String goal,
         Double targetWeightKg,
         Double  targetWeightLbs,
+        Integer dailyStepGoal,
         String referralSource,
         String locale,
         String timezone,
