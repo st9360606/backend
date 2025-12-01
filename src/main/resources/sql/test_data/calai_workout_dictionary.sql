@@ -1,66 +1,3 @@
-/* ============================================================
- * Workout Tracking Schema
- *
- * 功能：
- *  - workout_dictionary : 標準化的運動字典（走路、跑步、騎腳踏車...）
- *  - workout_alias      : 使用者實際輸入的各種語言/別名 → map 到字典
- *  - workout_session    : 使用者一天內實際做了什麼運動、花幾分鐘、估計消耗多少 kcal
- *
- * 注意：
- *  - 我們不在 DB 裡存「歸屬哪一天(當地日曆)」，而是存 UTC-ish 時間戳 (started_at)
- *    前端呼叫 API 時會帶 X-Client-Timezone，後端依那個時區去切 LocalDate.now(zone)
- *    來決定「今天」是什麼範圍。這邏輯在 Service.buildToday() 已處理。
- *
- *  - kcal 的說明文字在 App 會顯示 "estimated calories burned"
- *    不做醫療/療效宣稱，符合 Google Play 健康資料合規要求。
- *
- * Flyway / 本地開發用 NOTE：
- *  - DROP TABLE ... IF EXISTS 僅建議在本地/測試用。上正式環境時請拿掉 DROP。
- * ============================================================
- */
-
--- ============================================================
--- 開發環境方便重建（正式環境請移除 DROP）
--- ============================================================
-DROP TABLE IF EXISTS workout_session;
-DROP TABLE IF EXISTS workout_alias;
-DROP TABLE IF EXISTS workout_dictionary;
-
--- ============================================================
--- 1. workout_dictionary
---
---    這是權威運動清單 (canonical list)，例如：
---      - canonical_key   = 'walking'
---      - display_name_en = 'Walking'
---      - met_value       = 3.5        (MET: 代謝當量)
---      - icon_key        = 'walk'     (前端可根據這個顯示正確 icon)
---
---    kcal 計算公式 (後端):
---        kcal = MET * 使用者體重(kg) * (minutes / 60.0)
---
---    這張表通常是後台/營運在維護，不讓一般使用者直接改。
--- ============================================================
-
-
-CREATE TABLE workout_dictionary
-(
-    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-
-    -- 唯一識別 key，用來當後台/工程師的穩定 ID
-    canonical_key   VARCHAR(64)  NOT NULL UNIQUE,
-
-    -- 英文顯示名稱（目前先用英文顯示給所有語言，之後可擴充 i18n）
-    display_name_en VARCHAR(128) NOT NULL,
-
-    -- MET 值，用來估算消耗熱量
-    met_value DOUBLE NOT NULL,
-
-    -- 前端用來挑 icon，例如 "walk", "run", "bike"
-    icon_key        VARCHAR(32)  NOT NULL,
-
-    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 INSERT INTO workout_dictionary (id, canonical_key, display_name_en, met_value, icon_key)
 VALUES (1, 'walking', 'Walking', 3.5, 'walk'),
        (2, 'running', 'Running', 9.0, 'run'),
@@ -533,25 +470,14 @@ VALUES (1, 'walking', 'Walking', 3.5, 'walk'),
        (397, 'orienteering_night', 'Orienteering (night)', 9.0, 'orienteering_night'),
        (398, 'underwater_hockey', 'Underwater Hockey (Octopush)', 6.0, 'underwater_hockey'),
        (399, 'footbag_freestyle', 'Footbag (freestyle)', 4.0, 'footbag'),
-       (400, 'tug_of_war', 'Tug of War', 6.0, 'tug_of_war') AS new
-ON DUPLICATE KEY
-UPDATE
-    canonical_key = new.canonical_key,
-    display_name_en = new.display_name_en,
-    met_value = new.met_value,
-    icon_key = new.icon_key;
+       (400, 'tug_of_war', 'Tug of War', 6.0, 'tug_of_war')
 
 
--- 建議：確保 canonical_key 唯一
-ALTER TABLE workout_dictionary
-    ADD UNIQUE KEY uq_workout_dictionary_canonical (canonical_key);
-
-
-
--- 字典補齊：Generic / other_exercise（正確欄位名版）
 -- 主條目（一般強度）
-INSERT INTO workout_dictionary (canonical_key, display_name_en, met_value, icon_key)
-VALUES ('other_exercise', 'Other Exercise', 5.0, 'other') ON DUPLICATE KEY
+    INSERT
+INTO workout_dictionary (canonical_key, display_name_en, met_value, icon_key)
+VALUES ('other_exercise', 'Other Exercise', 5.0, 'other')
+ON DUPLICATE KEY
 UPDATE
     display_name_en =
 VALUES (display_name_en), met_value =

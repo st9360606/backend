@@ -1,5 +1,5 @@
 -- ============================================================
--- 3. workout_session
+--     workout_session
 --
 --    使用者實際的一次運動紀錄 (一筆 session)。
 --
@@ -28,24 +28,15 @@
 CREATE TABLE workout_session
 (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-
-    -- 哪個使用者的紀錄
     user_id       BIGINT    NOT NULL,
-
-    -- 參照哪個標準運動
-    dictionary_id BIGINT    NOT NULL,
-
-    -- 這次做了多久
+    dictionary_id BIGINT    NOT NULL, -- 參照哪個標準運動
     minutes       INT       NOT NULL,
-
-    -- 預估消耗熱量 (kcal)
-    kcal          INT       NOT NULL,
+    kcal          INT       NOT NULL, -- 預估消耗熱量 (kcal)
 
     -- 這筆 session 的起始時間點
     -- 後端目前用 Instant.now() -> TIMESTAMP
     -- 注意：這是 UTC-ish 絕對時間戳，後端會再依時區去做 LocalDate 切日
     started_at    TIMESTAMP NOT NULL,
-
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_session_dict
