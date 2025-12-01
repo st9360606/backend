@@ -2,7 +2,8 @@ package com.calai.backend.userprofile.service;
 
 import com.calai.backend.auth.repo.UserRepo;
 import com.calai.backend.userprofile.common.Units;
-import com.calai.backend.userprofile.dto.UpdateTargetWeightRequest;
+
+import com.calai.backend.userprofile.dto.UpdateGoalWeightRequest;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.entity.UserProfile;
@@ -136,30 +137,30 @@ public class UserProfileService {
             }
         }
 
-        // ---------- 目標體重（target）----------
+        // ---------- 目標體重（goal）----------
         {
-            Double reqTargetKg  = r.targetWeightKg();
-            Double reqTargetLbs = r.targetWeightLbs();
+            Double reqGoalKg  = r.goalWeightKg();
+            Double reqGoalLbs = r.goalWeightLbs();
 
-            if (reqTargetKg != null || reqTargetLbs != null) {
+            if (reqGoalKg != null || reqGoalLbs != null) {
                 Double kgToSave;
                 Double lbsToSave;
 
-                if (reqTargetKg != null && reqTargetLbs != null) {
-                    kgToSave  = Units.clamp(reqTargetKg,  MIN_WEIGHT_KG,  MAX_WEIGHT_KG);
-                    lbsToSave = Units.clamp(reqTargetLbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
-                } else if (reqTargetKg != null) {
-                    kgToSave  = Units.clamp(reqTargetKg, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
+                if (reqGoalKg != null && reqGoalLbs != null) {
+                    kgToSave  = Units.clamp(reqGoalKg,  MIN_WEIGHT_KG,  MAX_WEIGHT_KG);
+                    lbsToSave = Units.clamp(reqGoalLbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
+                } else if (reqGoalKg != null) {
+                    kgToSave  = Units.clamp(reqGoalKg, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
                     lbsToSave = Units.kgToLbs1(kgToSave);
                     lbsToSave = Units.clamp(lbsToSave, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
                 } else { // 只有 lbs
-                    lbsToSave = Units.clamp(reqTargetLbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
+                    lbsToSave = Units.clamp(reqGoalLbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
                     kgToSave  = Units.lbsToKg1(lbsToSave);
                     kgToSave  = Units.clamp(kgToSave, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
                 }
 
-                p.setTargetWeightKg(kgToSave);
-                p.setTargetWeightLbs(lbsToSave);
+                p.setGoalWeightKg(kgToSave);
+                p.setGoalWeightLbs(lbsToSave);
             }
         }
 
@@ -186,7 +187,7 @@ public class UserProfileService {
      * - 伺服器負責：clamp + 換算 + 無條件捨去到小數第 1 位 + 同步兩制欄位
      */
     @Transactional
-    public UserProfileDto updateTargetWeight(Long userId, UpdateTargetWeightRequest r) {
+    public UserProfileDto updateGoalWeight(Long userId, UpdateGoalWeightRequest r) {
         if (r == null || r.value() == null || r.unit() == null) {
             throw new IllegalArgumentException("value and unit are required");
         }
@@ -213,8 +214,8 @@ public class UserProfileService {
             throw new IllegalArgumentException("unit must be KG or LBS");
         }
 
-        p.setTargetWeightKg(kgToSave);
-        p.setTargetWeightLbs(lbsToSave);
+        p.setGoalWeightKg(kgToSave);
+        p.setGoalWeightLbs(lbsToSave);
 
         var saved = repo.save(p);
         return toDto(saved);
@@ -231,8 +232,8 @@ public class UserProfileService {
                 p.getWeightLbs(),
                 p.getExerciseLevel(),
                 p.getGoal(),
-                p.getTargetWeightKg(),
-                p.getTargetWeightLbs(),
+                p.getGoalWeightKg(),
+                p.getGoalWeightLbs(),
                 p.getDailyStepGoal(),
                 p.getReferralSource(),
                 p.getLocale(),

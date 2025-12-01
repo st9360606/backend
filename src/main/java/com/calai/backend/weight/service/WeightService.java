@@ -228,12 +228,12 @@ public class WeightService {
         // 先把 user_profiles 撈出來
         var profile = profiles.getOrThrow(uid);
 
-        BigDecimal goalKg = profile.targetWeightKg() != null
-                ? BigDecimal.valueOf(profile.targetWeightKg())
+        BigDecimal goalKg = profile.goalWeightKg() != null
+                ? BigDecimal.valueOf(profile.goalWeightKg())
                 : null;
 
-        BigDecimal goalLbs = profile.targetWeightLbs() != null
-                ? BigDecimal.valueOf(profile.targetWeightLbs())
+        BigDecimal goalLbs = profile.goalWeightLbs() != null
+                ? BigDecimal.valueOf(profile.goalWeightLbs())
                 : null;
 
         BigDecimal profileCurrentKg = profile.weightKg() != null
@@ -483,8 +483,5 @@ public class WeightService {
         if (fn.endsWith(".heif")) return "heif";
         return "jpg";
     }
-
-
-
 
 }

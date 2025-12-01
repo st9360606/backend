@@ -13,7 +13,7 @@ public record SaveHealthPlanRequest(
         Integer age,
         BigDecimal heightCm,
         BigDecimal weightKg,
-        BigDecimal targetWeightKg,
+        BigDecimal goalWeightKg,
         String unitPreference,  // "KG" / "LBS"
         Integer workoutsPerWeek,
 

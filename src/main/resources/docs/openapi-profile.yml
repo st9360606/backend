@@ -46,7 +46,7 @@ components:
         weightKg: { type: number, format: double, nullable: true }
         exerciseLevel: { type: string, nullable: true }
         goal: { type: string, nullable: true }
-        targetWeightKg: { type: number, format: double, nullable: true }
+        goalWeightKg: { type: number, format: double, nullable: true }
         referralSource: { type: string, nullable: true }
         locale: { type: string, nullable: true }
     UpsertProfileRequest:

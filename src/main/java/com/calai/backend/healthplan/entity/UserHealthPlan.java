@@ -36,8 +36,8 @@ public class UserHealthPlan {
     @Column(name = "weight_kg", precision = 5, scale = 2)
     private BigDecimal weightKg;
 
-    @Column(name = "target_weight_kg", precision = 5, scale = 2)
-    private BigDecimal targetWeightKg;
+    @Column(name = "goal_weight_kg", precision = 5, scale = 2)
+    private BigDecimal goalWeightKg;
 
     @Column(name = "unit_preference", nullable = false, length = 8)
     private String unitPreference;
@@ -95,8 +95,8 @@ public class UserHealthPlan {
     public BigDecimal getWeightKg() { return weightKg; }
     public void setWeightKg(BigDecimal weightKg) { this.weightKg = weightKg; }
 
-    public BigDecimal getTargetWeightKg() { return targetWeightKg; }
-    public void setTargetWeightKg(BigDecimal targetWeightKg) { this.targetWeightKg = targetWeightKg; }
+    public BigDecimal getGoalWeightKg() { return goalWeightKg; }
+    public void setGoalWeightKg(BigDecimal goalWeightKg) { this.goalWeightKg = goalWeightKg; }
 
     public String getUnitPreference() { return unitPreference; }
     public void setUnitPreference(String unitPreference) { this.unitPreference = unitPreference; }

@@ -6,19 +6,19 @@ public record UpsertProfileRequest(
 
         // 身高（兩制擇一帶；英制帶齊兩個欄位）
         Double heightCm,
-        Short  heightFeet,         // 新增
-        Short  heightInches,       // 新增
+        Short  heightFeet,
+        Short  heightInches,
 
         // 現在體重（兩制擇一帶）
         Double  weightKg,
-        Double  weightLbs,          // ★ Integer -> Double
+        Double  weightLbs,
 
         String exerciseLevel,
         String goal,
 
         // 目標體重（兩制擇一帶）
-        Double  targetWeightKg,
-        Double  targetWeightLbs,    // ★ Integer -> Double
+        Double  goalWeightKg,
+        Double  goalWeightLbs,
         Integer dailyStepGoal,
         String referralSource,
         String locale

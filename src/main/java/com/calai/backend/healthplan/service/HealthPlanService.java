@@ -36,7 +36,7 @@ public class HealthPlanService {
         e.setAge(req.age());
         e.setHeightCm(req.heightCm());
         e.setWeightKg(req.weightKg());
-        e.setTargetWeightKg(req.targetWeightKg());
+        e.setGoalWeightKg(req.goalWeightKg());
         e.setUnitPreference(nz(req.unitPreference(), "KG"));
         e.setWorkoutsPerWeek(req.workoutsPerWeek());
 

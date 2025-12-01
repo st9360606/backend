@@ -25,8 +25,8 @@ public class UserProfile {
     @Column(name = "exercise_level")private String exerciseLevel;
     @Column(name = "goal")private String goal;
     @Column(name = "daily_step_goal") private Integer dailyStepGoal;
-    @Column(name = "target_weight_kg") private Double targetWeightKg;
-    @Column(name = "target_weight_lbs") private Double targetWeightLbs; // ★ Integer -> Double
+    @Column(name = "goal_weight_kg") private Double goalWeightKg;
+    @Column(name = "goal_weight_lbs") private Double goalWeightLbs; // ★ Integer -> Double
     @Column(name = "referral_source")private String referralSource;
     @Column(name = "locale")private String locale;
     @Column(name = "timezone") private String timezone; // ★ 新增：使用者時區（例如 "Asia/Taipei"）

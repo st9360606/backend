@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS user_health_plan (
   age               SMALLINT      NULL,
   height_cm         DECIMAL(5,2)  NULL,
   weight_kg         DECIMAL(5,2)  NULL,
-  target_weight_kg  DECIMAL(5,2)  NULL,
+  goal_weight_kg  DECIMAL(5,2)  NULL,
   unit_preference   VARCHAR(8)    NOT NULL,            -- KG/LBS
   workouts_per_week TINYINT       NULL,
 
@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS user_health_plan (
   water_ml          INT          NOT NULL,
   bmi               DECIMAL(5,2) NOT NULL,
   bmi_class         VARCHAR(16)  NOT NULL,             -- Underweight/Normal/Overweight/Obesity
-
   created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
