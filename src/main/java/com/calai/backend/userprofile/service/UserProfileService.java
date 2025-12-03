@@ -83,27 +83,23 @@ public class UserProfileService {
 
         // ---------- 身高 ----------
         if (r.heightFeet() != null && r.heightInches() != null) {
-            // 使用者以 ft/in 為主
+            // 使用者以 ft/in 為主：✅ 永遠由 server 依 ft/in 算 cm（忽略 client heightCm，避免資料不一致）
             short ft = r.heightFeet();
             short in = r.heightInches();
 
             p.setHeightFeet(ft);
             p.setHeightInches(in);
 
-            Double cm;
-            if (r.heightCm() != null) {
-                // client 有帶 cm：只做 clamp，不再 floor，避免 170.1 → 170.0
-                cm = Units.clamp(r.heightCm(), MIN_HEIGHT_CM, MAX_HEIGHT_CM);
-            } else {
-                // server 自己算 cm：用 feet+inches → cm，這裡才做 0.1cm floor
-                cm = Units.feetInchesToCm(ft, in);
-                cm = Units.clamp(cm, MIN_HEIGHT_CM, MAX_HEIGHT_CM);
-            }
+            Double cm = Units.feetInchesToCm(ft, in);                 // ✅ 0.1cm floor 在 Units 內
+            cm = Units.clamp(cm, MIN_HEIGHT_CM, MAX_HEIGHT_CM);       // ✅ 再做邊界夾住
             p.setHeightCm(cm);
+
         } else if (r.heightCm() != null) {
-            // 使用者以 cm 為主
+            // 使用者以 cm 為主：只 clamp，不改小數位（前端傳多少就保留多少）
             Double cm = Units.clamp(r.heightCm(), MIN_HEIGHT_CM, MAX_HEIGHT_CM);
             p.setHeightCm(cm);
+
+            // ✅ 清掉英制欄位，避免混用
             p.setHeightFeet(null);
             p.setHeightInches(null);
         }
