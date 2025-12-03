@@ -27,6 +27,37 @@ public class UserProfile {
     @Column(name = "daily_step_goal") private Integer dailyStepGoal;
     @Column(name = "goal_weight_kg") private Double goalWeightKg;
     @Column(name = "goal_weight_lbs") private Double goalWeightLbs; // ★ Integer -> Double
+
+    @Column(name = "unit_preference", nullable = false)
+    private String unitPreference;
+
+    @Column(name = "workouts_per_week")
+    private Integer workoutsPerWeek;
+
+    @Column(name = "kcal", nullable = false)
+    private Integer kcal;
+
+    @Column(name = "carbs_g", nullable = false)
+    private Integer carbsG;
+
+    @Column(name = "protein_g", nullable = false)
+    private Integer proteinG;
+
+    @Column(name = "fat_g", nullable = false)
+    private Integer fatG;
+
+    @Column(name = "water_ml", nullable = false)
+    private Integer waterMl;
+
+    @Column(name = "bmi", nullable = false)
+    private Double bmi;
+
+    @Column(name = "bmi_class", nullable = false)
+    private String bmiClass;
+
+    @Column(name = "calc_version", nullable = false)
+    private String calcVersion;
+
     @Column(name = "referral_source")private String referralSource;
     @Column(name = "locale")private String locale;
     @Column(name = "timezone") private String timezone; // ★ 新增：使用者時區（例如 "Asia/Taipei"）

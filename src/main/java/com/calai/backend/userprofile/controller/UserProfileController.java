@@ -3,6 +3,7 @@ package com.calai.backend.userprofile.controller;
 import com.calai.backend.auth.security.AuthContext;
 
 import com.calai.backend.userprofile.dto.UpdateGoalWeightRequest;
+import com.calai.backend.userprofile.dto.UpsertPlanMetricsRequest;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.service.UserProfileService;
@@ -71,5 +72,17 @@ public class UserProfileController {
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    @PutMapping(
+            path = "/plan-metrics",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<UserProfileDto> upsertPlanMetrics(
+            @Valid @RequestBody UpsertPlanMetricsRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        return ResponseEntity.ok(svc.updatePlanMetrics(uid, req));
     }
 }

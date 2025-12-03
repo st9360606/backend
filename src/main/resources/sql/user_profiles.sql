@@ -51,3 +51,36 @@ CREATE TABLE IF NOT EXISTS user_profiles
         CHECK (daily_step_goal BETWEEN 0 AND 200000)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4;
+
+
+
+
+-- MySQL / InnoDB
+ALTER TABLE user_profiles
+    -- 使用者偏好單位（KG/LBS）
+    ADD COLUMN unit_preference VARCHAR(8) NOT NULL DEFAULT 'KG' AFTER goal_weight_lbs,
+
+    -- 每週運動次數（0..7）
+    ADD COLUMN workouts_per_week TINYINT NULL AFTER unit_preference,
+
+    -- 熱量與宏量（計算結果）
+    ADD COLUMN kcal INT NOT NULL DEFAULT 0 AFTER workouts_per_week,
+    ADD COLUMN protein_g INT NOT NULL DEFAULT 0 AFTER kcal,
+    ADD COLUMN carbs_g INT NOT NULL DEFAULT 0 AFTER protein_g,
+    ADD COLUMN fat_g INT NOT NULL DEFAULT 0 AFTER carbs_g,
+    ADD COLUMN water_ml INT NOT NULL DEFAULT 0 AFTER fat_g,
+
+    -- BMI 與分級（計算結果）
+    ADD COLUMN bmi DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER water_ml,
+    ADD COLUMN bmi_class VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN' AFTER bmi,
+
+    -- 計算版本（方便未來你調公式）
+    ADD COLUMN calc_version VARCHAR(32) NOT NULL DEFAULT 'healthcalc_v1' AFTER bmi_class;
+
+-- （可選）MySQL 8+ 才比較可靠：加 CHECK
+ALTER TABLE user_profiles
+    ADD CONSTRAINT chk_workouts_per_week_range
+        CHECK (workouts_per_week IS NULL OR workouts_per_week BETWEEN 0 AND 7),
+    ADD CONSTRAINT chk_plan_kcal_nonneg CHECK (kcal >= 0),
+    ADD CONSTRAINT chk_plan_macros_nonneg CHECK (carbs_g >= 0 AND protein_g >= 0 AND fat_g >= 0),
+    ADD CONSTRAINT chk_plan_water_nonneg CHECK (water_ml >= 0);

@@ -1,4 +1,4 @@
-package com.calai.backend.weight.jobs;
+package com.calai.backend.weight.job;
 
 import com.calai.backend.common.storage.LocalImageStorage;
 import com.calai.backend.weight.entity.WeightHistory;

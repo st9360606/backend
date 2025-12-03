@@ -2,8 +2,9 @@ package com.calai.backend.userprofile.service;
 
 import com.calai.backend.auth.repo.UserRepo;
 import com.calai.backend.userprofile.common.Units;
-
+import lombok.extern.slf4j.Slf4j;
 import com.calai.backend.userprofile.dto.UpdateGoalWeightRequest;
+import com.calai.backend.userprofile.dto.UpsertPlanMetricsRequest;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.entity.UserProfile;
@@ -12,6 +13,7 @@ import com.calai.backend.users.entity.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 public class UserProfileService {
     private final UserProfileRepository repo;
@@ -228,9 +230,19 @@ public class UserProfileService {
                 p.getWeightLbs(),
                 p.getExerciseLevel(),
                 p.getGoal(),
+                p.getDailyStepGoal(),
                 p.getGoalWeightKg(),
                 p.getGoalWeightLbs(),
-                p.getDailyStepGoal(),
+                p.getUnitPreference(),
+                p.getWorkoutsPerWeek(),
+                p.getKcal(),
+                p.getCarbsG(),
+                p.getProteinG(),
+                p.getFatG(),
+                p.getWaterMl(),
+                p.getBmi(),
+                p.getBmiClass(),
+                p.getCalcVersion(),
                 p.getReferralSource(),
                 p.getLocale(),
                 p.getTimezone(),
@@ -250,5 +262,47 @@ public class UserProfileService {
         });
         return dto;
     }
+
+    @Transactional
+    public UserProfileDto updatePlanMetrics(Long userId, UpsertPlanMetricsRequest r) {
+        if (r == null) throw new IllegalArgumentException("body is required");
+        var p = repo.findByUserId(userId)
+                .orElseGet(() -> ensureDefault(userId)); // ✅ 沒 profile 也能寫入
+
+        String unit = r.unitPreference().trim().toUpperCase();
+        if (!"KG".equals(unit) && !"LBS".equals(unit)) {
+            throw new IllegalArgumentException("unitPreference must be KG or LBS");
+        }
+
+        Integer w = r.workoutsPerWeek();
+        if (w != null && (w < 0 || w > 7)) {
+            throw new IllegalArgumentException("workoutsPerWeek must be 0..7");
+        }
+
+        // 非負防呆（你要更嚴可以改上限）
+        int kcal = Math.max(0, r.kcal());
+        int carbs = Math.max(0, r.carbsG());
+        int protein = Math.max(0, r.proteinG());
+        int fat = Math.max(0, r.fatG());
+        int water = Math.max(0, r.waterMl());
+
+        double bmi = r.bmi();
+        if (bmi < 0) bmi = 0;
+
+        p.setUnitPreference(unit);
+        p.setWorkoutsPerWeek(w);
+        p.setKcal(kcal);
+        p.setCarbsG(carbs);
+        p.setProteinG(protein);
+        p.setFatG(fat);
+        p.setWaterMl(water);
+        p.setBmi(bmi);
+        p.setBmiClass(r.bmiClass());
+        p.setCalcVersion(r.calcVersion());
+
+        var saved = repo.save(p);
+        return toDto(saved);
+    }
+
 
 }
