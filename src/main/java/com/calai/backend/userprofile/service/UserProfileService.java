@@ -1,56 +1,79 @@
 package com.calai.backend.userprofile.service;
 
 import com.calai.backend.auth.repo.UserRepo;
+import com.calai.backend.userprofile.common.PlanMode;
 import com.calai.backend.userprofile.common.Units;
-import lombok.extern.slf4j.Slf4j;
+import com.calai.backend.userprofile.common.WaterMode;
 import com.calai.backend.userprofile.dto.UpdateGoalWeightRequest;
-import com.calai.backend.userprofile.dto.UpsertPlanMetricsRequest;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
 import com.calai.backend.userprofile.entity.UserProfile;
 import com.calai.backend.userprofile.repo.UserProfileRepository;
 import com.calai.backend.users.entity.User;
+import com.calai.backend.weight.repo.WeightTimeseriesRepo;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
 public class UserProfileService {
+
     private final UserProfileRepository repo;
     private final UserRepo users;
+    private final WeightTimeseriesRepo weightSeries;
 
-    // 建議視實際需求調整邊界
     private static final double MIN_HEIGHT_CM = 80.0d;
     private static final double MAX_HEIGHT_CM = 300.0d;
     private static final double MIN_WEIGHT_KG = 20.0d;
     private static final double MAX_WEIGHT_KG = 800.0d;
     private static final double MIN_WEIGHT_LBS = 40.0d;
     private static final double MAX_WEIGHT_LBS = 1000.0d;
+
     private static final int DEFAULT_DAILY_STEP_GOAL = 10000;
 
-    public UserProfileService(UserProfileRepository repo, UserRepo users) {
+    public UserProfileService(UserProfileRepository repo, UserRepo users, WeightTimeseriesRepo weightSeries) {
         this.repo = repo;
         this.users = users;
+        this.weightSeries = weightSeries;
     }
 
     private static int clampInt(int v, int min, int max) {
         return Math.max(min, Math.min(max, v));
     }
 
-    /** 首次登入或缺資料時：確保至少有一筆最小 Profile（避免前端先遇到 404/401） */
+    /** ✅ 新用戶插入不會炸：補齊 NOT NULL 預設值 */
+    private static void applyNotNullDefaults(UserProfile p) {
+        if (p.getDailyStepGoal() == null) p.setDailyStepGoal(DEFAULT_DAILY_STEP_GOAL);
+        if (p.getUnitPreference() == null || p.getUnitPreference().isBlank()) p.setUnitPreference("KG");
+
+        if (p.getKcal() == null) p.setKcal(0);
+        if (p.getCarbsG() == null) p.setCarbsG(0);
+        if (p.getProteinG() == null) p.setProteinG(0);
+        if (p.getFatG() == null) p.setFatG(0);
+
+        if (p.getWaterMl() == null) p.setWaterMl(0);
+        if (p.getWaterMode() == null) p.setWaterMode(WaterMode.AUTO);
+
+        if (p.getBmi() == null) p.setBmi(0.0);
+        if (p.getBmiClass() == null || p.getBmiClass().isBlank()) p.setBmiClass("UNKNOWN");
+
+        if (p.getCalcVersion() == null || p.getCalcVersion().isBlank()) p.setCalcVersion("healthcalc_v1");
+        if (p.getPlanMode() == null) p.setPlanMode(PlanMode.AUTO);
+    }
+
+    /** 首次登入或缺資料時：確保至少有一筆最小 Profile */
     @Transactional
     public UserProfile ensureDefault(User u) {
         return repo.findByUserId(u.getId()).orElseGet(() -> {
             var np = new UserProfile();
-            np.setUser(u);                 // @MapsId: 以 user.id 當 user_id
-            np.setDailyStepGoal(DEFAULT_DAILY_STEP_GOAL);
-            // 這裡只給安全預設；不要亂填身高體重避免造成 UI 誤導
-            // 可選：np.setLocale("en");
+            np.setUser(u);
+            applyNotNullDefaults(np);
             return repo.save(np);
         });
     }
 
-    /** 以 userId 確保存在（便於只拿到 id 的情境） */
     @Transactional
     public UserProfile ensureDefault(Long userId) {
         var u = users.findById(userId).orElseThrow();
@@ -69,44 +92,55 @@ public class UserProfileService {
         return repo.existsByUserId(userId);
     }
 
-    /**
-     * 建立或更新使用者的 Profile。
-     * 身高/體重採兩制同步規則；其他欄位維持「非 null 才覆寫」。
-     */
+    // =========================
+    // ✅ Upsert：新增 allowPlanRecalc（只有 onboarding = true 才會重算宏量）
+    // =========================
+
     @Transactional
     public UserProfileDto upsert(Long userId, UpsertProfileRequest r) {
+        return upsertInternal(userId, r, null, false);
+    }
+
+    @Transactional
+    public UserProfileDto upsert(Long userId, UpsertProfileRequest r, String tz) {
+        return upsertInternal(userId, r, tz, false);
+    }
+
+    @Transactional
+    public UserProfileDto upsert(Long userId, UpsertProfileRequest r, String tz, boolean allowPlanRecalc) {
+        return upsertInternal(userId, r, tz, allowPlanRecalc);
+    }
+
+    @Transactional
+    protected UserProfileDto upsertInternal(Long userId, UpsertProfileRequest r, String tz, boolean allowPlanRecalc) {
         var u = users.findById(userId).orElseThrow();
         var p = repo.findByUserId(userId).orElseGet(() -> {
             var np = new UserProfile();
             np.setUser(u);
-            np.setDailyStepGoal(DEFAULT_DAILY_STEP_GOAL); // ✅ NEW：保證預設
+            applyNotNullDefaults(np);
             return np;
         });
 
         // ---------- 身高 ----------
         if (r.heightFeet() != null && r.heightInches() != null) {
-            // 使用者以 ft/in 為主：✅ 永遠由 server 依 ft/in 算 cm（忽略 client heightCm，避免資料不一致）
             short ft = r.heightFeet();
             short in = r.heightInches();
 
             p.setHeightFeet(ft);
             p.setHeightInches(in);
 
-            Double cm = Units.feetInchesToCm(ft, in);                 // ✅ 0.1cm floor 在 Units 內
-            cm = Units.clamp(cm, MIN_HEIGHT_CM, MAX_HEIGHT_CM);       // ✅ 再做邊界夾住
+            Double cm = Units.feetInchesToCm(ft, in);
+            cm = Units.clamp(cm, MIN_HEIGHT_CM, MAX_HEIGHT_CM);
             p.setHeightCm(cm);
 
         } else if (r.heightCm() != null) {
-            // 使用者以 cm 為主：只 clamp，不改小數位（前端傳多少就保留多少）
             Double cm = Units.clamp(r.heightCm(), MIN_HEIGHT_CM, MAX_HEIGHT_CM);
             p.setHeightCm(cm);
-
-            // ✅ 清掉英制欄位，避免混用
             p.setHeightFeet(null);
             p.setHeightInches(null);
         }
 
-        // ---------- 現在體重（current）----------
+        // ---------- 現在體重（只更新 user_profiles 欄位，不觸發宏量重算） ----------
         {
             Double reqKg  = r.weightKg();
             Double reqLbs = r.weightLbs();
@@ -116,15 +150,13 @@ public class UserProfileService {
                 Double lbsToSave;
 
                 if (reqKg != null && reqLbs != null) {
-                    // 新版 app：兩個都帶，視為「各自都是原始單位」，只 clamp 不改小數
                     kgToSave  = Units.clamp(reqKg,  MIN_WEIGHT_KG,  MAX_WEIGHT_KG);
                     lbsToSave = Units.clamp(reqLbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
                 } else if (reqKg != null) {
-                    // 只有 kg：kg 當原始，lbs 由 server 換算（0.1 無條件捨去）
                     kgToSave  = Units.clamp(reqKg, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
                     lbsToSave = Units.kgToLbs1(kgToSave);
                     lbsToSave = Units.clamp(lbsToSave, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
-                } else { // 只有 lbs
+                } else {
                     lbsToSave = Units.clamp(reqLbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
                     kgToSave  = Units.lbsToKg1(lbsToSave);
                     kgToSave  = Units.clamp(kgToSave, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
@@ -135,7 +167,7 @@ public class UserProfileService {
             }
         }
 
-        // ---------- 目標體重（goal）----------
+        // ---------- 目標體重 ----------
         {
             Double reqGoalKg  = r.goalWeightKg();
             Double reqGoalLbs = r.goalWeightLbs();
@@ -151,7 +183,7 @@ public class UserProfileService {
                     kgToSave  = Units.clamp(reqGoalKg, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
                     lbsToSave = Units.kgToLbs1(kgToSave);
                     lbsToSave = Units.clamp(lbsToSave, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
-                } else { // 只有 lbs
+                } else {
                     lbsToSave = Units.clamp(reqGoalLbs, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
                     kgToSave  = Units.lbsToKg1(lbsToSave);
                     kgToSave  = Units.clamp(kgToSave, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
@@ -162,7 +194,7 @@ public class UserProfileService {
             }
         }
 
-        // ---------- 其他欄位：非 null 才覆寫 ----------
+        // ---------- 其他欄位 ----------
         if (r.gender() != null)         p.setGender(r.gender());
         if (r.age() != null)            p.setAge(r.age());
         if (r.exerciseLevel() != null)  p.setExerciseLevel(r.exerciseLevel());
@@ -175,15 +207,117 @@ public class UserProfileService {
             p.setDailyStepGoal(goal);
         }
 
+        if (r.unitPreference() != null && !r.unitPreference().isBlank()) {
+            String unit = r.unitPreference().trim().toUpperCase();
+            if (!"KG".equals(unit) && !"LBS".equals(unit)) {
+                throw new IllegalArgumentException("unitPreference must be KG or LBS");
+            }
+            p.setUnitPreference(unit);
+        }
+
+        if (r.workoutsPerWeek() != null) {
+            int w = clampInt(r.workoutsPerWeek(), 0, 7);
+            p.setWorkoutsPerWeek(w);
+        } else if (r.exerciseLevel() != null && p.getWorkoutsPerWeek() == null) {
+            Integer w = exerciseLevelToBucket(r.exerciseLevel());
+            if (w != null) p.setWorkoutsPerWeek(w);
+        }
+
+        if (tz != null && !tz.isBlank()) {
+            p.setTimezone(tz.trim());
+        }
+
+        applyNotNullDefaults(p);
+
+        // =========================================================
+        // ✅ 新規則：
+        // - 一般更新：不重算 kcal/P/C/F（不管 AUTO/MANUAL）
+        // - 只有 onboarding（allowPlanRecalc=true）且 planMode==AUTO 才重算宏量
+        // - BMI/BMI_CLASS 永遠更新（體重優先 timeseries 最新）
+        // =========================================================
+        if (allowPlanRecalc && p.getPlanMode() == PlanMode.AUTO) {
+            recalcMacrosOnlyIfPossible(p);
+        }
+
+        // ✅ 永遠更新 BMI / BMI_CLASS（體重來源：timeseries 最新 > profile）
+        recalcBmiFromLatestTimeseriesOrProfile(p, userId);
+
+        // ✅ water AUTO 仍照你原本規則（timeseries 最新 > profile）
+        recalcWaterIfAuto(p);
+
         var saved = repo.save(p);
         return toDto(saved);
     }
 
-    /**
-     * 單純更新「目標體重」的專用方法。
-     * - value + unit 由前端傳進來（KG 或 LBS）
-     * - 伺服器負責：clamp + 換算 + 無條件捨去到小數第 1 位 + 同步兩制欄位
-     */
+    /** ✅ 只重算 kcal/P/C/F（不碰 BMI），避免覆寫 BMI 規則 */
+    private static void recalcMacrosOnlyIfPossible(UserProfile p) {
+        if (!hasBaseForPlan(p)) return;
+
+        var in = new PlanCalculator.Inputs(
+                parseGender(p.getGender()),
+                p.getAge(),
+                p.getHeightCm().floatValue(),
+                p.getWeightKg().floatValue(),
+                safeWorkouts(p.getWorkoutsPerWeek())
+        );
+
+        var split = PlanCalculator.splitForGoalKey(p.getGoal());
+        var plan = PlanCalculator.macroPlanBySplit(in, split, null);
+
+        p.setKcal(plan.kcal());
+        p.setCarbsG(plan.carbsGrams());
+        p.setProteinG(plan.proteinGrams());
+        p.setFatG(plan.fatGrams());
+
+        p.setCalcVersion("healthcalc_v1");
+    }
+
+    /** ✅ BMI 一律用：最新 timeseries 體重 > profile.weightKg */
+    private void recalcBmiFromLatestTimeseriesOrProfile(UserProfile p, Long fallbackUserId) {
+        Double heightCm = p.getHeightCm();
+        if (heightCm == null) return;
+
+        Long uid = (p.getUserId() != null) ? p.getUserId() : fallbackUserId;
+        Double weightKg = resolveWeightKgForBmi(uid, p.getWeightKg());
+        if (weightKg == null) return;
+
+        double bmiRaw = PlanCalculator.bmi(weightKg, heightCm);
+        double bmi1 = Math.round(bmiRaw * 10.0) / 10.0;
+
+        var cls = PlanCalculator.classifyBmi(bmiRaw);
+        p.setBmi(bmi1);
+        p.setBmiClass(cls.name());
+    }
+
+    private Double resolveWeightKgForBmi(Long userId, Double profileFallbackKg) {
+        Double latestKg = weightSeries.findLatest(userId, PageRequest.of(0, 1))
+                .stream()
+                .findFirst()
+                .map(w -> w.getWeightKg() == null ? null : w.getWeightKg().doubleValue())
+                .orElse(null);
+
+        return (latestKg != null) ? latestKg : profileFallbackKg;
+    }
+
+    // =========================
+    // ✅ 給 WeightService 呼叫：只要 timeseries 更新，就同步 BMI/BMI_CLASS
+    // =========================
+    @Transactional
+    public void refreshBmiFromLatestWeightIfPossible(Long userId) {
+        var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
+        applyNotNullDefaults(p);
+
+        // BMI 需要身高
+        if (p.getHeightCm() == null) return;
+
+        // 體重來源：timeseries 最新 > profile
+        recalcBmiFromLatestTimeseriesOrProfile(p, userId);
+        repo.save(p);
+    }
+
+    // =========================
+    // 目標體重（原樣保留）
+    // =========================
     @Transactional
     public UserProfileDto updateGoalWeight(Long userId, UpdateGoalWeightRequest r) {
         if (r == null || r.value() == null || r.unit() == null) {
@@ -198,25 +332,153 @@ public class UserProfileService {
         Double lbsToSave;
 
         if ("KG".equals(unit)) {
-            // 情境 2：使用者以 kg 輸入
             kgToSave  = Units.clamp(r.value(), MIN_WEIGHT_KG, MAX_WEIGHT_KG);
-            lbsToSave = Units.kgToLbs1(kgToSave); // 0.1 lbs 無條件捨去
+            lbsToSave = Units.kgToLbs1(kgToSave);
             lbsToSave = Units.clamp(lbsToSave, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
         } else if ("LBS".equals(unit)) {
-            // 情境 1：使用者以 lbs 輸入
             lbsToSave = Units.clamp(r.value(), MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
-            kgToSave  = Units.lbsToKg1(lbsToSave); // 0.1 kg 無條件捨去
+            kgToSave  = Units.lbsToKg1(lbsToSave);
             kgToSave  = Units.clamp(kgToSave, MIN_WEIGHT_KG, MAX_WEIGHT_KG);
         } else {
-            // 前端請保證只送 KG / LBS，這裡保守一點直接丟錯
             throw new IllegalArgumentException("unit must be KG or LBS");
         }
 
         p.setGoalWeightKg(kgToSave);
         p.setGoalWeightLbs(lbsToSave);
 
+        applyNotNullDefaults(p);
         var saved = repo.save(p);
         return toDto(saved);
+    }
+
+    @Transactional
+    public void refreshAutoWaterIfEnabled(Long userId) {
+        var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
+        applyNotNullDefaults(p);
+
+        if (p.getWaterMode() != WaterMode.AUTO) return;
+
+        Double latestKg = weightSeries.findLatest(userId, PageRequest.of(0, 1))
+                .stream()
+                .findFirst()
+                .map(w -> w.getWeightKg() == null ? null : w.getWeightKg().doubleValue())
+                .orElse(null);
+
+        if (latestKg == null) latestKg = p.getWeightKg();
+        if (latestKg == null) return;
+
+        int water = (int) Math.round(latestKg * 35.0d);
+        if (water < 0) water = 0;
+
+        p.setWaterMl(water);
+        repo.save(p);
+    }
+
+    @Transactional
+    public void setManualPlan(Long userId, int kcal, int proteinG, int carbsG, int fatG) {
+        var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
+
+        p.setKcal(Math.max(0, kcal));
+        p.setProteinG(Math.max(0, proteinG));
+        p.setCarbsG(Math.max(0, carbsG));
+        p.setFatG(Math.max(0, fatG));
+        p.setPlanMode(PlanMode.MANUAL);
+
+        applyNotNullDefaults(p);
+
+        // ✅ 可選：順手把 BMI 也更新（體重以 timeseries 最新為準）
+        recalcBmiFromLatestTimeseriesOrProfile(p, userId);
+
+        repo.save(p);
+    }
+
+    @Transactional
+    public void setPlanMode(Long userId, PlanMode mode) {
+        var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
+
+        if (mode == null) mode = PlanMode.AUTO;
+        p.setPlanMode(mode);
+
+        // ✅ 新規則：切回 AUTO 不重算宏量（只有 onboarding 才能重算）
+        // 但 BMI 可更新（不影響 kcal/P/C/F）
+        applyNotNullDefaults(p);
+        recalcBmiFromLatestTimeseriesOrProfile(p, userId);
+
+        repo.save(p);
+    }
+
+    @Transactional
+    public void setManualWater(Long userId, int waterMl) {
+        var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
+        p.setWaterMl(Math.max(0, waterMl));
+        p.setWaterMode(WaterMode.MANUAL);
+        applyNotNullDefaults(p);
+        repo.save(p);
+    }
+
+    @Transactional
+    public void setWaterMode(Long userId, WaterMode mode) {
+        var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
+        if (mode == null) mode = WaterMode.AUTO;
+        p.setWaterMode(mode);
+
+        if (mode == WaterMode.AUTO) {
+            recalcWaterIfAuto(p); // 立刻算一次
+        }
+
+        applyNotNullDefaults(p);
+        repo.save(p);
+    }
+
+    private static Integer exerciseLevelToBucket(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim().toLowerCase();
+        return switch (s) {
+            case "sedentary" -> 0;
+            case "light" -> 2;
+            case "moderate" -> 4;
+            case "active" -> 6;
+            case "very_active", "very-active" -> 7;
+            default -> null;
+        };
+    }
+
+    private void recalcWaterIfAuto(UserProfile p) {
+        if (p.getWaterMode() != WaterMode.AUTO) return;
+
+        Double kg = weightSeries.findLatest(p.getUserId(), PageRequest.of(0, 1))
+                .stream()
+                .findFirst()
+                .map(x -> x.getWeightKg() == null ? null : x.getWeightKg().doubleValue())
+                .orElse(null);
+
+        if (kg == null) kg = p.getWeightKg();
+        if (kg == null) return;
+
+        int water = (int) Math.round(kg * 35.0d);
+        if (water < 0) water = 0;
+        p.setWaterMl(water);
+    }
+
+    private static boolean hasBaseForPlan(UserProfile p) {
+        return p.getGender() != null
+                && p.getAge() != null
+                && p.getHeightCm() != null
+                && p.getWeightKg() != null;
+    }
+
+    private static int safeWorkouts(Integer w) {
+        if (w == null) return 0;
+        if (w < 0) return 0;
+        if (w > 7) return 7;
+        return w;
+    }
+
+    private static PlanCalculator.Gender parseGender(String raw) {
+        if (raw == null) return PlanCalculator.Gender.Male;
+        String s = raw.trim().toUpperCase();
+        if (s.equals("FEMALE") || s.equals("F")) return PlanCalculator.Gender.Female;
+        return PlanCalculator.Gender.Male;
     }
 
     private static UserProfileDto toDto(UserProfile p) {
@@ -240,8 +502,10 @@ public class UserProfileService {
                 p.getProteinG(),
                 p.getFatG(),
                 p.getWaterMl(),
+                (p.getWaterMode() == null ? "AUTO" : p.getWaterMode().name()),
                 p.getBmi(),
                 p.getBmiClass(),
+                (p.getPlanMode() == null ? "AUTO" : p.getPlanMode().name()),
                 p.getCalcVersion(),
                 p.getReferralSource(),
                 p.getLocale(),
@@ -250,59 +514,4 @@ public class UserProfileService {
                 p.getUpdatedAt()
         );
     }
-
-    @Transactional
-    public UserProfileDto upsert(Long userId, UpsertProfileRequest r, String tz) {
-        var dto = upsert(userId, r);
-        repo.findByUserId(userId).ifPresent(p -> {
-            if (tz != null && !tz.isBlank()) {
-                p.setTimezone(tz);
-                repo.save(p);
-            }
-        });
-        return dto;
-    }
-
-    @Transactional
-    public UserProfileDto updatePlanMetrics(Long userId, UpsertPlanMetricsRequest r) {
-        if (r == null) throw new IllegalArgumentException("body is required");
-        var p = repo.findByUserId(userId)
-                .orElseGet(() -> ensureDefault(userId)); // ✅ 沒 profile 也能寫入
-
-        String unit = r.unitPreference().trim().toUpperCase();
-        if (!"KG".equals(unit) && !"LBS".equals(unit)) {
-            throw new IllegalArgumentException("unitPreference must be KG or LBS");
-        }
-
-        Integer w = r.workoutsPerWeek();
-        if (w != null && (w < 0 || w > 7)) {
-            throw new IllegalArgumentException("workoutsPerWeek must be 0..7");
-        }
-
-        // 非負防呆（你要更嚴可以改上限）
-        int kcal = Math.max(0, r.kcal());
-        int carbs = Math.max(0, r.carbsG());
-        int protein = Math.max(0, r.proteinG());
-        int fat = Math.max(0, r.fatG());
-        int water = Math.max(0, r.waterMl());
-
-        double bmi = r.bmi();
-        if (bmi < 0) bmi = 0;
-
-        p.setUnitPreference(unit);
-        p.setWorkoutsPerWeek(w);
-        p.setKcal(kcal);
-        p.setCarbsG(carbs);
-        p.setProteinG(protein);
-        p.setFatG(fat);
-        p.setWaterMl(water);
-        p.setBmi(bmi);
-        p.setBmiClass(r.bmiClass());
-        p.setCalcVersion(r.calcVersion());
-
-        var saved = repo.save(p);
-        return toDto(saved);
-    }
-
-
 }

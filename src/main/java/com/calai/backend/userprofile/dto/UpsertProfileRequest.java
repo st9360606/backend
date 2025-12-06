@@ -21,5 +21,8 @@ public record UpsertProfileRequest(
         Double  goalWeightLbs,
         Integer dailyStepGoal,
         String referralSource,
-        String locale
+        String locale,
+
+        String unitPreference,
+        Integer workoutsPerWeek
 ) {}

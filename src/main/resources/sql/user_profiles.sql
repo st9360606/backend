@@ -84,3 +84,10 @@ ALTER TABLE user_profiles
     ADD CONSTRAINT chk_plan_kcal_nonneg CHECK (kcal >= 0),
     ADD CONSTRAINT chk_plan_macros_nonneg CHECK (carbs_g >= 0 AND protein_g >= 0 AND fat_g >= 0),
     ADD CONSTRAINT chk_plan_water_nonneg CHECK (water_ml >= 0);
+
+
+ALTER TABLE user_profiles
+    ADD COLUMN plan_mode VARCHAR(16) NOT NULL DEFAULT 'AUTO' AFTER bmi_class;
+
+ALTER TABLE user_profiles
+    ADD COLUMN water_mode VARCHAR(16) NOT NULL DEFAULT 'AUTO'AFTER water_ml;

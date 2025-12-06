@@ -126,6 +126,7 @@ public class WeightService {
         s.setWeightKg(kg);
         s.setWeightLbs(lbs);
         series.save(s);
+        profiles.refreshBmiFromLatestWeightIfPossible(uid);
     }
 
     /** 由 header 解析 IANA 時區，失敗回 UTC（不拒絕請求） */
@@ -185,6 +186,12 @@ public class WeightService {
         s.setWeightKg(kg);
         s.setWeightLbs(lbs);
         series.save(s);
+
+        // ✅ 新規則：只要 timeseries 體重更新，就同步 BMI/BMI_CLASS
+        profiles.refreshBmiFromLatestWeightIfPossible(uid);
+
+        // ✅ 最重要：體重寫入後，同步 Auto water
+        profiles.refreshAutoWaterIfEnabled(uid);
 
         return toItem(h);
     }
