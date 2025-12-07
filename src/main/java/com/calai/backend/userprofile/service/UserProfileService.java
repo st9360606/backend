@@ -33,6 +33,9 @@ public class UserProfileService {
 
     private static final int DEFAULT_DAILY_STEP_GOAL = 10000;
 
+    private static final int MAX_WATER_ML_MALE = 3700;
+    private static final int MAX_WATER_ML_FEMALE = 2700;
+
     public UserProfileService(UserProfileRepository repo, UserRepo users, WeightTimeseriesRepo weightSeries) {
         this.repo = repo;
         this.users = users;
@@ -367,9 +370,7 @@ public class UserProfileService {
         if (latestKg == null) latestKg = p.getWeightKg();
         if (latestKg == null) return;
 
-        int water = (int) Math.round(latestKg * 35.0d);
-        if (water < 0) water = 0;
-
+        int water = calcAutoWaterMl(latestKg, p.getGender());
         p.setWaterMl(water);
         repo.save(p);
     }
@@ -445,18 +446,21 @@ public class UserProfileService {
 
     private void recalcWaterIfAuto(UserProfile p) {
         if (p.getWaterMode() != WaterMode.AUTO) return;
+        Long uid = p.getUserId();
+        if (uid == null && p.getUser() != null) uid = p.getUser().getId();
 
-        Double kg = weightSeries.findLatest(p.getUserId(), PageRequest.of(0, 1))
-                .stream()
-                .findFirst()
-                .map(x -> x.getWeightKg() == null ? null : x.getWeightKg().doubleValue())
-                .orElse(null);
-
+        Double kg = null;
+        if (uid != null) {
+            kg = weightSeries.findLatest(uid, PageRequest.of(0, 1))
+                    .stream()
+                    .findFirst()
+                    .map(x -> x.getWeightKg() == null ? null : x.getWeightKg().doubleValue())
+                    .orElse(null);
+        }
         if (kg == null) kg = p.getWeightKg();
         if (kg == null) return;
 
-        int water = (int) Math.round(kg * 35.0d);
-        if (water < 0) water = 0;
+        int water = calcAutoWaterMl(kg, p.getGender());
         p.setWaterMl(water);
     }
 
@@ -479,6 +483,25 @@ public class UserProfileService {
         String s = raw.trim().toUpperCase();
         if (s.equals("FEMALE") || s.equals("F")) return PlanCalculator.Gender.Female;
         return PlanCalculator.Gender.Male;
+    }
+
+    /** ✅ 只認 "MALE"/"M" 為男性；其他（含 null/OTHER/FEMALE）一律視為女性（較保守） */
+    private static boolean isMaleForWaterCap(String raw) {
+        if (raw == null) return false;
+        String s = raw.trim().toUpperCase();
+        return "MALE".equals(s) || "M".equals(s);
+    }
+
+    private static int waterCapMlByGender(String genderRaw) {
+        return isMaleForWaterCap(genderRaw) ? MAX_WATER_ML_MALE : MAX_WATER_ML_FEMALE;
+    }
+
+    /** ✅ AUTO 水量：round(kg*35) 並套性別上限 */
+    static int calcAutoWaterMl(double weightKg, String genderRaw) {
+        int base = (int) Math.round(weightKg * 35.0d);
+        if (base < 0) base = 0;
+        int cap = waterCapMlByGender(genderRaw);
+        return Math.min(base, cap);
     }
 
     private static UserProfileDto toDto(UserProfile p) {
