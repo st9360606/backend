@@ -1,9 +1,7 @@
 package com.calai.backend.userprofile.service;
 
 import com.calai.backend.auth.repo.UserRepo;
-import com.calai.backend.userprofile.common.PlanMode;
-import com.calai.backend.userprofile.common.Units;
-import com.calai.backend.userprofile.common.WaterMode;
+import com.calai.backend.userprofile.common.*;
 import com.calai.backend.userprofile.dto.UpdateGoalWeightRequest;
 import com.calai.backend.userprofile.dto.UpsertProfileRequest;
 import com.calai.backend.userprofile.dto.UserProfileDto;
@@ -46,7 +44,10 @@ public class UserProfileService {
         return Math.max(min, Math.min(max, v));
     }
 
-    /** ✅ 新用戶插入不會炸：補齊 NOT NULL 預設值 */
+    /**
+     * ✅ 新用戶插入不會炸：補齊 NOT NULL 預設值
+     * 只做「補 null」，不要做「推導值永遠覆寫」
+     */
     private static void applyNotNullDefaults(UserProfile p) {
         if (p.getDailyStepGoal() == null) p.setDailyStepGoal(DEFAULT_DAILY_STEP_GOAL);
         if (p.getUnitPreference() == null || p.getUnitPreference().isBlank()) p.setUnitPreference("KG");
@@ -55,6 +56,14 @@ public class UserProfileService {
         if (p.getCarbsG() == null) p.setCarbsG(0);
         if (p.getProteinG() == null) p.setProteinG(0);
         if (p.getFatG() == null) p.setFatG(0);
+
+        // ✅ 這三個欄位確保 NOT NULL；推導/同步交給 refreshNutritionTargetsFromKcal()
+        if (p.getFiberG() == null) p.setFiberG(NutritionTargets.DEFAULT_FIBER_G);
+        if (p.getSodiumMg() == null) p.setSodiumMg(NutritionTargets.DEFAULT_SODIUM_MG);
+        if (p.getSugarG() == null) {
+            int kcal = Math.max(0, p.getKcal());
+            p.setSugarG(NutritionTargets.SugarMaxG10(kcal));
+        }
 
         if (p.getWaterMl() == null) p.setWaterMl(0);
         if (p.getWaterMode() == null) p.setWaterMode(WaterMode.AUTO);
@@ -66,6 +75,26 @@ public class UserProfileService {
         if (p.getPlanMode() == null) p.setPlanMode(PlanMode.AUTO);
     }
 
+    /**
+     * ✅ 核心修正：任何時候只要「kcal 可能改變」，就用最新 kcal 同步 sugar
+     * sugar = floor(kcal * 0.10 / 4) = floor(kcal / 40)
+     *
+     * 設計決策：sugar 視為推導值（不提供手動編輯），因此每次存檔前都會覆寫成正確值。
+     */
+    static void refreshNutritionTargetsFromKcal(UserProfile p) {
+        if (p == null) return;
+
+        int kcal = 0;
+        if (p.getKcal() != null) kcal = Math.max(0, p.getKcal());
+
+        // 固定欄位（保險：若未來 DB 改 nullable 或舊資料出現 null）
+        if (p.getFiberG() == null) p.setFiberG(NutritionTargets.DEFAULT_FIBER_G);
+        if (p.getSodiumMg() == null) p.setSodiumMg(NutritionTargets.DEFAULT_SODIUM_MG);
+
+        // ✅ 依 kcal 同步 sugar（永遠覆寫，避免出現 kcal=2430 但 sugar=46）
+        p.setSugarG(NutritionTargets.SugarMaxG10(kcal));
+    }
+
     /** 首次登入或缺資料時：確保至少有一筆最小 Profile */
     @Transactional
     public UserProfile ensureDefault(User u) {
@@ -73,6 +102,7 @@ public class UserProfileService {
             var np = new UserProfile();
             np.setUser(u);
             applyNotNullDefaults(np);
+            refreshNutritionTargetsFromKcal(np);
             return repo.save(np);
         });
     }
@@ -121,6 +151,7 @@ public class UserProfileService {
             var np = new UserProfile();
             np.setUser(u);
             applyNotNullDefaults(np);
+            refreshNutritionTargetsFromKcal(np);
             return np;
         });
 
@@ -230,6 +261,7 @@ public class UserProfileService {
             p.setTimezone(tz.trim());
         }
 
+        // 先補齊 null，避免後面計算/存檔炸
         applyNotNullDefaults(p);
 
         // =========================================================
@@ -239,8 +271,11 @@ public class UserProfileService {
         // - BMI/BMI_CLASS 永遠更新（體重優先 timeseries 最新）
         // =========================================================
         if (allowPlanRecalc && p.getPlanMode() == PlanMode.AUTO) {
-            recalcMacrosOnlyIfPossible(p);
+            recalcMacrosOnlyIfPossible(p); // 這裡可能改 kcal
         }
+
+        // ✅ 關鍵：存檔前永遠用最新 kcal 同步 sugar（避免舊值殘留）
+        refreshNutritionTargetsFromKcal(p);
 
         // ✅ 永遠更新 BMI / BMI_CLASS（體重來源：timeseries 最新 > profile）
         recalcBmiFromLatestTimeseriesOrProfile(p, userId);
@@ -310,6 +345,9 @@ public class UserProfileService {
         var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
         applyNotNullDefaults(p);
 
+        // ✅ 保險：存檔前同步 sugar（即使此 API 不改 kcal，也避免舊資料有 null/髒值）
+        refreshNutritionTargetsFromKcal(p);
+
         // BMI 需要身高
         if (p.getHeightCm() == null) return;
 
@@ -319,7 +357,7 @@ public class UserProfileService {
     }
 
     // =========================
-    // 目標體重（原樣保留）
+    // 目標體重（原樣保留，但存檔前同步 sugar）
     // =========================
     @Transactional
     public UserProfileDto updateGoalWeight(Long userId, UpdateGoalWeightRequest r) {
@@ -350,6 +388,8 @@ public class UserProfileService {
         p.setGoalWeightLbs(lbsToSave);
 
         applyNotNullDefaults(p);
+        refreshNutritionTargetsFromKcal(p);
+
         var saved = repo.save(p);
         return toDto(saved);
     }
@@ -372,6 +412,8 @@ public class UserProfileService {
 
         int water = calcAutoWaterMl(latestKg, p.getGender());
         p.setWaterMl(water);
+
+        refreshNutritionTargetsFromKcal(p);
         repo.save(p);
     }
 
@@ -386,6 +428,9 @@ public class UserProfileService {
         p.setPlanMode(PlanMode.MANUAL);
 
         applyNotNullDefaults(p);
+
+        // ✅ 關鍵：手動改 kcal 後也必須同步 sugar
+        refreshNutritionTargetsFromKcal(p);
 
         // ✅ 可選：順手把 BMI 也更新（體重以 timeseries 最新為準）
         recalcBmiFromLatestTimeseriesOrProfile(p, userId);
@@ -403,6 +448,8 @@ public class UserProfileService {
         // ✅ 新規則：切回 AUTO 不重算宏量（只有 onboarding 才能重算）
         // 但 BMI 可更新（不影響 kcal/P/C/F）
         applyNotNullDefaults(p);
+        refreshNutritionTargetsFromKcal(p);
+
         recalcBmiFromLatestTimeseriesOrProfile(p, userId);
 
         repo.save(p);
@@ -413,7 +460,10 @@ public class UserProfileService {
         var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
         p.setWaterMl(Math.max(0, waterMl));
         p.setWaterMode(WaterMode.MANUAL);
+
         applyNotNullDefaults(p);
+        refreshNutritionTargetsFromKcal(p);
+
         repo.save(p);
     }
 
@@ -428,6 +478,8 @@ public class UserProfileService {
         }
 
         applyNotNullDefaults(p);
+        refreshNutritionTargetsFromKcal(p);
+
         repo.save(p);
     }
 
@@ -524,6 +576,9 @@ public class UserProfileService {
                 p.getCarbsG(),
                 p.getProteinG(),
                 p.getFatG(),
+                p.getFiberG(),
+                p.getSugarG(),
+                p.getSodiumMg(),
                 p.getWaterMl(),
                 (p.getWaterMode() == null ? "AUTO" : p.getWaterMode().name()),
                 p.getBmi(),

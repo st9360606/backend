@@ -85,9 +85,23 @@ ALTER TABLE user_profiles
     ADD CONSTRAINT chk_plan_macros_nonneg CHECK (carbs_g >= 0 AND protein_g >= 0 AND fat_g >= 0),
     ADD CONSTRAINT chk_plan_water_nonneg CHECK (water_ml >= 0);
 
-
 ALTER TABLE user_profiles
     ADD COLUMN plan_mode VARCHAR(16) NOT NULL DEFAULT 'AUTO' AFTER bmi_class;
 
 ALTER TABLE user_profiles
     ADD COLUMN water_mode VARCHAR(16) NOT NULL DEFAULT 'AUTO'AFTER water_ml;
+
+/**
+  公式 1) 糖（Free sugars） WHO：應降到 世界衛生組織 10% 上限（一般建議）
+  <10% 總熱量；再降到
+  <5% 會有額外健康益處。
+  SugarG = TDEE_kcal × 0.10 ÷ 4
+
+  2) 纖維（Dietary fibre） USDA 近年公開資料常見建議：成人最好 建議攝取 35 克/日，並偏好「食物中天然存在」的纖維。
+
+  3) 鈉（Sodium） USDA：成人建議 鈉上限 sodiumMaxMg = 2,300 毫克以下
+ */
+ALTER TABLE user_profiles
+    ADD COLUMN fiber_g          INTEGER NOT NULL DEFAULT 35 AFTER fat_g,
+    ADD COLUMN sugar_g INTEGER NOT NULL DEFAULT 0 AFTER fiber_g,
+    ADD COLUMN sodium_mg        INTEGER NOT NULL DEFAULT 2300 AFTER sugar_g;

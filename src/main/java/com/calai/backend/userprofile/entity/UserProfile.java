@@ -59,6 +59,15 @@ public class UserProfile {
     @Column(name = "fat_g", nullable = false)
     private Integer fatG = 0;
 
+    @Column(name = "fiber_g", nullable = false)
+    private Integer fiberG = 35;
+
+    @Column(name = "sugar_g", nullable = false)
+    private Integer sugarG = 0;
+
+    @Column(name = "sodium_mg", nullable = false)
+    private Integer sodiumMg = 2300;
+
     @Column(name = "water_ml", nullable = false)
     private Integer waterMl = 0;
 

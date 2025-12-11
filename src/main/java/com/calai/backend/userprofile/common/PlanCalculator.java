@@ -1,4 +1,4 @@
-package com.calai.backend.userprofile.service;
+package com.calai.backend.userprofile.common;
 
 public class PlanCalculator {
 
