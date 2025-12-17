@@ -2,7 +2,7 @@ package com.calai.backend.auth.service;
 
 
 import com.calai.backend.auth.entity.AuthToken;
-import com.calai.backend.users.entity.User;
+import com.calai.backend.users.user.entity.User;
 import com.calai.backend.auth.repo.AuthTokenRepo;
 import com.calai.backend.auth.utils.SecureToken;
 import org.springframework.beans.factory.annotation.Value;

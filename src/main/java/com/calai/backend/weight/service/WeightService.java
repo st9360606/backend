@@ -1,8 +1,8 @@
 package com.calai.backend.weight.service;
 
 import com.calai.backend.common.storage.LocalImageStorage;
-import com.calai.backend.userprofile.common.Units;
-import com.calai.backend.userprofile.service.UserProfileService;
+import com.calai.backend.users.profile.common.Units;
+import com.calai.backend.users.profile.service.UserProfileService;
 import com.calai.backend.weight.dto.LogWeightRequest;
 import com.calai.backend.weight.dto.SummaryDto;
 import com.calai.backend.weight.dto.WeightItemDto;

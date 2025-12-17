@@ -1,7 +1,7 @@
 // src/main/java/com/calai/backend/workout/job/WorkoutRetentionJob.java
 package com.calai.backend.workout.job;
 
-import com.calai.backend.userprofile.repo.UserProfileRepository;
+import com.calai.backend.users.profile.repo.UserProfileRepository;
 import com.calai.backend.workout.service.WorkoutService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

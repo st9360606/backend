@@ -1,0 +1,38 @@
+package com.calai.backend.users.profile.dto;
+
+import java.time.Instant;
+
+public record UserProfileDto(
+        String gender,
+        Integer age,
+        Double heightCm,
+        Short heightFeet,
+        Short heightInches,
+        Double weightKg,
+        Double weightLbs,
+        String exerciseLevel,
+        String goal,
+        Integer dailyStepGoal,
+        Double goalWeightKg,
+        Double goalWeightLbs,
+        String unitPreference,
+        Integer workoutsPerWeek,
+        Integer kcal,
+        Integer carbsG,
+        Integer proteinG,
+        Integer fatG,
+        Integer fiberG,
+        Integer sugarG,
+        Integer sodiumMg,
+        Integer waterMl,
+        String waterMode,
+        Double bmi,
+        String bmiClass,
+        String planMode,
+        String calcVersion,
+        String referralSource,
+        String locale,
+        String timezone,
+        Instant createdAt,
+        Instant updatedAt
+) {}

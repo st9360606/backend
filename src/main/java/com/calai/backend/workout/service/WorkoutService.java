@@ -1,9 +1,9 @@
 package com.calai.backend.workout.service;
 
 import com.calai.backend.auth.security.AuthContext;
-import com.calai.backend.userprofile.common.Units;
-import com.calai.backend.userprofile.entity.UserProfile;
-import com.calai.backend.userprofile.repo.UserProfileRepository;
+import com.calai.backend.users.profile.common.Units;
+import com.calai.backend.users.profile.entity.UserProfile;
+import com.calai.backend.users.profile.repo.UserProfileRepository;
 import com.calai.backend.workout.dto.*;
 import com.calai.backend.workout.entity.WorkoutAlias;
 import com.calai.backend.workout.entity.WorkoutAliasEvent;
