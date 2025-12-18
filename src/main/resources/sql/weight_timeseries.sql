@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS weight_timeseries
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
 
-DROP VIEW IF EXISTS v_weight_timeseries;
+
 CREATE VIEW v_weight_timeseries AS
 SELECT id,
        user_id,
@@ -22,5 +22,6 @@ SELECT id,
        timezone,
        created_at
 FROM weight_timeseries;
+
 
 CREATE INDEX idx_wt_user_date ON weight_timeseries (user_id, log_date);

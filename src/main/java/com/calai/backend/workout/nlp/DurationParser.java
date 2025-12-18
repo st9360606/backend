@@ -14,11 +14,13 @@ public final class DurationParser {
     private static final String MIN_UNITS_NORM =
             "(?:min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
                     +  "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|मिनट|phut|นาที|menit|minit|"
+                    +  "phut|phút|"
                     +  "分鐘|分钟|分|분)";
 
     private static final String HR_UNITS_NORM  =
             "(?:h|hr|hrs|hour|hours|hora|horas|ore|uur|std|stunden|godz|saat|час|часы|ساعة|ساعات|שעה|"
-                    +  "gio|ชั่วโมง|jam|小时|小時|時間|시간)";
+                    + "gio|giờ|"
+                    + "ชั่วโมง|jam|小时|小時|鐘頭|鐘|時間|시간)";
 
     private static final Pattern P_MIN = Pattern.compile("(\\d{1,4})\\s*" + MIN_UNITS_NORM,
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
@@ -29,13 +31,14 @@ public final class DurationParser {
     /* ========= 半小時（獨立詞）========= */
     private static final Pattern P_HALF_ALONE = Pattern.compile(
             "(?:"
-                    +  "half\\s+(?:an\\s+)?hour\\b"
+                    + "half\\s+(?:an\\s+)?hour\\b"
                     + "|半\\s*(?:個|个)?\\s*(?:小時|小时|鐘頭|鐘|時間)"
                     + "|demi\\s*-?\\s*heure(?:s)?\\b"
                     + "|halbe\\s*stunde\\b"
                     + "|mezz'?\\s*ora\\b|mezza\\s*ora\\b"
                     + "|half\\s*uur\\b"
-                    + "|p(?:oł|ol)\\s*godzin(?:a|y|e)?\\.?\\b|p(?:oł|ol)\\s*godz\\.?\\b"
+                    + "|p(?:ó|o)(?:ł|l)\\s*godzin(?:a|y|e)?\\.?\\b"
+                    + "|p(?:ó|o)(?:ł|l)\\s*godz\\.?\\b"
                     + "|yarim\\s*saat\\b"
                     + "|полчаса\\b|пол\\s*часа\\b"
                     + "|نصف\\s*ساعة"

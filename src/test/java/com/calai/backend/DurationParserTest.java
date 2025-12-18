@@ -126,4 +126,8 @@ class DurationParserTest {
         assertEquals(150, DurationParser.parseMinutes("2:00 + 0.5h + 20 min - 0.5h + 30min"));
         assertEquals(95,  DurationParser.parseMinutes("1.5h + 5 minutes"));
     }
+
+    @Test void vietnamese_hours_raw_should_pass() {
+        assertEquals(120, DurationParser.parseMinutes("2 giờ"));
+    }
 }

@@ -14,8 +14,6 @@ CREATE TABLE IF NOT EXISTS weight_history
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
 
-
-DROP VIEW IF EXISTS v_weight_history;
 CREATE VIEW v_weight_history AS
 SELECT id,
        user_id,
@@ -27,5 +25,6 @@ SELECT id,
        created_at,
        updated_at
 FROM weight_history;
+
 
 CREATE INDEX idx_wh_user_date ON weight_history (user_id, log_date);

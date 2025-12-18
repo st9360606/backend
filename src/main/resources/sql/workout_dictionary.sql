@@ -20,13 +20,6 @@
  */
 
 -- ============================================================
--- 開發環境方便重建（正式環境請移除 DROP）
--- ============================================================
-DROP TABLE IF EXISTS workout_session;
-DROP TABLE IF EXISTS workout_alias;
-DROP TABLE IF EXISTS workout_dictionary;
-
--- ============================================================
 -- 1. workout_dictionary
 --
 --    這是權威運動清單 (canonical list)，例如：
@@ -542,45 +535,16 @@ UPDATE
     icon_key = new.icon_key;
 
 
--- 建議：確保 canonical_key 唯一
-ALTER TABLE workout_dictionary
-    ADD UNIQUE KEY uq_workout_dictionary_canonical (canonical_key);
-
-
-
 -- 字典補齊：Generic / other_exercise（正確欄位名版）
--- 主條目（一般強度）
 INSERT INTO workout_dictionary (canonical_key, display_name_en, met_value, icon_key)
-VALUES ('other_exercise', 'Other Exercise', 5.0, 'other') ON DUPLICATE KEY
-UPDATE
-    display_name_en =
-VALUES (display_name_en), met_value =
-VALUES (met_value), icon_key =
-VALUES (icon_key);
+VALUES
+    ('other_exercise',      'Other Exercise',             5.0, 'other'),
+    ('other_exercise_low',  'Other Exercise (Low)',       3.5, 'other_low'),
+    ('other_exercise_mid',  'Other Exercise (Moderate)',  5.0, 'other_mid'),
+    ('other_exercise_high', 'Other Exercise (Vigorous)',  7.0, 'other_high')
+    AS src
+ON DUPLICATE KEY UPDATE
+                     display_name_en = src.display_name_en,
+                     met_value       = src.met_value,
+                     icon_key        = src.icon_key;
 
--- 低強度
-INSERT INTO workout_dictionary (canonical_key, display_name_en, met_value, icon_key)
-VALUES ('other_exercise_low', 'Other Exercise (Low)', 3.5, 'other_low') ON DUPLICATE KEY
-UPDATE
-    display_name_en =
-VALUES (display_name_en), met_value =
-VALUES (met_value), icon_key =
-VALUES (icon_key);
-
--- 中強度
-INSERT INTO workout_dictionary (canonical_key, display_name_en, met_value, icon_key)
-VALUES ('other_exercise_mid', 'Other Exercise (Moderate)', 5.0, 'other_mid') ON DUPLICATE KEY
-UPDATE
-    display_name_en =
-VALUES (display_name_en), met_value =
-VALUES (met_value), icon_key =
-VALUES (icon_key);
-
--- 高強度
-INSERT INTO workout_dictionary (canonical_key, display_name_en, met_value, icon_key)
-VALUES ('other_exercise_high', 'Other Exercise (Vigorous)', 7.0, 'other_high') ON DUPLICATE KEY
-UPDATE
-    display_name_en =
-VALUES (display_name_en), met_value =
-VALUES (met_value), icon_key =
-VALUES (icon_key);

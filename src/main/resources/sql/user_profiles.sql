@@ -105,3 +105,5 @@ ALTER TABLE user_profiles
     ADD COLUMN fiber_g          INTEGER NOT NULL DEFAULT 35 AFTER fat_g,
     ADD COLUMN sugar_g INTEGER NOT NULL DEFAULT 0 AFTER fiber_g,
     ADD COLUMN sodium_mg        INTEGER NOT NULL DEFAULT 2300 AFTER sugar_g;
+
+CREATE INDEX idx_user_profiles_timezone ON user_profiles (timezone);

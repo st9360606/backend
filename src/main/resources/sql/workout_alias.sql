@@ -1,8 +1,5 @@
-SET NAMES utf8mb4;
-START TRANSACTION;
-
 -- 1) 建表（若不存在）
-CREATE TABLE IF NOT EXISTS workout_alias
+CREATE TABLE workout_alias
 (
     id                BIGINT AUTO_INCREMENT PRIMARY KEY,
     dictionary_id     BIGINT                                 NULL,
@@ -24,8 +21,13 @@ CREATE TABLE IF NOT EXISTS workout_alias
   COLLATE = utf8mb4_unicode_ci;
 
 
+-- ✅ 建議加索引：查 alias 會用到
+CREATE INDEX idx_alias_lang_status ON workout_alias (lang_tag, status);
+CREATE INDEX idx_alias_dict_status ON workout_alias (dictionary_id, status);
+CREATE INDEX idx_alias_last_seen ON workout_alias (last_seen);
+
+
 -- 4) 33 語言臨時表（自你的 Kotlin 清單）
-DROP TEMPORARY TABLE IF EXISTS tmp_langs;
 CREATE TEMPORARY TABLE tmp_langs
 (
     lang_tag VARCHAR(16) PRIMARY KEY
@@ -13687,8 +13689,6 @@ ALTER TABLE workout_alias
 CREATE INDEX idx_alias_lang_phrase_status
     ON workout_alias (lang_tag, phrase_lower, status);
 
-CREATE INDEX idx_alias_event_user_created
-    ON workout_alias_event (user_id, created_at);
 
 -- 建 UNIQUE：uk_alias_lang_phrase
 SET @exists := (SELECT COUNT(*)
@@ -13716,15 +13716,3 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- 建索引：idx_alias_event_user_created
-SET @exists := (SELECT COUNT(*)
-                FROM information_schema.statistics
-                WHERE table_schema = DATABASE()
-                  AND table_name = 'workout_alias_event'
-                  AND index_name = 'idx_alias_event_user_created');
-SET @sql := IF(@exists = 0,
-               'CREATE INDEX idx_alias_event_user_created ON workout_alias_event (user_id, created_at)',
-               'SELECT "idx_alias_event_user_created exists"');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;

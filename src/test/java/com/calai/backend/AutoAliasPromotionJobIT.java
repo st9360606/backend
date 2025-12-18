@@ -1,8 +1,9 @@
-package com.calai.backend.workout.job;
+// src/test/java/com/calai/backend/AutoAliasPromotionJobIT.java
+package com.calai.backend;
 
-import com.calai.backend.BackendApplication;
 import com.calai.backend.workout.entity.WorkoutAliasEvent;
 import com.calai.backend.workout.entity.WorkoutDictionary;
+import com.calai.backend.workout.job.AutoAliasPromotionJob;
 import com.calai.backend.workout.repo.WorkoutAliasEventRepo;
 import com.calai.backend.workout.repo.WorkoutAliasRepo;
 import com.calai.backend.workout.repo.WorkoutDictionaryRepo;
@@ -11,15 +12,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.time.Instant;
+import java.util.UUID;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * 修正點：
- * - 改用 IntStream.rangeClosed 讓 uid 成為 lambda 參數 (effectively final)。
- * - 或者你也可以用傳統 for 迴圈，完全避開 lambda。
- */
 @SpringBootTest(classes = BackendApplication.class)
 class AutoAliasPromotionJobIT {
 
@@ -31,35 +28,38 @@ class AutoAliasPromotionJobIT {
     @Test
     void should_promote_when_thresholds_met() {
         final String lang = "th";
-        final String phrase = "เวทเทรนนิ่ง"; // 範例片語
 
-        // 準備一個字典（保證存在）
+        // ✅ 每次跑都獨一無二，避免撞到舊資料/別的測試
+        final String phrase = ("เวทเทรนนิ่ง-" + UUID.randomUUID()).toLowerCase();
+
         final WorkoutDictionary dict = dictRepo.findAll().stream()
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("No WorkoutDictionary found"));
 
-        // 清殘留，避免互相污染
+        // ✅ 清乾淨：alias + events 都要清
         aliasRepo.findAnyByLangAndPhrase(lang, phrase)
                 .ifPresent(a -> aliasRepo.deleteById(a.getId()));
+        eventRepo.deleteByLangAndPhrase(lang, phrase);
 
-        // 生成事件資料：
-        // 三位不同 user（10,11,12），每人 3 筆非 generic、score=0.95 → 共 9 筆
-        // 這樣可滿足 minUsers=3, minCount=7, minMedian=0.88 的預設門檻
+        // ✅ 確保在 windowDays(30) 內：用 now-1h
+        final Instant withinWindow = Instant.now().minusSeconds(3600);
+
+        // 3 users (10,11,12) each 3 events, score=0.95, non-generic => 9 events
         IntStream.rangeClosed(10, 12).forEach(uid -> {
             for (int i = 0; i < 3; i++) {
                 WorkoutAliasEvent e = new WorkoutAliasEvent();
-                e.setUserId((long) uid);       // ← 這裡 uid 是 lambda 參數，本身 effectively final
+                e.setUserId((long) uid);
                 e.setLangTag(lang);
                 e.setPhraseLower(phrase);
                 e.setMatchedDict(dict);
                 e.setScore(0.95);
                 e.setUsedGeneric(false);
-                e.setCreatedAt(Instant.now().minusSeconds(3600));
+                e.setCreatedAt(withinWindow);
                 eventRepo.save(e);
             }
         });
 
-        // 額外加兩筆 generic（不計分）
+        // 2 generic events
         for (int i = 0; i < 2; i++) {
             WorkoutAliasEvent e = new WorkoutAliasEvent();
             e.setUserId(99L);
@@ -72,10 +72,21 @@ class AutoAliasPromotionJobIT {
             eventRepo.save(e);
         }
 
+        // ✅ 先 flush：避免 job 讀不到剛寫入的資料（同 DB、不同 transaction 時很常見）
+        eventRepo.flush();
+
         // 執行批次
         job.run();
 
-        var opt = aliasRepo.findAnyByLangAndPhrase(lang, phrase);
+        // ✅ 若 job 內部是非同步（你 log thread 名 alias-prom-1 很像），這裡可能查太快
+        // 先給你「不引入新套件」的最小等待：輪詢幾次
+        var opt = java.util.Optional.<com.calai.backend.workout.entity.WorkoutAlias>empty();
+        for (int i = 0; i < 20; i++) {
+            opt = aliasRepo.findAnyByLangAndPhrase(lang, phrase);
+            if (opt.isPresent()) break;
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+        }
+
         assertThat(opt).isPresent();
 
         var a = opt.get();

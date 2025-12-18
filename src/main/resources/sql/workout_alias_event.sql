@@ -1,5 +1,5 @@
 -- 事件表（append-only）
-CREATE TABLE IF NOT EXISTS workout_alias_event
+CREATE TABLE workout_alias_event
 (
     id              BIGINT        NOT NULL AUTO_INCREMENT PRIMARY KEY,
     user_id         BIGINT        NOT NULL,
@@ -17,13 +17,18 @@ CREATE INDEX idx_event_created_at ON workout_alias_event (created_at);
 CREATE INDEX idx_event_lang_phrase ON workout_alias_event (lang_tag, phrase_lower);
 CREATE INDEX idx_alias_event_user_created_at ON workout_alias_event (user_id, created_at);
 
--- UserProfileRepository 查時區用欄位 timezone（請先確保欄位存在）
--- 若尚未有 timezone 欄位，可先新增並以 'UTC' 或伺服器預設填值
-ALTER TABLE user_profiles
-    ADD COLUMN timezone VARCHAR(64) NULL AFTER locale;
-
-CREATE INDEX idx_user_profiles_timezone ON user_profiles (timezone);
-
+-- 建索引：idx_alias_event_user_created
+SET @exists := (SELECT COUNT(*)
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'workout_alias_event'
+                  AND index_name = 'idx_alias_event_user_created');
+SET @sql := IF(@exists = 0,
+               'CREATE INDEX idx_alias_event_user_created ON workout_alias_event (user_id, created_at)',
+               'SELECT "idx_alias_event_user_created exists"');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 
 

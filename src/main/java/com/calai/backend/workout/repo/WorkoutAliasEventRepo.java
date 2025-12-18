@@ -2,9 +2,10 @@ package com.calai.backend.workout.repo;
 
 import com.calai.backend.workout.entity.WorkoutAliasEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-
+import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 
@@ -24,5 +25,13 @@ public interface WorkoutAliasEventRepo extends JpaRepository<WorkoutAliasEvent, 
     """)
     long countDistinctPhrasesSince(@Param("uid") Long userId, @Param("since") Instant since);
 
-
+    @Modifying
+    @Transactional
+    @Query("""
+        delete from WorkoutAliasEvent e
+        where e.langTag = :lang
+          and e.phraseLower = :phrase
+    """)
+    int deleteByLangAndPhrase(@Param("lang") String lang,
+                              @Param("phrase") String phrase);
 }
