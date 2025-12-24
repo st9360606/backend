@@ -3,6 +3,7 @@ package com.calai.backend.users.profile.controller;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.users.profile.common.PlanMode;
 import com.calai.backend.users.profile.common.WaterMode;
+import com.calai.backend.users.profile.dto.NutritionGoalsManualRequest;
 import com.calai.backend.users.profile.service.UserProfileService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -58,6 +59,23 @@ public class ProfilePlanController {
     public ResponseEntity<Void> setWaterMode(@Valid @RequestBody WaterModeRequest req) {
         Long uid = auth.requireUserId();
         service.setWaterMode(uid, req.mode());
+        return ResponseEntity.noContent().build();
+    }
+    @PutMapping("/nutrition-goals-manual")
+    public ResponseEntity<Void> setManualNutritionGoals(
+            @Valid @RequestBody NutritionGoalsManualRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        service.setManualNutritionGoals(
+                uid,
+                req.kcal(),
+                req.proteinG(),
+                req.carbsG(),
+                req.fatG(),
+                req.fiberG(),
+                req.sugarG(),
+                req.sodiumMg()
+        );
         return ResponseEntity.noContent().build();
     }
 }

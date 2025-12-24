@@ -19,9 +19,4 @@ public final class NutritionTargets {
         return (int) Math.floor(safe * 0.10d / 4.0d);
     }
 
-    // （可選）<5% 額外益處：如果未來你要做進階顯示
-    public static int freeSugarMaxG5(int kcal) {
-        int safe = Math.max(0, kcal);
-        return (int) Math.floor(safe * 0.05d / 4.0d);
-    }
 }

@@ -8,11 +8,14 @@ import com.calai.backend.users.profile.dto.UserProfileDto;
 import com.calai.backend.users.profile.entity.UserProfile;
 import com.calai.backend.users.profile.repo.UserProfileRepository;
 import com.calai.backend.users.user.entity.User;
+import com.calai.backend.weight.entity.WeightTimeseries;
 import com.calai.backend.weight.repo.WeightTimeseriesRepo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -40,8 +43,8 @@ public class UserProfileService {
         this.weightSeries = weightSeries;
     }
 
-    private static int clampInt(int v, int min, int max) {
-        return Math.max(min, Math.min(max, v));
+    private static int clampInt(int v, int max) {
+        return Math.max(0, Math.min(max, v));
     }
 
     /**
@@ -78,21 +81,25 @@ public class UserProfileService {
     /**
      * ✅ 核心修正：任何時候只要「kcal 可能改變」，就用最新 kcal 同步 sugar
      * sugar = floor(kcal * 0.10 / 4) = floor(kcal / 40)
-     *
      * 設計決策：sugar 視為推導值（不提供手動編輯），因此每次存檔前都會覆寫成正確值。
      */
     static void refreshNutritionTargetsFromKcal(UserProfile p) {
         if (p == null) return;
 
-        int kcal = 0;
-        if (p.getKcal() != null) kcal = Math.max(0, p.getKcal());
+        int kcal = (p.getKcal() == null) ? 0 : Math.max(0, p.getKcal());
 
-        // 固定欄位（保險：若未來 DB 改 nullable 或舊資料出現 null）
         if (p.getFiberG() == null) p.setFiberG(NutritionTargets.DEFAULT_FIBER_G);
         if (p.getSodiumMg() == null) p.setSodiumMg(NutritionTargets.DEFAULT_SODIUM_MG);
 
-        // ✅ 依 kcal 同步 sugar（永遠覆寫，避免出現 kcal=2430 但 sugar=46）
-        p.setSugarG(NutritionTargets.SugarMaxG10(kcal));
+        // ✅ AUTO：同步；MANUAL：不覆寫（除非 null）
+        PlanMode mode = p.getPlanMode();
+        boolean isAuto = (mode == null) || (mode == PlanMode.AUTO);
+
+        if (isAuto) {
+            p.setSugarG(NutritionTargets.SugarMaxG10(kcal));
+        } else {
+            if (p.getSugarG() == null) p.setSugarG(NutritionTargets.SugarMaxG10(kcal));
+        }
     }
 
     /** 首次登入或缺資料時：確保至少有一筆最小 Profile */
@@ -237,7 +244,7 @@ public class UserProfileService {
         if (r.locale() != null)         p.setLocale(r.locale());
 
         if (r.dailyStepGoal() != null) {
-            int goal = clampInt(r.dailyStepGoal(), 0, 200000);
+            int goal = clampInt(r.dailyStepGoal(), 200000);
             p.setDailyStepGoal(goal);
         }
 
@@ -250,7 +257,7 @@ public class UserProfileService {
         }
 
         if (r.workoutsPerWeek() != null) {
-            int w = clampInt(r.workoutsPerWeek(), 0, 7);
+            int w = clampInt(r.workoutsPerWeek(), 7);
             p.setWorkoutsPerWeek(w);
         } else if (r.exerciseLevel() != null && p.getWorkoutsPerWeek() == null) {
             Integer w = exerciseLevelToBucket(r.exerciseLevel());
@@ -328,14 +335,16 @@ public class UserProfileService {
     }
 
     private Double resolveWeightKgForBmi(Long userId, Double profileFallbackKg) {
-        Double latestKg = weightSeries.findLatest(userId, PageRequest.of(0, 1))
+        if (userId == null) return profileFallbackKg;
+        return weightSeries.findLatest(userId, PageRequest.of(0, 1))
                 .stream()
+                .map(WeightTimeseries::getWeightKg)
+                .filter(Objects::nonNull)
                 .findFirst()
-                .map(w -> w.getWeightKg() == null ? null : w.getWeightKg().doubleValue())
-                .orElse(null);
-
-        return (latestKg != null) ? latestKg : profileFallbackKg;
+                .map(BigDecimal::doubleValue)
+                .orElse(profileFallbackKg);
     }
+
 
     // =========================
     // ✅ 給 WeightService 呼叫：只要 timeseries 更新，就同步 BMI/BMI_CLASS
@@ -592,4 +601,32 @@ public class UserProfileService {
                 p.getUpdatedAt()
         );
     }
+
+    @Transactional
+    public void setManualNutritionGoals(
+            Long userId,
+            int kcal, int proteinG, int carbsG, int fatG,
+            int fiberG, int sugarG, int sodiumMg
+    ) {
+        var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
+
+        p.setKcal(Math.max(0, kcal));
+        p.setProteinG(Math.max(0, proteinG));
+        p.setCarbsG(Math.max(0, carbsG));
+        p.setFatG(Math.max(0, fatG));
+
+        p.setFiberG(Math.max(0, fiberG));
+        p.setSugarG(Math.max(0, sugarG));
+        p.setSodiumMg(Math.max(0, sodiumMg));
+
+        p.setPlanMode(PlanMode.MANUAL);
+        applyNotNullDefaults(p);
+
+        // ✅ BMI/水量照你既有邏輯更新（可留可不留）
+        recalcBmiFromLatestTimeseriesOrProfile(p, userId);
+        recalcWaterIfAuto(p);
+
+        repo.save(p);
+    }
+
 }
