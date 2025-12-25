@@ -18,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import org.springframework.dao.DataIntegrityViolationException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -790,8 +790,18 @@ public class UserProfileService {
         weightSeries.save(s);
     }
 
+
     @Transactional
     public UserProfileDto commitAutoGoals(Long userId, AutoGoalsRequest req, String tzHeader) {
+        log.info("commitAutoGoals uid={} tzHeader={} req={}",
+                userId, tzHeader,
+                String.format("hCm=%s ft=%s in=%s wKg=%s wLbs=%s workouts=%s goalKey=%s",
+                        req.heightCm(), req.heightFeet(), req.heightInches(),
+                        req.weightKg(), req.weightLbs(),
+                        req.workoutsPerWeek(), req.goalKey()
+                )
+        );
+
         var p = repo.findByUserId(userId).orElseGet(() -> ensureDefault(userId));
         applyNotNullDefaults(p);
 
@@ -858,6 +868,7 @@ public class UserProfileService {
                 p.setExerciseLevel(level);
             }
         }
+
         p.setGoal(m.goalKey()); // 已驗證必填
 
         // ✅ 若 commit 有帶 tzHeader，順便寫回 profile.timezone（讓後續行為一致）
@@ -900,17 +911,15 @@ public class UserProfileService {
         var saved = repo.save(p);
 
         // =========================================================
-        // ✅ 風險消除：只在「完全沒有任何體重資料」時，才 seed baseline
-        // - 避免覆蓋既有同日拍照/手動輸入的體重
-        // - onboarding 只需要一個起始點即可
+        // ✅ 核心修改：不管新舊用戶，永遠把「本次 commit 的體重」寫入同日兩張表
+        // - 一天最多一筆：由 uq(user_id, log_date) 保證
+        // - 同日覆蓋：kg/lbs 更新，但不動 photoUrl（你的 upsert helper 已做到）
         // =========================================================
-        boolean hasAnyHistory = !weightHistory.findAllByUserDesc(userId, PageRequest.of(0, 1)).isEmpty();
-        boolean hasAnySeries  = !weightSeries.findLatest(userId, PageRequest.of(0, 1)).isEmpty();
+        ZoneId zone = parseZonePreferHeaderOrProfileOrUtc(tzHeader, saved.getTimezone());
+        LocalDate logDate = LocalDate.now(zone);
 
-        if (!hasAnyHistory && !hasAnySeries && saved.getWeightKg() != null) {
-            ZoneId zone = parseZonePreferHeaderOrProfileOrUtc(tzHeader, saved.getTimezone());
-            LocalDate logDate = LocalDate.now(zone);
-
+        // saved.getWeightKg() 理論上必有（missing 已檢查），但保險一層
+        if (saved.getWeightKg() != null) {
             double kgVal = Units.clamp(saved.getWeightKg(), MIN_WEIGHT_KG, MAX_WEIGHT_KG);
 
             double lbsVal;
@@ -921,22 +930,40 @@ public class UserProfileService {
                 lbsVal = Units.clamp(lbsVal, MIN_WEIGHT_LBS, MAX_WEIGHT_LBS);
             }
 
-            upsertWeightSnapshotSameDay(userId, logDate, zone, kgVal, lbsVal);
+            // ✅ 推薦：用 retry 版本（避免並發下 unique constraint 偶發）
+            upsertWeightSnapshotSameDayWithRetry(userId, logDate, zone, kgVal, lbsVal);
+            // 若你不要 retry，就改成：
+            // upsertWeightSnapshotSameDay(userId, logDate, zone, kgVal, lbsVal);
         }
 
         return toDto(saved);
     }
 
+    /**
+     * ✅ 同日 upsert（並發保險版）
+     * - 遇到 race 造成 unique constraint（DataIntegrityViolationException）就重試一次
+     */
+    private void upsertWeightSnapshotSameDayWithRetry(
+            Long userId, LocalDate logDate, ZoneId zone, double kgVal, double lbsVal
+    ) {
+        try {
+            upsertWeightSnapshotSameDay(userId, logDate, zone, kgVal, lbsVal);
+        } catch (DataIntegrityViolationException e) {
+            // 可能是同日並發建立造成的 unique constraint race：重抓再存
+            upsertWeightSnapshotSameDay(userId, logDate, zone, kgVal, lbsVal);
+        }
+    }
 
     // ✅ 優先用 header；沒有就用 profile.timezone；最後 UTC
-    private static java.time.ZoneId parseZonePreferHeaderOrProfileOrUtc(String tzHeader, String profileTz) {
+    private static ZoneId parseZonePreferHeaderOrProfileOrUtc(String tzHeader, String profileTz) {
         String raw = (tzHeader != null && !tzHeader.isBlank())
                 ? tzHeader.trim()
                 : (profileTz != null && !profileTz.isBlank() ? profileTz.trim() : "UTC");
         try {
-            return java.time.ZoneId.of(raw);
+            return ZoneId.of(raw);
         } catch (Exception e) {
-            return java.time.ZoneId.of("UTC");
+            return ZoneId.of("UTC");
         }
     }
+
 }
