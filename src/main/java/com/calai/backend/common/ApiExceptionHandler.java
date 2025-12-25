@@ -1,5 +1,7 @@
 package com.calai.backend.common;
 
+import com.calai.backend.users.auto_generate_goals.dto.MissingFieldsResponse;
+import com.calai.backend.users.auto_generate_goals.exception.MissingFieldsException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -23,7 +25,7 @@ public class ApiExceptionHandler {
 
     // ===== 400 Bad Request =====
 
-    @ExceptionHandler({IllegalArgumentException.class, DateTimeException.class})
+    @ExceptionHandler({DateTimeException.class})
     public ResponseEntity<Map<String, Object>> handleBadRequest(Exception ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(err("BAD_REQUEST", ex.getMessage()));
@@ -82,5 +84,27 @@ public class ApiExceptionHandler {
         m.put("code", code);
         if (message != null && !message.isBlank()) m.put("message", message);
         return m;
+    }
+
+    @ExceptionHandler(MissingFieldsException.class)
+    public ResponseEntity<MissingFieldsResponse> handleMissing(MissingFieldsException e) {
+        return ResponseEntity.badRequest().body(
+                new MissingFieldsResponse(
+                        "AUTO_GOALS_MISSING_FIELDS",
+                        e.getMissingFields(),
+                        e.getMessage()
+                )
+        );
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<MissingFieldsResponse> handleIllegalArgument(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(
+                new MissingFieldsResponse(
+                        "BAD_REQUEST",
+                        java.util.List.of(),
+                        e.getMessage()
+                )
+        );
     }
 }
