@@ -29,6 +29,12 @@ public class DailyActivityService {
      * kcal ≈ weightKg × steps × 0.0005
      */
     private static final double COEFF = 0.0005d;
+    private static final String PKG_GOOGLE_FIT = "com.google.android.apps.fitness";
+    private static final String PKG_SAMSUNG_HEALTH = "com.sec.android.app.shealth";
+
+    private static final String ORIGIN_GOOGLE_FIT = "Google Fit";
+    private static final String ORIGIN_SAMSUNG_HEALTH = "Samsung Health";
+    private static final String ORIGIN_OTHER = "Other";
 
     public record UpsertReq(
             LocalDate localDate,
@@ -91,7 +97,9 @@ public class DailyActivityService {
 
         e.setIngestSource(ingest);
         e.setDataOriginPackage(req.dataOriginPackage());
-        e.setDataOriginName(req.dataOriginName());
+
+        // 規格：Fit / Samsung / Other
+        e.setDataOriginName(normalizeOriginName(req.dataOriginPackage()));
 
         repo.save(e);
 
@@ -111,12 +119,11 @@ public class DailyActivityService {
         var latest = weightSeries.findLatest(userId, PageRequest.of(0, 1));
         if (latest == null || latest.isEmpty()) return null;
 
-        var kg = latest.get(0).getWeightKg();
+        var kg = latest.getFirst().getWeightKg();
         if (kg == null) return null;
 
         double kcal = kg.doubleValue() * steps.doubleValue() * COEFF;
-        long rounded = Math.round(kcal); // 與 Android roundToInt 對齊
-        return (double) rounded;
+        return (double) Math.round(kcal);
     }
 
     @Transactional(readOnly = true)
@@ -131,9 +138,9 @@ public class DailyActivityService {
     }
 
     @Transactional
-    public int cleanupExpiredForUser(Long userId) {
+    public void cleanupExpiredForUser(Long userId) {
         Instant cutoff = Instant.now().minusSeconds(7L * 24 * 3600);
-        return repo.deleteExpiredForUser(userId, cutoff);
+        repo.deleteExpiredForUser(userId, cutoff);
     }
 
     // ✅ 全域排程：每天清一次（UTC 03:10）
@@ -150,5 +157,19 @@ public class DailyActivityService {
         } catch (ZoneRulesException | NullPointerException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid timezone: " + tz);
         }
+    }
+
+    /**
+     * ✅ 你要的規則：
+     * - Google Fit -> "Google Fit"
+     * - Samsung Health -> "Samsung Health"
+     * - 其他 -> "Other"
+     * 注意：即便 client 有送其它名字（例如只送 "Fit"），仍會被規則化成 "Google Fit"
+     * 這樣 DB 才一致、客服排查也穩。
+     */
+    private static String normalizeOriginName(String pkg) {
+        if (PKG_GOOGLE_FIT.equals(pkg)) return ORIGIN_GOOGLE_FIT;
+        if (PKG_SAMSUNG_HEALTH.equals(pkg)) return ORIGIN_SAMSUNG_HEALTH;
+        return ORIGIN_OTHER;
     }
 }
