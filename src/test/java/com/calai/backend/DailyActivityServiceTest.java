@@ -1,7 +1,8 @@
-package com.calai.backend.users.activity.service;
+package com.calai.backend;
 
 import com.calai.backend.users.activity.entity.UserDailyActivity;
 import com.calai.backend.users.activity.repo.UserDailyActivityRepository;
+import com.calai.backend.users.activity.service.DailyActivityService;
 import com.calai.backend.weight.repo.WeightTimeseriesRepo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -98,6 +99,7 @@ class DailyActivityServiceTest {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
+        assertNotNull(ex.getReason());
         assertTrue(ex.getReason().contains("dataOriginPackage"));
         verify(repo, never()).save(any());
     }
