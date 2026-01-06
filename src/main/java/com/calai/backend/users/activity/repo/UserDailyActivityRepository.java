@@ -21,5 +21,5 @@ public interface UserDailyActivityRepository extends JpaRepository<UserDailyActi
 
     @Modifying
     @Query("delete from UserDailyActivity a where a.userId = :userId and a.dayEndUtc < :cutoff")
-    int deleteExpiredForUser(Long userId, Instant cutoff);
+    void deleteExpiredForUser(Long userId, Instant cutoff);
 }

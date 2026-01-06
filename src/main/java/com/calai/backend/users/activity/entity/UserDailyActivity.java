@@ -40,11 +40,11 @@ public class UserDailyActivity {
     private Instant dayEndUtc;
 
     // ✅ 規格：允許 null（未知/未授權/無資料）
-    @Column(nullable = true)
+    @Column(name = "steps")
     private Long steps;
 
     // ✅ 規格：active_kcal 允許 null
-    @Column(name = "active_kcal", nullable = true)
+    @Column(name = "active_kcal")
     private Double activeKcal;
 
     // ✅ ingest_source（必填）
@@ -53,14 +53,14 @@ public class UserDailyActivity {
     private IngestSource ingestSource = IngestSource.HEALTH_CONNECT;
 
     // ✅ data_origin（HC 記錄來源 app）
-    @Column(name = "data_origin_package", nullable = true, length = 255)
+    @Column(name = "data_origin_package")
     private String dataOriginPackage;
 
-    @Column(name = "data_origin_name", nullable = true, length = 255)
+    @Column(name = "data_origin_name")
     private String dataOriginName;
 
     // ✅ 伺服器實際寫入時間（排查用）
-    @Column(name = "ingested_at", nullable = true)
+    @Column(name = "ingested_at")
     private Instant ingestedAt;
 
     @Column(name = "updated_at", nullable = false)
