@@ -24,5 +24,6 @@ public record UpsertProfileRequest(
         String locale,
 
         String unitPreference,
-        Integer workoutsPerWeek
+        Integer workoutsPerWeek,
+        Integer waterMl
 ) {}

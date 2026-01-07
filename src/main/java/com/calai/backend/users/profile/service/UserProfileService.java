@@ -50,6 +50,9 @@ public class UserProfileService {
     private static final int MAX_WATER_ML_MALE = 3700;
     private static final int MAX_WATER_ML_FEMALE = 2700;
 
+    // ✅ 手動水量上限（對齊前端 VM/Repo）
+    private static final int MAX_WATER_GOAL_ML = 20000;
+
     // ✅ constructor 增加 WeightHistoryRepo
     public UserProfileService(
             UserProfileRepository repo,
@@ -290,6 +293,14 @@ public class UserProfileService {
 
         if (tz != null && !tz.isBlank()) {
             p.setTimezone(tz.trim());
+        }
+
+        // ---------- 每日飲水目標（手動）----------
+        // ✅ 只要 request 有帶 waterMl，就視為使用者手動設定：切 MANUAL，避免被 AUTO 重算覆寫
+        if (r.waterMl() != null) {
+            int ml = clampInt(r.waterMl(), MAX_WATER_GOAL_ML); // 0..20000
+            p.setWaterMl(ml);
+            p.setWaterMode(WaterMode.MANUAL);
         }
 
         // 先補齊 null，避免後面計算/存檔炸
