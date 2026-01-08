@@ -53,6 +53,9 @@ public class UserProfileService {
     // ✅ 手動水量上限（對齊前端 VM/Repo）
     private static final int MAX_WATER_GOAL_ML = 20000;
 
+    private static final int DEFAULT_DAILY_WORKOUT_GOAL_KCAL = 450;
+    private static final int MAX_DAILY_WORKOUT_GOAL_KCAL = 5000;
+
     // ✅ constructor 增加 WeightHistoryRepo
     public UserProfileService(
             UserProfileRepository repo,
@@ -93,7 +96,7 @@ public class UserProfileService {
 
         if (p.getWaterMl() == null) p.setWaterMl(0);
         if (p.getWaterMode() == null) p.setWaterMode(WaterMode.AUTO);
-
+        if (p.getDailyWorkoutGoalKcal() == null) p.setDailyWorkoutGoalKcal(DEFAULT_DAILY_WORKOUT_GOAL_KCAL);
         if (p.getBmi() == null) p.setBmi(0.0);
         if (p.getBmiClass() == null || p.getBmiClass().isBlank()) p.setBmiClass("UNKNOWN");
 
@@ -293,6 +296,11 @@ public class UserProfileService {
 
         if (tz != null && !tz.isBlank()) {
             p.setTimezone(tz.trim());
+        }
+
+        if (r.dailyWorkoutGoalKcal() != null) {
+            int v = clampInt(r.dailyWorkoutGoalKcal(), MAX_DAILY_WORKOUT_GOAL_KCAL); // 0..5000
+            p.setDailyWorkoutGoalKcal(v);
         }
 
         // ---------- 每日飲水目標（手動）----------
@@ -656,6 +664,7 @@ public class UserProfileService {
                 p.getGoalWeightLbs(),
                 p.getUnitPreference(),
                 p.getWorkoutsPerWeek(),
+                p.getDailyWorkoutGoalKcal(),
                 p.getKcal(),
                 p.getCarbsG(),
                 p.getProteinG(),

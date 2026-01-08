@@ -107,3 +107,7 @@ ALTER TABLE user_profiles
     ADD COLUMN sodium_mg        INTEGER NOT NULL DEFAULT 2300 AFTER sugar_g;
 
 CREATE INDEX idx_user_profiles_timezone ON user_profiles (timezone);
+
+
+ALTER TABLE user_profiles
+    ADD COLUMN daily_workout_goal_kcal INT NOT NULL DEFAULT 450 AFTER workouts_per_week;

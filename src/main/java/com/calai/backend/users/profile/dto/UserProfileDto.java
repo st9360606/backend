@@ -17,6 +17,7 @@ public record UserProfileDto(
         Double goalWeightLbs,
         String unitPreference,
         Integer workoutsPerWeek,
+        Integer dailyWorkoutGoalKcal,
         Integer kcal,
         Integer carbsG,
         Integer proteinG,

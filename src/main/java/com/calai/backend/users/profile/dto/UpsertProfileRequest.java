@@ -25,5 +25,6 @@ public record UpsertProfileRequest(
 
         String unitPreference,
         Integer workoutsPerWeek,
-        Integer waterMl
+        Integer waterMl,
+        Integer dailyWorkoutGoalKcal
 ) {}

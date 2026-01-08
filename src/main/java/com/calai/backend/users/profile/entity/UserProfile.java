@@ -52,6 +52,9 @@ public class UserProfile {
     @Column(name = "workouts_per_week")
     private Integer workoutsPerWeek;
 
+    @Column(name = "daily_workout_goal_kcal", nullable = false)
+    private Integer dailyWorkoutGoalKcal = 450;
+
     @Column(name = "kcal", nullable = false)
     private Integer kcal = 0;
 
