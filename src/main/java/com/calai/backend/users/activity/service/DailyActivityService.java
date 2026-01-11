@@ -4,25 +4,33 @@ import com.calai.backend.users.activity.entity.UserDailyActivity;
 import com.calai.backend.users.activity.repo.UserDailyActivityRepository;
 import com.calai.backend.weight.repo.WeightTimeseriesRepo;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.zone.ZoneRulesException;
 import java.util.List;
 
+@Slf4j
 @RequiredArgsConstructor
 @Service
 public class DailyActivityService {
 
     private final UserDailyActivityRepository repo;
     private final WeightTimeseriesRepo weightSeries;
+
+    /**
+     * ✅ Retention：保留 8 天（以 Instant/UTC 時間線計算，8*24 小時）
+     * delete where day_end_utc < now - 8 days
+     */
+    private static final Duration RETENTION = Duration.ofDays(8);
 
     /**
      * 估算步行消耗熱量：
@@ -39,11 +47,11 @@ public class DailyActivityService {
     public record UpsertReq(
             LocalDate localDate,
             String timezone,
-            Long steps,                 // nullable
-            Double activeKcal,          // nullable (payload, allow fallback)
+            Long steps,
+            Double activeKcal,
             UserDailyActivity.IngestSource ingestSource,
-            String dataOriginPackage,   // nullable, HC 建議必填
-            String dataOriginName       // nullable
+            String dataOriginPackage,
+            String dataOriginName
     ) {}
 
     @Transactional
@@ -54,11 +62,8 @@ public class DailyActivityService {
         Instant start = req.localDate().atStartOfDay(zone).toInstant();
         Instant end = req.localDate().plusDays(1).atStartOfDay(zone).toInstant();
 
-        UserDailyActivity.IngestSource ingest = (req.ingestSource() != null)
-                ? req.ingestSource()
-                : UserDailyActivity.IngestSource.HEALTH_CONNECT;
+        UserDailyActivity.IngestSource ingest = resolveIngest(req.ingestSource());
 
-        // ✅ 規格：HEALTH_CONNECT 時建議要求 data_origin_package（避免客服無法解釋）
         if (ingest == UserDailyActivity.IngestSource.HEALTH_CONNECT) {
             if (req.dataOriginPackage() == null || req.dataOriginPackage().isBlank()) {
                 throw new ResponseStatusException(
@@ -77,15 +82,10 @@ public class DailyActivityService {
         e.setDayStartUtc(start);
         e.setDayEndUtc(end);
 
-        // ✅ PUT 全量覆蓋：payload null 就覆蓋成 null（不能 default 0）
         e.setSteps(req.steps());
 
-        // ✅ 核心：active_kcal 一律由後端用「最新體重 + steps」計算（至少 HEALTH_CONNECT 要這樣）
         Double computed = computeEstimatedActiveKcalFromLatestWeight(userId, req.steps());
 
-        // 規格：
-        // - HEALTH_CONNECT：computed 有就用 computed；沒有就存 req.activeKcal（通常 client 送 null → 就是 null）
-        // - 其他來源：如果 client 有送 activeKcal 就尊重；沒送才用 computed（可選）
         Double activeKcalToStore;
         if (ingest == UserDailyActivity.IngestSource.HEALTH_CONNECT) {
             activeKcalToStore = (computed != null) ? computed : req.activeKcal();
@@ -97,8 +97,6 @@ public class DailyActivityService {
 
         e.setIngestSource(ingest);
         e.setDataOriginPackage(req.dataOriginPackage());
-
-        // 規格：Fit / Samsung / Other
         e.setDataOriginName(normalizeOriginName(req.dataOriginPackage()));
 
         repo.save(e);
@@ -137,18 +135,50 @@ public class DailyActivityService {
         return repo.findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(userId, from, to);
     }
 
+    //cleanupExpiredForUser(userId)：每次有使用者呼叫 upsert 成功寫入後
+    //就會被觸發（同一個 transaction 內），只清那個 user 的過期資料。
     @Transactional
     public void cleanupExpiredForUser(Long userId) {
-        Instant cutoff = Instant.now().minusSeconds(7L * 24 * 3600);
-        repo.deleteExpiredForUser(userId, cutoff);
+        Instant cutoff = Instant.now().minus(RETENTION);
+
+        long t0 = System.nanoTime();
+        int deleted = repo.deleteExpiredForUser(userId, cutoff);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+
+        // ✅ 建議：有刪到才 INFO，沒刪到用 DEBUG，避免洗版
+        if (elapsedMs > 200) {
+            log.warn("DailyActivity cleanupExpiredForUser SLOW: userId={}, cutoff={}, deletedRows={}, elapsedMs={}",
+                    userId, cutoff, deleted, elapsedMs);
+        } else if (deleted > 0) {
+            log.info("DailyActivity cleanupExpiredForUser: userId={}, cutoff={}, deletedRows={}, elapsedMs={}",
+                    userId, cutoff, deleted, elapsedMs);
+        } else {
+            log.debug("DailyActivity cleanupExpiredForUser: userId={}, cutoff={}, deletedRows=0, elapsedMs={}",
+                    userId, cutoff, elapsedMs);
+        }
     }
 
-    // ✅ 全域排程：每天清一次（UTC 03:10）
+    //全域排程：每天清一次（UTC 03:10）
+    //cleanupExpiredGlobal()：每天固定 UTC 03:10 被 Spring 排程觸發一次，清全表的過期資料。
+    //兩者差別：觸發時機（即時 vs 每日）、範圍（單一 user vs 全部 user）、目的（減少單 user 長期累積 + 全域保底清理）。
     @Scheduled(cron = "0 10 3 * * *", zone = "UTC")
     @Transactional
     public int cleanupExpiredGlobal() {
-        Instant cutoff = Instant.now().minusSeconds(7L * 24 * 3600);
-        return repo.deleteAllExpired(cutoff);
+        Instant cutoff = Instant.now().minus(RETENTION);
+
+        long t0 = System.nanoTime();
+        int deleted = repo.deleteAllExpired(cutoff);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+
+        // 全域每天一次，INFO OK
+        if (elapsedMs > 500) { // 全域可放寬一點，例如 500ms
+            log.warn("DailyActivity cleanupExpiredGlobal SLOW: cutoff={}, deletedRows={}, elapsedMs={}",
+                    cutoff, deleted, elapsedMs);
+        } else {
+            log.info("DailyActivity cleanupExpiredGlobal: cutoff={}, deletedRows={}, elapsedMs={}",
+                    cutoff, deleted, elapsedMs);
+        }
+        return deleted;
     }
 
     private static ZoneId parseZoneOr400(String tz) {
@@ -171,5 +201,9 @@ public class DailyActivityService {
         if (PKG_GOOGLE_FIT.equals(pkg)) return ORIGIN_GOOGLE_FIT;
         if (PKG_SAMSUNG_HEALTH.equals(pkg)) return ORIGIN_SAMSUNG_HEALTH;
         return ORIGIN_OTHER;
+    }
+
+    private static UserDailyActivity.IngestSource resolveIngest(UserDailyActivity.IngestSource ingestSource) {
+        return (ingestSource != null) ? ingestSource : UserDailyActivity.IngestSource.HEALTH_CONNECT;
     }
 }
