@@ -1,9 +1,8 @@
 package com.calai.backend.foodlog.service;
 
-import com.calai.backend.foodlog.db.FoodLogEntity;
-import com.calai.backend.foodlog.db.FoodLogOverrideEntity;
-import com.calai.backend.foodlog.db.FoodLogOverrideRepository;
-import com.calai.backend.foodlog.db.FoodLogRepository;
+
+import com.calai.backend.foodlog.entity.FoodLogEntity;
+import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

@@ -1,9 +1,7 @@
  package com.calai.backend.foodlog.task;
 
-import com.calai.backend.foodlog.db.FoodLogEntity;
-import com.calai.backend.foodlog.db.FoodLogRepository;
-import com.calai.backend.foodlog.db.FoodLogTaskEntity;
-import com.calai.backend.foodlog.db.FoodLogTaskRepository;
+
+import com.calai.backend.foodlog.repo.FoodLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;

@@ -1,52 +1,54 @@
 -- MySQL 8.x
--- 建議：資料庫與連線都用 utf8mb4
--- ALTER DATABASE your_db CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+-- 你說「已建但沒資料」：直接 drop + recreate 最乾淨
+DROP TABLE IF EXISTS food_logs;
 
--- === food_logs（主表）===
-CREATE TABLE IF NOT EXISTS food_logs (
-    id CHAR(36) NOT NULL DEFAULT (UUID()),
-    user_id CHAR(36) NOT NULL,
+CREATE TABLE food_logs
+(
+    id                     CHAR(36)                                            NOT NULL,
+    user_id                BIGINT                                              NOT NULL,
+    status                 ENUM ('PENDING','DRAFT','SAVED','FAILED','DELETED') NOT NULL,
+    method                 VARCHAR(16)                                         NOT NULL, -- PHOTO/ALBUM/BARCODE/LABEL
+    provider               VARCHAR(32)                                         NOT NULL, -- STUB/LOGMEAL/...
+    degrade_level          VARCHAR(8)                                          NULL,     -- DG-0..DG-4
 
-    status ENUM('PENDING','DRAFT','SAVED','FAILED','DELETED') NOT NULL,
+    -- time (一律以 UTC 寫入到 DATETIME)
+    captured_at_utc        DATETIME(6)                                         NOT NULL,
+    captured_tz            VARCHAR(64)                                         NOT NULL, -- IANA
+    captured_local_date    DATE                                                NOT NULL, -- for summary
+    server_received_at_utc DATETIME(6)                                         NOT NULL,
 
-    method VARCHAR(16) NOT NULL,       -- PHOTO/ALBUM/BARCODE/LABEL
-    provider VARCHAR(32) NOT NULL,     -- LOGMEAL/...
-    degrade_level VARCHAR(8) NULL,     -- DG-0..DG-4
-
--- time (唯一真相) - 建議全用 UTC 寫入
-    captured_at_utc DATETIME(6) NOT NULL,
-    captured_tz VARCHAR(64) NOT NULL,            -- IANA
-    captured_local_date DATE NOT NULL,           -- for summary
-    server_received_at_utc DATETIME(6) NOT NULL,
-    time_source ENUM('EXIF','DEVICE_CLOCK','SERVER_RECEIVED') NOT NULL,
-    time_suspect BOOLEAN NOT NULL DEFAULT FALSE,
+    time_source            ENUM ('EXIF','DEVICE_CLOCK','SERVER_RECEIVED')      NOT NULL,
+    time_suspect           BOOLEAN                                             NOT NULL DEFAULT FALSE,
 
     -- input refs
-    image_object_key TEXT NULL,
-    image_sha256 CHAR(64) NULL,
-    barcode VARCHAR(64) NULL,
+    image_object_key       TEXT                                                NULL,
+    image_sha256           CHAR(64)                                            NULL,
+    barcode                VARCHAR(64)                                         NULL,
 
     -- effective values（列表/彙總以此為準）
-    effective JSON NULL,
+    effective              JSON                                                NULL,
 
-    -- original snapshot（provider payload 追溯）
-    original_snapshot_ref CHAR(36) NULL,
+    -- original snapshot（Step2 再做表/ref）
+    original_snapshot_ref  CHAR(36)                                            NULL,
 
     -- error / deleted
-    last_error_code VARCHAR(64) NULL,
-    last_error_message TEXT NULL,
-    deleted_at_utc DATETIME(6) NULL,
-    deleted_by VARCHAR(16) NULL, -- USER/SYSTEM/ADMIN
+    last_error_code        VARCHAR(64)                                         NULL,
+    last_error_message     TEXT                                                NULL,
+    deleted_at_utc         DATETIME(6)                                         NULL,
+    deleted_by             VARCHAR(16)                                         NULL,     -- USER/SYSTEM/ADMIN
 
-    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    created_at_utc         DATETIME(6)                                         NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc         DATETIME(6)                                         NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
-
     INDEX idx_food_logs_user_date (user_id, captured_local_date),
     INDEX idx_food_logs_user_status (user_id, status),
     INDEX idx_food_logs_sha256 (user_id, image_sha256)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+    -- ✅ 可選：如果你確定 users(id) 存在且想強約束
+    -- ,CONSTRAINT fk_food_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_0900_ai_ci;
 
 
 -- === food_log_tasks（承接 PENDING）===
