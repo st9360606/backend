@@ -50,6 +50,9 @@ CREATE TABLE food_logs
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci;
 
+ALTER TABLE food_logs
+    ADD COLUMN image_content_type VARCHAR(64) NULL AFTER image_sha256,
+    ADD COLUMN image_size_bytes BIGINT NULL AFTER image_content_type;
 
 -- === food_log_tasks（承接 PENDING）===
 DROP TABLE IF EXISTS food_log_tasks;

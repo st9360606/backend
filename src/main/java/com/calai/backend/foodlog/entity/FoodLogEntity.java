@@ -65,6 +65,12 @@ public class FoodLogEntity {
     @Column(name = "image_sha256", length = 64)
     private String imageSha256;
 
+    @Column(name = "image_content_type", length = 64)
+    private String imageContentType;
+
+    @Column(name = "image_size_bytes")
+    private Long imageSizeBytes;
+
     @Column(name = "barcode", length = 64)
     private String barcode;
 

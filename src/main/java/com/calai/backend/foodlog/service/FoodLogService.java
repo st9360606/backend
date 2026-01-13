@@ -5,56 +5,83 @@ import com.calai.backend.foodlog.dto.FoodLogStatus;
 import com.calai.backend.foodlog.dto.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.image.ImageSniffer;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
-
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
 
-import java.security.MessageDigest;
+import java.io.PushbackInputStream;
 import java.time.*;
-import java.util.HexFormat;
+import java.io.InputStream;
 
 @RequiredArgsConstructor
 @Service
 public class FoodLogService {
 
+    private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024; // 8MB（先保守）
     private final FoodLogRepository repo;
     private final FoodLogTaskRepository taskRepo;
+    private final StorageService storage;
     private final ObjectMapper om;
+
+    public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
 
     @Transactional
     public FoodLogEnvelope createAlbum(Long userId, String clientTz, MultipartFile file, String requestId) throws Exception {
         ZoneId tz = parseTzOrUtc(clientTz);
-
         Instant serverNow = Instant.now();
         LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
 
-        String sha256 = sha256Hex(file);
+        validateUploadBasics(file);
 
-        // ✅ Step2：先存 PENDING，effective 先空（等 worker 填）
+        // 先建 log（拿到 id）
         FoodLogEntity e = new FoodLogEntity();
         e.setUserId(userId);
         e.setStatus(FoodLogStatus.PENDING);
         e.setMethod("ALBUM");
         e.setProvider("STUB");
         e.setDegradeLevel("DG-0");
-
         e.setCapturedAtUtc(serverNow);
         e.setCapturedTz(tz.getId());
         e.setCapturedLocalDate(todayLocal);
         e.setServerReceivedAtUtc(serverNow);
-
         e.setTimeSource(TimeSource.SERVER_RECEIVED);
         e.setTimeSuspect(false);
-
-        e.setImageSha256(sha256);
         e.setEffective(null);
 
+        repo.save(e);
+
+        // ✅ Step 3.5：用 magic number 決定 type/ext/contentType
+        String objectKey;
+        StorageService.SaveResult saved;
+
+        try (InputStream raw = file.getInputStream();
+             PushbackInputStream in = new PushbackInputStream(raw, 16)) {
+
+            ImageSniffer.Detection det = ImageSniffer.detect(in);
+            if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
+
+            objectKey = "user-" + userId + "/food-log/" + e.getId() + "/original" + det.ext();
+
+            try {
+                saved = storage.save(objectKey, in, det.contentType());
+            } catch (Exception ex) {
+                try { storage.delete(objectKey); } catch (Exception ignored) {}
+                throw ex;
+            }
+        }
+
+        e.setImageObjectKey(saved.objectKey());
+        e.setImageSha256(saved.sha256());
+        e.setImageContentType(saved.contentType());
+        e.setImageSizeBytes(saved.sizeBytes());
         repo.save(e);
 
         FoodLogTaskEntity t = new FoodLogTaskEntity();
@@ -65,6 +92,16 @@ public class FoodLogService {
         taskRepo.save(t);
 
         return toEnvelope(e, t, requestId);
+    }
+
+    private static void validateUploadBasics(MultipartFile file) {
+        if (file == null || file.isEmpty()) throw new IllegalArgumentException("FILE_REQUIRED");
+        if (file.getSize() > MAX_IMAGE_BYTES) throw new IllegalArgumentException("FILE_TOO_LARGE");
+    }
+
+    private static ZoneId parseTzOrUtc(String tz) {
+        try { return (tz == null || tz.isBlank()) ? ZoneOffset.UTC : ZoneId.of(tz); }
+        catch (Exception ignored) { return ZoneOffset.UTC; }
     }
 
     @Transactional(readOnly = true)
@@ -131,15 +168,25 @@ public class FoodLogService {
         );
     }
 
-    private static ZoneId parseTzOrUtc(String tz) {
-        try { return (tz == null || tz.isBlank()) ? ZoneOffset.UTC : ZoneId.of(tz); }
-        catch (Exception ignored) { return ZoneOffset.UTC; }
+    @Transactional(readOnly = true)
+    public OpenedImage openImage(Long userId, String foodLogId) {
+        var log = repo.findByIdAndUserId(foodLogId, userId)
+                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
+
+        if (log.getStatus() == FoodLogStatus.DELETED) {
+            throw new IllegalArgumentException("FOOD_LOG_DELETED");
+        }
+        if (log.getImageObjectKey() == null || log.getImageObjectKey().isBlank()) {
+            throw new IllegalStateException("IMAGE_OBJECT_KEY_MISSING");
+        }
+
+        long size = log.getImageSizeBytes() == null ? -1L : log.getImageSizeBytes();
+        return new OpenedImage(log.getImageObjectKey(), log.getImageContentType(), size);
     }
 
-    private static String sha256Hex(MultipartFile file) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        byte[] bytes = file.getBytes();
-        return HexFormat.of().formatHex(md.digest(bytes));
+    /** StreamingResponseBody 會負責關閉 */
+    public InputStream openImageStream(String objectKey) throws Exception {
+        return storage.open(objectKey).inputStream();
     }
 
     private static String textOrNull(JsonNode node, String field) {

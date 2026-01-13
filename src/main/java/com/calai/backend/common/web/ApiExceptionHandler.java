@@ -1,7 +1,6 @@
-package com.calai.backend.common;
+package com.calai.backend.common.web;
 
 import com.calai.backend.users.auto_generate_goals.dto.MissingFieldsResponse;
-import com.calai.backend.users.auto_generate_goals.exception.MissingFieldsException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -19,6 +18,7 @@ import java.util.NoSuchElementException;
  * - 404：找不到資源（PROFILE_NOT_FOUND / NoSuchElementException）
  * - 422：語意錯誤（例如缺必要欄位 WEIGHT_REQUIRED）
  * - 500：其他未預期錯誤
+ * ✅ 建議：讓 common advice 當最後兜底，避免蓋掉更專門的 advice（例如 auth）
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -39,7 +39,7 @@ public class ApiExceptionHandler {
         String msg = ex.getBindingResult().getFieldErrors().isEmpty()
                 ? "VALIDATION_FAILED"
                 : ex.getBindingResult().getFieldErrors().get(0).getField()
-                + " " + ex.getBindingResult().getFieldErrors().get(0).getDefaultMessage();
+                  + " " + ex.getBindingResult().getFieldErrors().get(0).getDefaultMessage();
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(err("VALIDATION_FAILED", msg));
@@ -70,33 +70,7 @@ public class ApiExceptionHandler {
                 .body(err("NOT_FOUND", ex.getMessage()));
     }
 
-    // ===== 500 Fallback =====
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleUnknown(Exception ex) {
-        // 上線可改成不回 message，避免洩漏內部資訊；log 例外即可
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(err("INTERNAL_ERROR", ex.getMessage()));
-    }
-
-    private static Map<String, Object> err(String code, String message) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("code", code);
-        if (message != null && !message.isBlank()) m.put("message", message);
-        return m;
-    }
-
-    @ExceptionHandler(MissingFieldsException.class)
-    public ResponseEntity<MissingFieldsResponse> handleMissing(MissingFieldsException e) {
-        return ResponseEntity.badRequest().body(
-                new MissingFieldsResponse(
-                        "AUTO_GOALS_MISSING_FIELDS",
-                        e.getMissingFields(),
-                        e.getMessage()
-                )
-        );
-    }
-
+    // ✅ 你原本就有：全站 IllegalArgumentException → MissingFieldsResponse（維持既有行為）
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<MissingFieldsResponse> handleIllegalArgument(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(
@@ -106,5 +80,20 @@ public class ApiExceptionHandler {
                         e.getMessage()
                 )
         );
+    }
+
+    // ===== 500 Fallback =====
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleUnknown(Exception ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(err("INTERNAL_ERROR", ex.getMessage()));
+    }
+
+    private static Map<String, Object> err(String code, String message) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("code", code);
+        if (message != null && !message.isBlank()) m.put("message", message);
+        return m;
     }
 }

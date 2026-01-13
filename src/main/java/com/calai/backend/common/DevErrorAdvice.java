@@ -1,16 +1,13 @@
 package com.calai.backend.common;
 
 import org.springframework.context.annotation.Profile;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
-@RestControllerAdvice
-@Order(Ordered.HIGHEST_PRECEDENCE)
 @Profile({"dev","test"})
+@RestControllerAdvice
 public class DevErrorAdvice {
 
     @ExceptionHandler(Throwable.class)
@@ -35,9 +32,7 @@ public class DevErrorAdvice {
     private static List<String> firstFrames(Throwable t, int n) {
         StackTraceElement[] arr = t.getStackTrace();
         List<String> out = new ArrayList<>();
-        for (int i = 0; i < Math.min(n, arr.length); i++) {
-            out.add(arr[i].toString());
-        }
+        for (int i = 0; i < Math.min(n, arr.length); i++) out.add(arr[i].toString());
         return out;
     }
 }

@@ -74,6 +74,10 @@ app:
     # 若要用自家網域 no-reply@bitecal.app，建議改用 SendGrid/SES 並設定 SPF/DKIM/DMARC
   storage:
     weight-photos-dir: uploads/weight-photos
+    local:
+      base-dir: ./data
+  features:
+    dev-image-endpoint: true   # TODO 上線要改成 false
 alias:
   promotion:
     # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲

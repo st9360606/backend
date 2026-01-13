@@ -7,11 +7,11 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -26,11 +26,15 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock FoodLogRepository repo;
     @Mock FoodLogTaskRepository taskRepo;
 
+    // ✅ 這個是你缺的
+    @Mock StorageService storage;
+
     private FoodLogService service;
 
     @BeforeEach
     void setUp() {
-        service = new FoodLogService(repo, taskRepo, new ObjectMapper());
+        // ✅ 依照最新建構子：repo, taskRepo, storage, objectMapper
+        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper());
     }
 
     @Test
@@ -78,5 +82,38 @@ class FoodLogServiceTaskVisibilityTest {
 
         assertNull(env.task());
         verify(taskRepo, never()).findByFoodLogId(anyString());
+    }
+
+    // ✅ 建議順手補：FAILED 也要查 task（跟你現行邏輯一致）
+    @Test
+    void failed_should_query_task_and_include_task_in_envelope() {
+        FoodLogEntity e = new FoodLogEntity();
+        e.setId("log-3");
+        e.setUserId(1L);
+        e.setStatus(FoodLogStatus.FAILED);
+        e.setMethod("ALBUM");
+        e.setProvider("STUB");
+        e.setDegradeLevel("DG-0");
+        e.setEffective(null);
+        e.setLastErrorCode("PROVIDER_FAILED");
+        e.setLastErrorMessage("boom");
+
+        FoodLogTaskEntity t = new FoodLogTaskEntity();
+        t.setId("task-3");
+        t.setFoodLogId("log-3");
+        t.setTaskStatus(FoodLogTaskEntity.TaskStatus.FAILED);
+        t.setPollAfterSec(2);
+
+        when(repo.findByIdAndUserId("log-3", 1L)).thenReturn(Optional.of(e));
+        when(taskRepo.findByFoodLogId("log-3")).thenReturn(Optional.of(t));
+
+        FoodLogEnvelope env = service.getOne(1L, "log-3", "rid-3");
+
+        assertNotNull(env.task());
+        assertEquals("task-3", env.task().taskId());
+        assertNotNull(env.error());
+        assertEquals("PROVIDER_FAILED", env.error().errorCode());
+
+        verify(taskRepo, times(1)).findByFoodLogId("log-3");
     }
 }

@@ -1,4 +1,4 @@
-package com.calai.backend.auth.security;
+package com.calai.backend.auth.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -6,12 +6,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
 import java.util.Map;
 import java.util.UUID;
 
-@RestControllerAdvice
-public class GlobalExceptionHandler {
-    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+@RestControllerAdvice(basePackages = "com.calai.backend.auth")
+public class AuthGlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthGlobalExceptionHandler.class);
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handle(Exception ex, HttpServletRequest req) {
