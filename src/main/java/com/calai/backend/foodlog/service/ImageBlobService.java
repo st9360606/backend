@@ -82,4 +82,11 @@ public class ImageBlobService {
     private static String blobKey(Long userId, String sha256, String ext) {
         return "user-" + userId + "/blobs/sha256/" + sha256 + ext;
     }
+
+    public String findExtOrNull(Long userId, String sha256) {
+        return repo.findByUserIdAndSha256(userId, sha256)
+                .map(ImageBlobEntity::getExt)
+                .orElse(null);
+    }
+
 }
