@@ -46,7 +46,6 @@ public class LocalDiskStorageService implements StorageService {
         Path path = resolve(objectKey);
         if (!Files.exists(path)) throw new FileNotFoundException("OBJECT_NOT_FOUND: " + objectKey);
 
-        // contentType 這裡先用 probeContentType（不一定準），你也可以直接存 DB 再回
         String ct = Files.probeContentType(path);
         long size = Files.size(path);
         InputStream in = Files.newInputStream(path, StandardOpenOption.READ);
@@ -59,8 +58,27 @@ public class LocalDiskStorageService implements StorageService {
         Files.deleteIfExists(path);
     }
 
+    @Override
+    public boolean exists(String objectKey) throws Exception {
+        Path path = resolve(objectKey);
+        return Files.exists(path);
+    }
+
+    @Override
+    public void move(String fromObjectKey, String toObjectKey) throws Exception {
+        Path from = resolve(fromObjectKey);
+        Path to = resolve(toObjectKey);
+        Files.createDirectories(to.getParent());
+
+        try {
+            Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            // fallback：非原子 move（本機 dev OK）
+            Files.move(from, to);
+        }
+    }
+
     private Path resolve(String objectKey) {
-        // 防止 path traversal
         Path p = baseDir.resolve(objectKey).normalize();
         if (!p.startsWith(baseDir)) throw new SecurityException("Invalid objectKey");
         return p;

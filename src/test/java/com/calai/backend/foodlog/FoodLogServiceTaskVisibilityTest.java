@@ -8,6 +8,7 @@ import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
 import com.calai.backend.foodlog.service.IdempotencyService;
+import com.calai.backend.foodlog.service.ImageBlobService;
 import com.calai.backend.foodlog.service.QuotaService; // ✅ 加這個
 import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,19 +26,27 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceTaskVisibilityTest {
 
-    @Mock FoodLogRepository repo;
-    @Mock FoodLogTaskRepository taskRepo;
-    @Mock StorageService storage;
+    @Mock
+    FoodLogRepository repo;
+    @Mock
+    FoodLogTaskRepository taskRepo;
+    @Mock
+    StorageService storage;
 
     // ✅ 新增：缺的第 5 個依賴
-    @Mock QuotaService quota;
-    @Mock IdempotencyService idem;
+    @Mock
+    QuotaService quota;
+    @Mock
+    IdempotencyService idem;
+    @Mock
+    ImageBlobService imageblobservice;
+
     private FoodLogService service;
 
     @BeforeEach
     void setUp() {
         // ✅ 依照最新建構子：repo, taskRepo, storage, objectMapper, quota
-        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota,idem);
+        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota, idem, imageblobservice);
     }
 
     @Test
