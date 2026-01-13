@@ -23,10 +23,10 @@ spring:
     hibernate:
       ddl-auto: none             # 無自動建表；請用 Flyway/Liquibase
     open-in-view: false
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
         jdbc:
           time_zone: UTC         # 與 DB 溝通用 UTC
 

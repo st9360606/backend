@@ -6,5 +6,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 public record FoodLogErrorResponse(
         String code,
         String message,
-        String requestId
+        String requestId,
+        String clientAction,
+        Integer retryAfterSec
 ) {}

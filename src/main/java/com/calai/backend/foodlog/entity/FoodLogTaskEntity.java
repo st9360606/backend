@@ -82,4 +82,13 @@ public class FoodLogTaskEntity {
         this.nextRetryAtUtc = now.plusSeconds(retryAfterSec);
         this.updatedAtUtc = now;
     }
+
+    /** ✅ 明確取消：不再重試 */
+    public void markCancelled(Instant now, String code, String message) {
+        this.taskStatus = TaskStatus.CANCELLED;
+        this.lastErrorCode = code;
+        this.lastErrorMessage = message;
+        this.nextRetryAtUtc = null;
+        this.updatedAtUtc = now;
+    }
 }

@@ -15,11 +15,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.http.MediaType;
 
 import java.io.PushbackInputStream;
 import java.time.*;
 import java.io.InputStream;
+import java.util.Optional;
 
 @RequiredArgsConstructor
 @Service
@@ -30,17 +30,19 @@ public class FoodLogService {
     private final FoodLogTaskRepository taskRepo;
     private final StorageService storage;
     private final ObjectMapper om;
-
+    private final QuotaService quota;
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
 
     @Transactional
     public FoodLogEnvelope createAlbum(Long userId, String clientTz, MultipartFile file, String requestId) throws Exception {
         ZoneId tz = parseTzOrUtc(clientTz);
         Instant serverNow = Instant.now();
-        LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
-
         validateUploadBasics(file);
 
+        // ✅ 先扣點（擋掉瘋狂請求）
+        quota.consumeAiOrThrow(userId, tz, serverNow);
+
+        LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
         // 先建 log（拿到 id）
         FoodLogEntity e = new FoodLogEntity();
         e.setUserId(userId);
@@ -200,5 +202,54 @@ public class FoodLogService {
     private static Double doubleOrNull(JsonNode node, String field) {
         JsonNode v = node.get(field);
         return (v == null || v.isNull()) ? null : v.asDouble();
+    }
+
+    @Transactional
+    public FoodLogEnvelope retry(Long userId, String foodLogId, String requestId) {
+        Instant now = Instant.now();
+
+        // ✅ lock food_log（避免同時被 worker/別人 retry 改狀態）
+        FoodLogEntity log = repo.findByIdForUpdate(foodLogId);
+        if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
+
+        if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
+        if (log.getStatus() == FoodLogStatus.DRAFT || log.getStatus() == FoodLogStatus.SAVED) {
+            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
+        }
+        if (log.getStatus() != FoodLogStatus.FAILED) {
+            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
+        }
+
+        // ✅ Step 3.9：retry 也扣點（用 log.capturedTz 當 userTz）
+        ZoneId tz = ZoneId.of(log.getCapturedTz());
+        quota.consumeAiOrThrow(userId, tz, now);
+
+        // ✅ lock task（沒有就補一筆）
+        Optional<FoodLogTaskEntity> opt = taskRepo.findByFoodLogIdForUpdate(foodLogId);
+        FoodLogTaskEntity task = opt.orElseGet(() -> {
+            FoodLogTaskEntity t = new FoodLogTaskEntity();
+            t.setFoodLogId(foodLogId);
+            t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+            t.setPollAfterSec(2);
+            t.setAttempts(0);
+            return t;
+        });
+
+        // ✅ 重置 task 成可立即執行
+        task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+        task.setNextRetryAtUtc(null);
+        task.setPollAfterSec(2);
+        task.setAttempts(0);
+        task.setLastErrorCode(null);
+        task.setLastErrorMessage(null);
+        taskRepo.save(task);
+
+        // ✅ 把 log 拉回 PENDING，讓 App poll 起來
+        log.setStatus(FoodLogStatus.PENDING);
+        log.setLastErrorCode(null);
+        log.setLastErrorMessage(null);
+        repo.save(log);
+
+        return getOne(userId, foodLogId, requestId); // 直接回 envelope（含 task）
     }
 }

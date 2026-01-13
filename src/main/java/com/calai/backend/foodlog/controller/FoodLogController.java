@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.controller;
 
 import com.calai.backend.auth.security.AuthContext;
+import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.service.FoodLogService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,14 +31,14 @@ public class FoodLogController {
             HttpServletRequest req
     ) throws Exception {
         Long uid = auth.requireUserId();
-        String requestId = requestId(req);
+        String requestId = RequestIdFilter.getOrCreate(req); // ✅ 統一
         return service.createAlbum(uid, clientTz, file, requestId);
     }
 
     @GetMapping("/{id}")
     public FoodLogEnvelope getOne(@PathVariable String id, HttpServletRequest req) {
         Long uid = auth.requireUserId();
-        String requestId = requestId(req);
+        String requestId = RequestIdFilter.getOrCreate(req); // ✅ 統一
         return service.getOne(uid, id, requestId);
     }
 
@@ -79,6 +80,13 @@ public class FoodLogController {
                 })
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .body(body);
+    }
+
+    @PostMapping("/{id}/retry")
+    public FoodLogEnvelope retry(@PathVariable String id, HttpServletRequest req) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return service.retry(uid, id, requestId);
     }
 
 }

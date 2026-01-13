@@ -1,0 +1,24 @@
+package com.calai.backend.foodlog.repo;
+
+
+import com.calai.backend.foodlog.entity.UserEntitlementEntity;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.Instant;
+import java.util.List;
+
+public interface UserEntitlementRepository extends JpaRepository<UserEntitlementEntity, String> {
+
+    @Query("""
+        select e from UserEntitlementEntity e
+        where e.userId = :userId
+          and e.status = 'ACTIVE'
+          and e.validFromUtc <= :now
+          and e.validToUtc > :now
+        order by e.validToUtc desc
+    """)
+    List<UserEntitlementEntity> findActive(@Param("userId") Long userId, @Param("now") Instant now, Pageable pageable);
+}

@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.dto.FoodLogErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -24,6 +25,8 @@ public class FoodLogExceptionAdvice {
             case "FOOD_LOG_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "FOOD_LOG_DELETED" -> HttpStatus.GONE;
 
+            case "FOOD_LOG_NOT_RETRYABLE" -> HttpStatus.CONFLICT;
+
             case "FILE_REQUIRED",
                  "FILE_TOO_LARGE",
                  "UNSUPPORTED_IMAGE_FORMAT",
@@ -33,41 +36,75 @@ public class FoodLogExceptionAdvice {
         };
 
         return ResponseEntity.status(status)
-                .body(new FoodLogErrorResponse(code, safeMsg(e), rid(req)));
+                .body(err(code, e, req)); // ✅ 補齊 5 欄位
     }
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<FoodLogErrorResponse> handleIllegalState(IllegalStateException e, HttpServletRequest req) {
         String code = norm(e.getMessage(), "ILLEGAL_STATE");
         HttpStatus status = switch (code) {
-            case "IMAGE_OBJECT_KEY_MISSING" -> HttpStatus.CONFLICT; // 資料狀態不一致
+            case "IMAGE_OBJECT_KEY_MISSING" -> HttpStatus.CONFLICT;
             case "EMPTY_IMAGE" -> HttpStatus.BAD_REQUEST;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
 
         return ResponseEntity.status(status)
-                .body(new FoodLogErrorResponse(code, safeMsg(e), rid(req)));
+                .body(err(code, e, req)); // ✅ 補齊 5 欄位
+    }
+
+    @ExceptionHandler(SubscriptionRequiredException.class)
+    public ResponseEntity<FoodLogErrorResponse> handleSubRequired(SubscriptionRequiredException e, HttpServletRequest req) {
+        return ResponseEntity.status(402)
+                .body(new FoodLogErrorResponse(
+                        "SUBSCRIPTION_REQUIRED",
+                        safeMsg(e),
+                        rid(req),
+                        e.clientAction(),
+                        null
+                ));
+    }
+
+    @ExceptionHandler(QuotaExceededException.class)
+    public ResponseEntity<FoodLogErrorResponse> handleQuota(QuotaExceededException e, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
+                .body(new FoodLogErrorResponse(
+                        "QUOTA_EXCEEDED",
+                        safeMsg(e),
+                        rid(req),
+                        e.clientAction(),
+                        e.retryAfterSec()
+                ));
     }
 
     @ExceptionHandler(FileNotFoundException.class)
     public ResponseEntity<FoodLogErrorResponse> handleNotFound(FileNotFoundException e, HttpServletRequest req) {
-        // 例如：LocalDiskStorageService.open() 的 OBJECT_NOT_FOUND
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(new FoodLogErrorResponse("OBJECT_NOT_FOUND", safeMsg(e), rid(req)));
+                .body(err("OBJECT_NOT_FOUND", e, req)); // ✅ 補齊 5 欄位
     }
 
     @ExceptionHandler(SecurityException.class)
     public ResponseEntity<FoodLogErrorResponse> handleSecurity(SecurityException e, HttpServletRequest req) {
-        // 例如：objectKey traversal 被擋
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(new FoodLogErrorResponse("INVALID_OBJECT_KEY", safeMsg(e), rid(req)));
+                .body(err("INVALID_OBJECT_KEY", e, req)); // ✅ 補齊 5 欄位
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<FoodLogErrorResponse> handleUnknown(Exception e, HttpServletRequest req) {
-        // 上線可改成不要回 message，避免洩漏內部資訊
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new FoodLogErrorResponse("INTERNAL_ERROR", safeMsg(e), rid(req)));
+                .body(err("INTERNAL_ERROR", e, req)); // ✅ 補齊 5 欄位
+    }
+
+    // ===== helpers =====
+
+    private static FoodLogErrorResponse err(String code, Throwable e, HttpServletRequest req) {
+        return new FoodLogErrorResponse(
+                code,
+                safeMsg(e),
+                rid(req),
+                null,  // clientAction
+                null   // retryAfterSec
+        );
     }
 
     private static String rid(HttpServletRequest req) {

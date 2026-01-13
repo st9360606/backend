@@ -7,6 +7,7 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.QuotaService; // ✅ 加這個
 import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,16 +26,17 @@ class FoodLogServiceTaskVisibilityTest {
 
     @Mock FoodLogRepository repo;
     @Mock FoodLogTaskRepository taskRepo;
-
-    // ✅ 這個是你缺的
     @Mock StorageService storage;
+
+    // ✅ 新增：缺的第 5 個依賴
+    @Mock QuotaService quota;
 
     private FoodLogService service;
 
     @BeforeEach
     void setUp() {
-        // ✅ 依照最新建構子：repo, taskRepo, storage, objectMapper
-        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper());
+        // ✅ 依照最新建構子：repo, taskRepo, storage, objectMapper, quota
+        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota);
     }
 
     @Test
@@ -63,6 +65,7 @@ class FoodLogServiceTaskVisibilityTest {
         assertEquals("task-1", env.task().taskId());
 
         verify(taskRepo, times(1)).findByFoodLogId("log-1");
+        verifyNoInteractions(quota); // ✅ getOne 不應該扣點
     }
 
     @Test
@@ -82,9 +85,9 @@ class FoodLogServiceTaskVisibilityTest {
 
         assertNull(env.task());
         verify(taskRepo, never()).findByFoodLogId(anyString());
+        verifyNoInteractions(quota); // ✅
     }
 
-    // ✅ 建議順手補：FAILED 也要查 task（跟你現行邏輯一致）
     @Test
     void failed_should_query_task_and_include_task_in_envelope() {
         FoodLogEntity e = new FoodLogEntity();
@@ -115,5 +118,6 @@ class FoodLogServiceTaskVisibilityTest {
         assertEquals("PROVIDER_FAILED", env.error().errorCode());
 
         verify(taskRepo, times(1)).findByFoodLogId("log-3");
+        verifyNoInteractions(quota); // ✅
     }
 }
