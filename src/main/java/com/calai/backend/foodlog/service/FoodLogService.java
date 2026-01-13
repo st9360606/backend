@@ -32,6 +32,7 @@ public class FoodLogService {
     private final ObjectMapper om;
     private final QuotaService quota;
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
+    private final IdempotencyService idem;
 
     @Transactional
     public FoodLogEnvelope createAlbum(Long userId, String clientTz, MultipartFile file, String requestId) throws Exception {
@@ -39,61 +40,104 @@ public class FoodLogService {
         Instant serverNow = Instant.now();
         validateUploadBasics(file);
 
-        // ✅ 先扣點（擋掉瘋狂請求）
-        quota.consumeAiOrThrow(userId, tz, serverNow);
-
-        LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
-        // 先建 log（拿到 id）
-        FoodLogEntity e = new FoodLogEntity();
-        e.setUserId(userId);
-        e.setStatus(FoodLogStatus.PENDING);
-        e.setMethod("ALBUM");
-        e.setProvider("STUB");
-        e.setDegradeLevel("DG-0");
-        e.setCapturedAtUtc(serverNow);
-        e.setCapturedTz(tz.getId());
-        e.setCapturedLocalDate(todayLocal);
-        e.setServerReceivedAtUtc(serverNow);
-        e.setTimeSource(TimeSource.SERVER_RECEIVED);
-        e.setTimeSuspect(false);
-        e.setEffective(null);
-
-        repo.save(e);
-
-        // ✅ Step 3.5：用 magic number 決定 type/ext/contentType
-        String objectKey;
-        StorageService.SaveResult saved;
-
-        try (InputStream raw = file.getInputStream();
-             PushbackInputStream in = new PushbackInputStream(raw, 16)) {
-
-            ImageSniffer.Detection det = ImageSniffer.detect(in);
-            if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
-
-            objectKey = "user-" + userId + "/food-log/" + e.getId() + "/original" + det.ext();
-
-            try {
-                saved = storage.save(objectKey, in, det.contentType());
-            } catch (Exception ex) {
-                try { storage.delete(objectKey); } catch (Exception ignored) {}
-                throw ex;
-            }
+        // ✅ Step 3.10A：先做冪等占位
+        String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
+        if (existingLogId != null) {
+            return getOne(userId, existingLogId, requestId);
         }
 
-        e.setImageObjectKey(saved.objectKey());
-        e.setImageSha256(saved.sha256());
-        e.setImageContentType(saved.contentType());
-        e.setImageSizeBytes(saved.sizeBytes());
-        repo.save(e);
+        try {
+            // ✅ 只會被第一個成功 reserve 的請求扣 quota
+            quota.consumeAiOrThrow(userId, tz, serverNow);
 
-        FoodLogTaskEntity t = new FoodLogTaskEntity();
-        t.setFoodLogId(e.getId());
-        t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-        t.setPollAfterSec(2);
-        t.setNextRetryAtUtc(null);
-        taskRepo.save(t);
+            LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
 
-        return toEnvelope(e, t, requestId);
+            FoodLogEntity e = new FoodLogEntity();
+            e.setUserId(userId);
+            e.setStatus(FoodLogStatus.PENDING);
+            e.setMethod("ALBUM");
+            e.setProvider("STUB");
+            e.setDegradeLevel("DG-0");
+            e.setCapturedAtUtc(serverNow);
+            e.setCapturedTz(tz.getId());
+            e.setCapturedLocalDate(todayLocal);
+            e.setServerReceivedAtUtc(serverNow);
+            e.setTimeSource(TimeSource.SERVER_RECEIVED);
+            e.setTimeSuspect(false);
+            e.setEffective(null);
+
+            repo.save(e);
+
+            // ✅ attach：此 requestId 從此對應到這個 food_log_id
+            idem.attach(userId, requestId, e.getId(), serverNow);
+
+            String objectKey;
+            StorageService.SaveResult saved;
+
+            try (InputStream raw = file.getInputStream();
+                 PushbackInputStream in = new PushbackInputStream(raw, 16)) {
+
+                ImageSniffer.Detection det = ImageSniffer.detect(in);
+                if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
+
+                objectKey = "user-" + userId + "/food-log/" + e.getId() + "/original" + det.ext();
+
+                try {
+                    saved = storage.save(objectKey, in, det.contentType());
+                } catch (Exception ex) {
+                    try {
+                        storage.delete(objectKey);
+                    } catch (Exception ignored) {
+                    }
+                    throw ex;
+                }
+            }
+
+            e.setImageObjectKey(saved.objectKey());
+            e.setImageSha256(saved.sha256());
+            e.setImageContentType(saved.contentType());
+            e.setImageSizeBytes(saved.sizeBytes());
+            repo.save(e);
+
+            // ✅ Step 3.10B：sha256 去重，如果已有 DRAFT/SAVED 的 effective，直接重用，不建 task、不跑 provider
+            var hit = repo.findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+                    userId,
+                    e.getImageSha256(),
+                    java.util.List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
+            );
+
+            if (hit.isPresent() && hit.get().getEffective() != null) {
+                e.setEffective(hit.get().getEffective());
+                e.setProvider(hit.get().getProvider());
+                e.setStatus(FoodLogStatus.DRAFT);
+                e.setLastErrorCode(null);
+                e.setLastErrorMessage(null);
+                repo.save(e);
+
+                // ✅ 不建立 task（也不排隊）
+                return toEnvelope(e, null, requestId);
+            }
+
+            // 否則照舊：建立 task → PENDING → worker 跑 provider
+            FoodLogTaskEntity t = new FoodLogTaskEntity();
+            t.setFoodLogId(e.getId());
+            t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+            t.setPollAfterSec(2);
+            t.setNextRetryAtUtc(null);
+            taskRepo.save(t);
+
+            return toEnvelope(e, t, requestId);
+
+        } catch (Exception ex) {
+            // ✅ 失敗不要讓 requestId 永久卡住 RESERVED
+            idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_ALBUM_FAILED", safeMsg(ex), true);
+            throw ex;
+        }
+    }
+
+    private static String safeMsg(Throwable t) {
+        String m = t.getMessage();
+        return (m == null || m.isBlank()) ? t.getClass().getSimpleName() : m;
     }
 
     private static void validateUploadBasics(MultipartFile file) {

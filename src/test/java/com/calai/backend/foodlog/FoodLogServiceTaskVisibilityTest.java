@@ -7,6 +7,7 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.IdempotencyService;
 import com.calai.backend.foodlog.service.QuotaService; // ✅ 加這個
 import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,13 +31,13 @@ class FoodLogServiceTaskVisibilityTest {
 
     // ✅ 新增：缺的第 5 個依賴
     @Mock QuotaService quota;
-
+    @Mock IdempotencyService idem;
     private FoodLogService service;
 
     @BeforeEach
     void setUp() {
         // ✅ 依照最新建構子：repo, taskRepo, storage, objectMapper, quota
-        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota);
+        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota,idem);
     }
 
     @Test

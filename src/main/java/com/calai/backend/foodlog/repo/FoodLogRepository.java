@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.repo;
 
+import com.calai.backend.foodlog.dto.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -14,5 +15,9 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select f from FoodLogEntity f where f.id = :id")
     FoodLogEntity findByIdForUpdate(String id);
+
+    Optional<FoodLogEntity> findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+            Long userId, String imageSha256, java.util.List<FoodLogStatus> status
+    );
 
 }

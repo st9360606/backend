@@ -52,6 +52,19 @@ public class FoodLogExceptionAdvice {
                 .body(err(code, e, req)); // ✅ 補齊 5 欄位
     }
 
+    @ExceptionHandler(RequestInProgressException.class)
+    public ResponseEntity<FoodLogErrorResponse> handleReqInProgress(RequestInProgressException e, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
+                .body(new FoodLogErrorResponse(
+                        "REQUEST_IN_PROGRESS",
+                        safeMsg(e),
+                        rid(req),
+                        "RETRY_LATER",
+                        e.retryAfterSec()
+                ));
+    }
+
     @ExceptionHandler(SubscriptionRequiredException.class)
     public ResponseEntity<FoodLogErrorResponse> handleSubRequired(SubscriptionRequiredException e, HttpServletRequest req) {
         return ResponseEntity.status(402)

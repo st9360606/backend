@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.IdempotencyService;
 import com.calai.backend.foodlog.service.QuotaService;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,7 +29,7 @@ class FoodLogRetryTest {
         StorageService storage = Mockito.mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
         QuotaService quota = Mockito.mock(QuotaService.class);
-
+        IdempotencyService idem = Mockito.mock(IdempotencyService.class);
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log1");
         log.setUserId(1L);
@@ -50,7 +51,7 @@ class FoodLogRetryTest {
         Mockito.when(taskRepo.findByFoodLogId("log1")).thenReturn(Optional.of(task));
 
         // ✅ 注意：consumeAiOrThrow 是 non-void，不需要 doNothing；mock 預設回 null 即可
-        FoodLogService svc = new FoodLogService(repo, taskRepo, storage, om, quota);
+        FoodLogService svc = new FoodLogService(repo, taskRepo, storage, om, quota, idem);
 
         svc.retry(1L, "log1", "rid-1");
 
@@ -73,7 +74,7 @@ class FoodLogRetryTest {
         StorageService storage = Mockito.mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
         QuotaService quota = Mockito.mock(QuotaService.class);
-
+        IdempotencyService idem = Mockito.mock(IdempotencyService.class);
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
         log.setUserId(1L);
@@ -81,7 +82,7 @@ class FoodLogRetryTest {
 
         Mockito.when(repo.findByIdForUpdate("log2")).thenReturn(log);
 
-        FoodLogService svc = new FoodLogService(repo, taskRepo, storage, om, quota);
+        FoodLogService svc = new FoodLogService(repo, taskRepo, storage, om, quota, idem);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> svc.retry(1L, "log2", "rid-2"));
