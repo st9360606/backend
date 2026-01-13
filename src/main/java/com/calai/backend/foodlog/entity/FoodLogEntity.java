@@ -102,4 +102,8 @@ public class FoodLogEntity {
     void preUpdate() {
         updatedAtUtc = Instant.now();
     }
+
+    public void applyEffectivePatch(String fieldKey, com.fasterxml.jackson.databind.JsonNode newValue) {
+        // TODO Step4: 依 fieldKey 寫入 effective JSON（例如 FOOD_NAME、NUTRIENTS...）
+    }
 }

@@ -1,4 +1,4 @@
- package com.calai.backend.foodlog.quota;
+package com.calai.backend.foodlog.quota;
 
 import java.time.*;
 

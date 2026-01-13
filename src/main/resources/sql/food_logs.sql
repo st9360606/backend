@@ -52,102 +52,116 @@ CREATE TABLE food_logs
 
 
 -- === food_log_tasks（承接 PENDING）===
-CREATE TABLE IF NOT EXISTS food_log_tasks (
-                                              id CHAR(36) NOT NULL DEFAULT (UUID()),
-    food_log_id CHAR(36) NOT NULL,
+DROP TABLE IF EXISTS food_log_tasks;
 
-    task_status VARCHAR(16) NOT NULL, -- RUNNING/SUCCEEDED/FAILED/CANCELLED
-    attempts INT NOT NULL DEFAULT 0,
-    next_retry_at_utc DATETIME(6) NULL,
+CREATE TABLE food_log_tasks
+(
+    id                 CHAR(36)                                                   NOT NULL,
+    food_log_id        CHAR(36)                                                   NOT NULL,
 
-    provider_request_ref CHAR(36) NULL,
-    provider_response_ref CHAR(36) NULL,
+    task_status        ENUM ('QUEUED','RUNNING','SUCCEEDED','FAILED','CANCELLED') NOT NULL,
+    attempts           INT                                                        NOT NULL DEFAULT 0,
+    next_retry_at_utc  DATETIME(6)                                                NULL,
 
-    poll_after_sec INT NOT NULL DEFAULT 2,
+    poll_after_sec     INT                                                        NOT NULL DEFAULT 2,
 
-    last_error_code VARCHAR(64) NULL,
-    last_error_message TEXT NULL,
+    last_error_code    VARCHAR(64)                                                NULL,
+    last_error_message TEXT                                                       NULL,
 
-    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    created_at_utc     DATETIME(6)                                                NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc     DATETIME(6)                                                NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
 
+    -- ✅ 一個 food_log 對應一個 task（Step2 MVP 先這樣）
+    UNIQUE KEY ux_food_log_tasks_food_log_id (food_log_id),
+
     INDEX idx_food_log_tasks_status (task_status, next_retry_at_utc),
-    INDEX idx_food_log_tasks_food_log_id (food_log_id),
 
     CONSTRAINT fk_food_log_tasks_food_log
-    FOREIGN KEY (food_log_id) REFERENCES food_logs(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+        FOREIGN KEY (food_log_id) REFERENCES food_logs (id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_0900_ai_ci;
 
 
 -- === food_log_overrides（回溯覆寫）===
-CREATE TABLE IF NOT EXISTS food_log_overrides (
-                                                  id CHAR(36) NOT NULL DEFAULT (UUID()),
-    food_log_id CHAR(36) NOT NULL,
+CREATE TABLE IF NOT EXISTS food_log_overrides
+(
+    id             CHAR(36)    NOT NULL,
+    food_log_id    CHAR(36)    NOT NULL,
 
-    field_key VARCHAR(32) NOT NULL, -- FOOD_NAME/QUANTITY/NUTRIENTS/HEALTH_SCORE...
-    old_value_json JSON NULL,
-    new_value_json JSON NOT NULL,
+    field_key      VARCHAR(32) NOT NULL, -- FOOD_NAME/QUANTITY/NUTRIENTS/HEALTH_SCORE...
+    old_value_json JSON        NULL,
+    new_value_json JSON        NOT NULL,
 
-    editor_type VARCHAR(16) NOT NULL, -- USER/ADMIN/SYSTEM
-    reason TEXT NULL,
-    edited_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    editor_type    VARCHAR(16) NOT NULL, -- USER/ADMIN/SYSTEM
+    reason         TEXT        NULL,
+    edited_at_utc  DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
 
     INDEX idx_food_log_overrides_log (food_log_id, edited_at_utc),
 
     CONSTRAINT fk_food_log_overrides_food_log
-    FOREIGN KEY (food_log_id) REFERENCES food_logs(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+        FOREIGN KEY (food_log_id) REFERENCES food_logs (id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_0900_ai_ci;
 
 
 -- === usage_counters（配額：server_now + user_tz 的 local_date）===
-CREATE TABLE IF NOT EXISTS usage_counters (
-                                              id BIGINT NOT NULL AUTO_INCREMENT,
-                                              user_id CHAR(36) NOT NULL,
-    local_date DATE NOT NULL,
-    used_count INT NOT NULL DEFAULT 0,
+CREATE TABLE IF NOT EXISTS usage_counters
+(
+    id             BIGINT      NOT NULL AUTO_INCREMENT,
+    user_id        BIGINT      NOT NULL,
+    local_date     DATE        NOT NULL,
+    used_count     INT         NOT NULL DEFAULT 0,
     updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
     UNIQUE KEY uk_usage_counters_user_date (user_id, local_date),
     INDEX idx_usage_counters_user_date (user_id, local_date)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_0900_ai_ci;
 
 
 -- === user_entitlements（訂閱/試用）===
-CREATE TABLE IF NOT EXISTS user_entitlements (
-                                                 id CHAR(36) NOT NULL DEFAULT (UUID()),
-    user_id CHAR(36) NOT NULL,
-    entitlement_type VARCHAR(16) NOT NULL, -- TRIAL/MONTHLY/YEARLY
-    status VARCHAR(16) NOT NULL,           -- ACTIVE/EXPIRED/CANCELLED
-    valid_from_utc DATETIME(6) NOT NULL,
-    valid_to_utc DATETIME(6) NOT NULL,
+CREATE TABLE IF NOT EXISTS user_entitlements
+(
+    id                   CHAR(36)    NOT NULL,
+    user_id              BIGINT      NOT NULL,
+    entitlement_type     VARCHAR(16) NOT NULL, -- TRIAL/MONTHLY/YEARLY
+    status               VARCHAR(16) NOT NULL, -- ACTIVE/EXPIRED/CANCELLED
+    valid_from_utc       DATETIME(6) NOT NULL,
+    valid_to_utc         DATETIME(6) NOT NULL,
 
-    purchase_token_hash CHAR(64) NULL,
+    purchase_token_hash  CHAR(64)    NULL,
     last_verified_at_utc DATETIME(6) NULL,
 
-    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    created_at_utc       DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc       DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
 
     INDEX idx_entitlements_user (user_id, status, valid_to_utc)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_0900_ai_ci;
 
 
 -- === deletion_jobs（刪圖/刪 payload 任務）===
-CREATE TABLE IF NOT EXISTS deletion_jobs (
-                                             id CHAR(36) NOT NULL DEFAULT (UUID()),
-    food_log_id CHAR(36) NOT NULL,
-    job_status VARCHAR(16) NOT NULL, -- QUEUED/RUNNING/SUCCEEDED/FAILED
-    image_object_key TEXT NULL,
-    last_error TEXT NULL,
+CREATE TABLE IF NOT EXISTS deletion_jobs
+(
+    id               CHAR(36)    NOT NULL,
+    food_log_id      CHAR(36)    NOT NULL,
+    job_status       VARCHAR(16) NOT NULL, -- QUEUED/RUNNING/SUCCEEDED/FAILED
+    image_object_key TEXT        NULL,
+    last_error       TEXT        NULL,
 
-    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    created_at_utc   DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc   DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
 
@@ -155,5 +169,7 @@ CREATE TABLE IF NOT EXISTS deletion_jobs (
     INDEX idx_deletion_jobs_status (job_status),
 
     CONSTRAINT fk_deletion_jobs_food_log
-    FOREIGN KEY (food_log_id) REFERENCES food_logs(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+        FOREIGN KEY (food_log_id) REFERENCES food_logs (id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_0900_ai_ci;
