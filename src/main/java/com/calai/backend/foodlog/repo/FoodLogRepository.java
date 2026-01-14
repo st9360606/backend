@@ -38,4 +38,16 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
             @Param("to") LocalDate to,
             Pageable pageable
     );
+
+    @Query("""
+        select count(f) from FoodLogEntity f
+        where f.userId = :userId
+          and f.imageObjectKey = :objectKey
+          and f.status <> :deletedStatus
+    """)
+    long countLiveRefsByObjectKey(
+            @Param("userId") Long userId,
+            @Param("objectKey") String objectKey,
+            @Param("deletedStatus") FoodLogStatus deletedStatus
+    );
 }

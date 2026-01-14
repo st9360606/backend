@@ -5,6 +5,7 @@ import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.service.FoodLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -18,6 +19,7 @@ import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
 
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "app.features", name = "dev-image-endpoint", havingValue = "true")
 @RestController
 public class FoodLogImageController {
 

@@ -2,6 +2,7 @@ package com.calai.backend.foodlog.web;
 
 import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.controller.FoodLogController;
+import com.calai.backend.foodlog.controller.FoodLogImageController;
 import com.calai.backend.foodlog.dto.FoodLogErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;
@@ -14,7 +15,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.io.FileNotFoundException;
 
-@RestControllerAdvice(assignableTypes = FoodLogController.class)
+@RestControllerAdvice(assignableTypes = {
+        FoodLogController.class,
+        FoodLogImageController.class
+})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class FoodLogExceptionAdvice {
 
