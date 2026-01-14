@@ -17,7 +17,7 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select f from FoodLogEntity f where f.id = :id")
-    FoodLogEntity findByIdForUpdate(String id);
+    FoodLogEntity findByIdForUpdate(@Param("id") String id);
 
     Optional<FoodLogEntity> findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
             Long userId, String imageSha256, java.util.List<FoodLogStatus> status
