@@ -19,27 +19,30 @@ public class IdempotencyService {
      */
     @Transactional
     public String reserveOrGetExisting(Long userId, String requestId, Instant now) {
-        if (requestId == null || requestId.isBlank()) return null; // 理論上不會發生（你已統一用 RequestIdFilter）
+        if (requestId == null || requestId.isBlank()) return null;
 
         String existing = repo.findFoodLogId(userId, requestId);
         if (existing != null && !existing.isBlank()) return existing;
 
-        int inserted = repo.reserve(userId, requestId, now);
-        if (inserted == 1) {
-            // 你是第一個拿到 RESERVED 的人
-            return null;
+        // ✅ 如果上一輪 FAILED 且未 attach，直接釋放，讓同 requestId 可重試
+        String status = repo.findStatus(userId, requestId);
+        if ("FAILED".equalsIgnoreCase(status)) {
+            repo.deleteFailedIfNotAttached(userId, requestId);
         }
 
+        int inserted = repo.reserve(userId, requestId, now);
+        if (inserted == 1) return null;
+
         // 已有人 reserve 了，但還沒 attach foodLogId
-        String status = repo.findStatus(userId, requestId);
+        status = repo.findStatus(userId, requestId);
         if ("RESERVED".equalsIgnoreCase(status)) {
             throw new RequestInProgressException("REQUEST_IN_PROGRESS", 1);
         }
 
-        // 其他狀態就再查一次看看
         existing = repo.findFoodLogId(userId, requestId);
         if (existing != null && !existing.isBlank()) return existing;
 
+        // 其他狀態一律視為仍在處理（保守）
         throw new RequestInProgressException("REQUEST_IN_PROGRESS", 1);
     }
 
@@ -54,7 +57,7 @@ public class IdempotencyService {
         if (requestId == null || requestId.isBlank()) return;
         repo.markFailed(userId, requestId, code, msg, Instant.now());
         if (releaseIfNotAttached) {
-            repo.releaseIfNotAttached(userId, requestId);
+            repo.releaseIfNotAttached(userId, requestId); // ✅ 你原本就有
         }
     }
 }

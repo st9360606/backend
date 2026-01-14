@@ -48,4 +48,40 @@ class IdempotencyServiceTest {
         assertThrows(RequestInProgressException.class,
                 () -> s.reserveOrGetExisting(1L, "rid", Instant.now()));
     }
+
+    @Test
+    void reserveOrGetExisting_shouldReleaseFailedAndReserveAgain() {
+        FoodLogRequestRepository repo = Mockito.mock(FoodLogRequestRepository.class);
+        IdempotencyService s = new IdempotencyService(repo);
+
+        Long userId = 1L;
+        String requestId = "req-1";
+        Instant now = Instant.now();
+
+        Mockito.when(repo.findFoodLogId(userId, requestId)).thenReturn(null);
+        Mockito.when(repo.findStatus(userId, requestId)).thenReturn("FAILED", null); // 第一次看到 FAILED，第二次可忽略
+        Mockito.when(repo.reserve(userId, requestId, now)).thenReturn(1); // 釋放後成功插入
+
+        String existing = s.reserveOrGetExisting(userId, requestId, now);
+
+        assertNull(existing);
+        Mockito.verify(repo).deleteFailedIfNotAttached(userId, requestId);
+        Mockito.verify(repo).reserve(userId, requestId, now);
+    }
+
+    @Test
+    void reserveOrGetExisting_whenReservedByOther_shouldThrowRequestInProgress() {
+        FoodLogRequestRepository repo = Mockito.mock(FoodLogRequestRepository.class);
+        IdempotencyService s = new IdempotencyService(repo);
+
+        Long userId = 1L;
+        String requestId = "req-2";
+        Instant now = Instant.now();
+
+        Mockito.when(repo.findFoodLogId(userId, requestId)).thenReturn(null);
+        Mockito.when(repo.findStatus(userId, requestId)).thenReturn("RESERVED");
+        Mockito.when(repo.reserve(userId, requestId, now)).thenReturn(0); // INSERT IGNORE 沒插入表示已存在
+
+        assertThrows(RequestInProgressException.class, () -> s.reserveOrGetExisting(userId, requestId, now));
+    }
 }

@@ -43,25 +43,29 @@ public interface FoodLogTaskRepository extends JpaRepository<FoodLogTaskEntity, 
     @Query("select t from FoodLogTaskEntity t where t.foodLogId = :foodLogId")
     Optional<FoodLogTaskEntity> findByFoodLogIdForUpdate(@Param("foodLogId") String foodLogId);
 
-    /**
-     * ✅ Step 3.8：回收卡死的 RUNNING
-     * 把 RUNNING 且 updated_at_utc 太久沒動的，轉為 FAILED 並可立即重跑
-     */
     @Modifying
     @Query(
             value = """
-            UPDATE food_log_tasks
-            SET task_status = 'FAILED',
-                next_retry_at_utc = :now,
-                last_error_code = :code,
-                last_error_message = :msg,
-                updated_at_utc = :now
-            WHERE task_status = 'RUNNING'
-              AND updated_at_utc <= :staleBefore
-            """,
+        UPDATE food_log_tasks t
+        JOIN food_logs f ON f.id = t.food_log_id
+        SET
+            t.task_status = 'FAILED',
+            t.next_retry_at_utc = :now,
+            t.last_error_code = :code,
+            t.last_error_message = :msg,
+            t.updated_at_utc = :now,
+
+            f.status = 'FAILED',
+            f.last_error_code = :code,
+            f.last_error_message = :msg,
+            f.updated_at_utc = :now
+        WHERE t.task_status = 'RUNNING'
+          AND t.updated_at_utc <= :staleBefore
+          AND f.status = 'PENDING'
+        """,
             nativeQuery = true
     )
-    int resetStaleRunning(
+    int resetStaleRunningAndMarkLogsFailed(
             @Param("staleBefore") Instant staleBefore,
             @Param("now") Instant now,
             @Param("code") String code,

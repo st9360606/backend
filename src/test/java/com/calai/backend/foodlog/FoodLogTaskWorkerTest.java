@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.never;
 
 class FoodLogTaskWorkerTest {
 
@@ -36,14 +37,18 @@ class FoodLogTaskWorkerTest {
         log.setId("log1");
         log.setStatus(FoodLogStatus.DELETED);
 
-        Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt())).thenReturn(List.of(task));
-        Mockito.when(logRepo.findByIdForUpdate("log1")).thenReturn(log);
+        Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
+                .thenReturn(List.of(task));
+        Mockito.when(logRepo.findByIdForUpdate("log1"))
+                .thenReturn(log);
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, provider, storage);
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
-        Mockito.verify(provider, Mockito.never()).process(anyString(), anyString(), any());
+
+        // ✅ 新簽名驗證：不應呼叫 provider.process(FoodLogEntity, StorageService)
+        Mockito.verify(provider, never()).process(any(FoodLogEntity.class), any(StorageService.class));
     }
 
     @Test
@@ -63,9 +68,13 @@ class FoodLogTaskWorkerTest {
         log.setStatus(FoodLogStatus.PENDING);
         log.setImageObjectKey("user-1/food-log/log2/original.jpg");
 
-        Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt())).thenReturn(List.of(task));
-        Mockito.when(logRepo.findByIdForUpdate("log2")).thenReturn(log);
-        Mockito.when(provider.process(eq("log2"), anyString(), eq(storage)))
+        Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
+                .thenReturn(List.of(task));
+        Mockito.when(logRepo.findByIdForUpdate("log2"))
+                .thenReturn(log);
+
+        // ✅ 新簽名 stubbing
+        Mockito.when(provider.process(any(FoodLogEntity.class), eq(storage)))
                 .thenThrow(new RuntimeException("boom"));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, provider, storage);
@@ -95,9 +104,13 @@ class FoodLogTaskWorkerTest {
         log.setStatus(FoodLogStatus.PENDING);
         log.setImageObjectKey("user-1/food-log/log3/original.jpg");
 
-        Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt())).thenReturn(List.of(task));
-        Mockito.when(logRepo.findByIdForUpdate("log3")).thenReturn(log);
-        Mockito.when(provider.process(eq("log3"), anyString(), eq(storage)))
+        Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
+                .thenReturn(List.of(task));
+        Mockito.when(logRepo.findByIdForUpdate("log3"))
+                .thenReturn(log);
+
+        // ✅ 新簽名 stubbing
+        Mockito.when(provider.process(any(FoodLogEntity.class), eq(storage)))
                 .thenThrow(new RuntimeException("always fail"));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, provider, storage);

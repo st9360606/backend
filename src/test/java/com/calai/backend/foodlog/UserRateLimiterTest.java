@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.service.UserRateLimiter;
+import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.web.RateLimitedException;
 import org.junit.jupiter.api.Test;
 

@@ -8,6 +8,8 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.image.ImageSniffer;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
+import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
@@ -17,7 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-
+import com.calai.backend.foodlog.service.cleanup.StorageCleanup;
 import java.io.InputStream;
 import java.io.PushbackInputStream;
 import java.time.*;
@@ -54,19 +56,18 @@ public class FoodLogService {
         Instant serverNow = Instant.now();
         validateUploadBasics(file);
 
-        // 1) idem：同 requestId 重送直接回原結果
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
-        // 2) guard：速率 + 併發
         rateLimiter.checkOrThrow(userId, serverNow);
 
         boolean acquired = false;
+        String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
+
         try {
             inFlight.acquireOrThrow(userId);
             acquired = true;
 
-            String tempKey;
             ImageSniffer.Detection det;
             StorageService.SaveResult saved;
 
@@ -77,12 +78,17 @@ public class FoodLogService {
                 det = ImageSniffer.detect(in);
                 if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
 
+                // ✅ detect 成功就先決定 tempKey（帶 ext）
                 tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();
+
                 saved = storage.save(tempKey, in, det.contentType());
 
             } catch (Exception ex) {
-                // 由 finally 統一 release，避免 double-release
-                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), false);
+                // ✅ 上傳失敗也嘗試刪 temp（即使不存在也不會炸）
+                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
+
+                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 
@@ -109,12 +115,10 @@ public class FoodLogService {
                 e.setTimeSuspect(false);
 
                 if (hit.isPresent() && hit.get().getEffective() != null) {
-                    // 命中：直接 DRAFT（不排 task、不扣 quota）
                     e.setProvider(hit.get().getProvider());
                     e.setEffective(hit.get().getEffective());
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    // 未命中：扣 quota，排 task → PENDING
                     quota.consumeAiOrThrow(userId, tz, serverNow);
                     e.setProvider("STUB");
                     e.setEffective(null);
@@ -140,12 +144,10 @@ public class FoodLogService {
                 e.setImageSizeBytes(saved.sizeBytes());
                 repo.save(e);
 
-                // 命中：不建 task
                 if (e.getStatus() == FoodLogStatus.DRAFT) {
                     return toEnvelope(e, null, requestId);
                 }
 
-                // 未命中：建 task
                 FoodLogTaskEntity t = new FoodLogTaskEntity();
                 t.setFoodLogId(e.getId());
                 t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
@@ -156,9 +158,10 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                // tempKey 可能已被 retainFromTemp move 掉：delete 失敗也無妨
-                try { storage.delete("user-" + userId + "/blobs/tmp/" + requestId + "/upload"); } catch (Exception ignored) {}
-                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_ALBUM_FAILED", safeMsg(ex), false);
+                // ✅ 以前你這裡 hard-code ".../upload" 現在改成刪 tempKey
+                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+
+                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_ALBUM_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 
@@ -187,11 +190,12 @@ public class FoodLogService {
         rateLimiter.checkOrThrow(userId, serverNow);
 
         boolean acquired = false;
+        String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
+
         try {
             inFlight.acquireOrThrow(userId);
             acquired = true;
 
-            String tempKey;
             ImageSniffer.Detection det;
             StorageService.SaveResult saved;
 
@@ -202,16 +206,20 @@ public class FoodLogService {
                 det = ImageSniffer.detect(in);
                 if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
 
+                // ✅ detect 成功就先決定 tempKey（帶 ext）
                 tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();
+
                 saved = storage.save(tempKey, in, det.contentType());
 
             } catch (Exception ex) {
-                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), false);
+                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
+                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 
             try {
-                // 2) EXIF（從 tempKey 再 open 一次讀。MVP 先求跑通）
+                // 2) EXIF（從 tempKey 再 open 一次讀）
                 Optional<Instant> exifUtc = ExifTimeExtractor.tryReadCapturedAtUtc(storage, tempKey, tz);
 
                 // 3) deviceCapturedAtUtc（App 可傳）
@@ -244,12 +252,10 @@ public class FoodLogService {
                 e.setTimeSuspect(r.suspect());
 
                 if (hit.isPresent() && hit.get().getEffective() != null) {
-                    // 命中：直接 DRAFT（不排 task、不扣 quota）
                     e.setProvider(hit.get().getProvider());
                     e.setEffective(hit.get().getEffective());
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    // 未命中：扣 quota + 建 task → PENDING
                     quota.consumeAiOrThrow(userId, tz, serverNow);
                     e.setProvider("STUB");
                     e.setEffective(null);
@@ -291,8 +297,9 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                try { storage.delete("user-" + userId + "/blobs/tmp/" + requestId + "/upload"); } catch (Exception ignored) {}
-                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_PHOTO_FAILED", safeMsg(ex), false);
+                // ✅ 以前你這裡 hard-code ".../upload" 現在改成刪 tempKey
+                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_PHOTO_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 

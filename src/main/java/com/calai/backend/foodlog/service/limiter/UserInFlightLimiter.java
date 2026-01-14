@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.service;
+package com.calai.backend.foodlog.service.limiter;
 
 import com.calai.backend.foodlog.web.TooManyInFlightException;
 import org.springframework.beans.factory.annotation.Value;

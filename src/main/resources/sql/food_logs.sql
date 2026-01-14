@@ -239,3 +239,21 @@ CREATE TABLE IF NOT EXISTS image_blobs
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci;
 
+
+
+CREATE TABLE IF NOT EXISTS logmeal_accounts
+(
+    id                 BIGINT      NOT NULL AUTO_INCREMENT,
+    user_id            BIGINT      NOT NULL,
+    -- 你從 LogMeal 拿到的 APIUser token（務必加密後存）
+    api_user_token_enc TEXT        NOT NULL,
+    status             VARCHAR(16) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE/DISABLED
+    created_at_utc     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_logmeal_accounts_user (user_id),
+    INDEX idx_logmeal_accounts_status (status)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_0900_ai_ci;

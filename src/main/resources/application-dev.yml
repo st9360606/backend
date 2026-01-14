@@ -39,8 +39,8 @@ spring:
     host: smtp.gmail.com
     port: 587
     test-connection: true
-    username: st9360606@gmail.com
-    password: tdukpsqbydqqzujd
+    username: "${SMTP_USERNAME}"
+    password: "${SMTP_PASSWORD}"
     properties:
       mail.transport.protocol: smtp
       mail.smtp.auth: true
@@ -58,6 +58,17 @@ management:
         include: health,info,scheduledtasks
 
 app:
+  crypto:
+    aesgcm:
+      key-b64: "${APP_CRYPTO_AESGCM_KEY_B64}"
+  foodlog:
+    provider: "STUB"  # STUB / TODO 正式環境改 : LOGMEAL
+  provider:
+    logmeal:
+      base-url: "https://api.logmeal.com"
+      api-user-token: "${LOGMEAL_APIUSER_TOKEN}"
+      connect-timeout: 5s
+      read-timeout: 25s
   google:
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
   auth:
@@ -76,6 +87,14 @@ app:
     weight-photos-dir: uploads/weight-photos
     local:
       base-dir: ./data
+      tmp-cleaner:
+        enabled: true
+        tmp-subdir: "blobs/tmp"     # 相對於 base-dir  cleaner 只會掃描 base-dir/tmp-subdir 子樹，並做 tmpDir.startsWith(baseDir) 防呆，避免配置錯誤誤刪其他路徑。建議 production 若改用雲端 object storage，可直接 enabled=false 關閉。
+        keep: "PT6H"                # 超過 6 小時的 tmp 檔會刪
+        fixed-delay: "PT10M"        # 每 10 分鐘跑一次
+        initial-delay: "PT1M"       # 啟動後 1 分鐘第一次執行
+        max-depth: 8                # 避免深層走訪拖慢
+        delete-empty-dirs: true
   features:
     dev-image-endpoint: true   # TODO 上線要改成 false
 alias:

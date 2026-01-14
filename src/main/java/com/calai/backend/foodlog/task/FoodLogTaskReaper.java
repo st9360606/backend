@@ -25,15 +25,13 @@ public class FoodLogTaskReaper {
         Instant now = Instant.now();
         Instant staleBefore = now.minus(RUNNING_TIMEOUT);
 
-        int n = taskRepo.resetStaleRunning(
+        int n = taskRepo.resetStaleRunningAndMarkLogsFailed(
                 staleBefore,
                 now,
                 "WORKER_STALE_RUNNING",
                 "RUNNING timeout, reset to FAILED"
         );
 
-        if (n > 0) {
-            log.warn("reaped stale RUNNING tasks: count={}", n);
-        }
+        if (n > 0) log.warn("reaped stale RUNNING tasks+logs: count={}", n);
     }
 }
