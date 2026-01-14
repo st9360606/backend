@@ -4,6 +4,7 @@ import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.service.FoodLogDeleteService;
+import com.calai.backend.foodlog.service.FoodLogHistoryService;
 import com.calai.backend.foodlog.service.FoodLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +15,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import com.calai.backend.foodlog.dto.FoodLogListResponse;
+import com.calai.backend.foodlog.service.FoodLogHistoryService;
+import org.springframework.format.annotation.DateTimeFormat;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @RequiredArgsConstructor
@@ -25,6 +30,7 @@ public class FoodLogController {
     private final AuthContext auth;
     private final FoodLogService service;
     private final FoodLogDeleteService deleteService;
+    private final FoodLogHistoryService historyService;
 
     @PostMapping(value = "/album", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope album(
@@ -96,6 +102,26 @@ public class FoodLogController {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
         return deleteService.deleteOne(uid, id, requestId);
+    }
+
+    @PostMapping("/{id}/save")
+    public FoodLogEnvelope save(@PathVariable String id, HttpServletRequest req) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return historyService.save(uid, id, requestId);
+    }
+
+    @GetMapping
+    public FoodLogListResponse listSaved(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromLocalDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toLocalDate,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            HttpServletRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return historyService.listSaved(uid, fromLocalDate, toLocalDate, page, size, requestId);
     }
 
 }

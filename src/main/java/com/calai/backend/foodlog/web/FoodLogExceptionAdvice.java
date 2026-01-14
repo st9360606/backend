@@ -25,7 +25,12 @@ public class FoodLogExceptionAdvice {
             case "FOOD_LOG_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "FOOD_LOG_DELETED" -> HttpStatus.GONE;
 
-            case "FOOD_LOG_NOT_RETRYABLE" -> HttpStatus.CONFLICT;
+            case "FOOD_LOG_NOT_READY",
+                 "FOOD_LOG_FAILED",
+                 "FOOD_LOG_NOT_SAVEABLE",
+                 "DATE_RANGE_REQUIRED",
+                 "DATE_RANGE_INVALID",
+                 "PAGE_SIZE_TOO_LARGE" -> HttpStatus.CONFLICT;
 
             case "FILE_REQUIRED",
                  "FILE_TOO_LARGE",

@@ -1,11 +1,11 @@
 -- MySQL 8.x
--- 你說「已建但沒資料」：直接 drop + recreate 最乾淨
 DROP TABLE IF EXISTS food_logs;
 
 CREATE TABLE food_logs
 (
     id                     CHAR(36)                                            NOT NULL,
     user_id                BIGINT                                              NOT NULL,
+
     status                 ENUM ('PENDING','DRAFT','SAVED','FAILED','DELETED') NOT NULL,
     method                 VARCHAR(16)                                         NOT NULL, -- PHOTO/ALBUM/BARCODE/LABEL
     provider               VARCHAR(32)                                         NOT NULL, -- STUB/LOGMEAL/...
@@ -23,6 +23,8 @@ CREATE TABLE food_logs
     -- input refs
     image_object_key       TEXT                                                NULL,
     image_sha256           CHAR(64)                                            NULL,
+    image_content_type     VARCHAR(64)                                         NULL,     -- ✅ 原本 ALTER 的欄位：合併進來
+    image_size_bytes       BIGINT                                              NULL,     -- ✅ 原本 ALTER 的欄位：合併進來
     barcode                VARCHAR(64)                                         NULL,
 
     -- effective values（列表/彙總以此為準）
@@ -41,18 +43,20 @@ CREATE TABLE food_logs
     updated_at_utc         DATETIME(6)                                         NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
-    INDEX idx_food_logs_user_date (user_id, captured_local_date),
-    INDEX idx_food_logs_user_status (user_id, status),
-    INDEX idx_food_logs_sha256 (user_id, image_sha256)
+
+    -- ✅ 1) 歷史列表：user + status + local_date 範圍（核心）
+    -- 若你未來把排序改成 ORDER BY captured_local_date DESC, captured_at_utc DESC，這個索引會更吃香
+    INDEX idx_food_logs_user_status_date (user_id, status, captured_local_date, captured_at_utc),
+
+    -- ✅ 2) 去重命中：user + sha + status + created_at_utc（limit 1）
+    INDEX idx_food_logs_user_sha_status_created (user_id, image_sha256, status, created_at_utc)
+
     -- ✅ 可選：如果你確定 users(id) 存在且想強約束
     -- ,CONSTRAINT fk_food_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci;
 
-ALTER TABLE food_logs
-    ADD COLUMN image_content_type VARCHAR(64) NULL AFTER image_sha256,
-    ADD COLUMN image_size_bytes BIGINT NULL AFTER image_content_type;
 
 -- === food_log_tasks（承接 PENDING）===
 DROP TABLE IF EXISTS food_log_tasks;
