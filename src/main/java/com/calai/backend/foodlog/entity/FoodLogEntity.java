@@ -9,9 +9,11 @@ import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
-
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.UUID;
 
 @Getter
@@ -109,7 +111,56 @@ public class FoodLogEntity {
         updatedAtUtc = Instant.now();
     }
 
-    public void applyEffectivePatch(String fieldKey, com.fasterxml.jackson.databind.JsonNode newValue) {
-        // TODO Step4: 依 fieldKey 寫入 effective JSON（例如 FOOD_NAME、NUTRIENTS...）
+    public void applyEffectivePatch(String fieldKey, JsonNode newValue) {
+        ObjectNode root;
+        if (this.effective == null || this.effective.isNull() || !this.effective.isObject()) {
+            root = JsonNodeFactory.instance.objectNode();
+        } else {
+            root = this.effective.deepCopy();
+        }
+
+        switch (fieldKey) {
+            case "FOOD_NAME" -> {
+                if (newValue == null || newValue.isNull()) root.remove("foodName");
+                else root.set("foodName", newValue);
+            }
+            case "QUANTITY" -> {
+                if (newValue == null || newValue.isNull()) root.remove("quantity");
+                else root.set("quantity", newValue);
+            }
+            case "HEALTH_SCORE" -> {
+                if (newValue == null || newValue.isNull()) root.remove("healthScore");
+                else root.set("healthScore", newValue);
+            }
+            case "NUTRIENTS" -> {
+                if (newValue == null || newValue.isNull()) {
+                    root.remove("nutrients");
+                } else {
+                    ObjectNode merged;
+
+                    JsonNode existing = root.get("nutrients");
+                    if (existing != null && existing.isObject()) {
+                        // ✅ 不需要 (ObjectNode) cast
+                        merged = existing.deepCopy();
+                    } else {
+                        merged = JsonNodeFactory.instance.objectNode();
+                    }
+
+                    if (!newValue.isObject()) {
+                        throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                    }
+
+                    // ✅ Jackson 新版建議用 properties() 取代 fields()
+                    for (Map.Entry<String, JsonNode> e : newValue.properties()) {
+                        merged.set(e.getKey(), e.getValue());
+                    }
+
+                    root.set("nutrients", merged);
+                }
+            }
+            default -> throw new IllegalArgumentException("FIELD_KEY_INVALID");
+        }
+
+        this.effective = root;
     }
 }

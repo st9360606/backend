@@ -27,9 +27,12 @@ public class FoodLogExceptionAdvice {
 
             case "FOOD_LOG_NOT_READY",
                  "FOOD_LOG_FAILED",
-                 "FOOD_LOG_NOT_SAVEABLE",
+                 "FOOD_LOG_NOT_SAVABLE",
                  "DATE_RANGE_REQUIRED",
                  "DATE_RANGE_INVALID",
+                 "FOOD_LOG_NOT_EDITABLE",
+                 "FIELD_KEY_INVALID",
+                 "OVERRIDE_VALUE_INVALID",
                  "PAGE_SIZE_TOO_LARGE" -> HttpStatus.CONFLICT;
 
             case "FILE_REQUIRED",

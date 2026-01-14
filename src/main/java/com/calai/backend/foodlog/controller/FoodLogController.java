@@ -3,9 +3,8 @@ package com.calai.backend.foodlog.controller;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.service.FoodLogDeleteService;
-import com.calai.backend.foodlog.service.FoodLogHistoryService;
-import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
+import com.calai.backend.foodlog.service.*;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -31,6 +30,8 @@ public class FoodLogController {
     private final FoodLogService service;
     private final FoodLogDeleteService deleteService;
     private final FoodLogHistoryService historyService;
+    private final FoodLogOverrideService overrideService;
+
 
     @PostMapping(value = "/album", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope album(
@@ -123,5 +124,18 @@ public class FoodLogController {
         String requestId = RequestIdFilter.getOrCreate(req);
         return historyService.listSaved(uid, fromLocalDate, toLocalDate, page, size, requestId);
     }
+
+    @PostMapping(value = "/{id}/overrides", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public FoodLogEnvelope override(
+            @PathVariable String id,
+            @RequestBody FoodLogOverrideRequest body,
+            HttpServletRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return overrideService.applyOverride(uid, id, body, requestId);
+    }
+
+
 
 }

@@ -11,7 +11,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.time.LocalDate;
 
 @RequiredArgsConstructor
@@ -23,8 +22,7 @@ public class FoodLogHistoryService {
 
     @Transactional
     public FoodLogEnvelope save(Long userId, String foodLogId, String requestId) {
-        Instant now = Instant.now();
-
+        // ✅ now 沒用到就刪掉（避免 IDE 警告）
         FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId);
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
 
@@ -46,7 +44,7 @@ public class FoodLogHistoryService {
         }
 
         if (log.getStatus() != FoodLogStatus.DRAFT) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_SAVEABLE");
+            throw new IllegalArgumentException("FOOD_LOG_NOT_SAVABLE");
         }
 
         // ✅ 最小：DRAFT -> SAVED
@@ -98,17 +96,20 @@ public class FoodLogHistoryService {
 
     private FoodLogListResponse.Item toItem(FoodLogEntity e) {
         JsonNode eff = e.getEffective();
+
         String foodName = null;
         Double kcal = null, protein = null, fat = null, carbs = null;
 
-        if (eff != null && !eff.isNull()) {
-            foodName = textOrNull(eff, "foodName");
+        if (eff != null && eff.isObject()) {
+            // ✅ 不再傳 field 字串，避免「field 永遠固定」警告
+            foodName = textOrNull(eff.get("foodName"));
+
             JsonNode n = eff.get("nutrients");
-            if (n != null && !n.isNull()) {
-                kcal = doubleOrNull(n, "kcal");
-                protein = doubleOrNull(n, "protein");
-                fat = doubleOrNull(n, "fat");
-                carbs = doubleOrNull(n, "carbs");
+            if (n != null && n.isObject()) {
+                kcal = doubleOrNull(n.get("kcal"));
+                protein = doubleOrNull(n.get("protein"));
+                fat = doubleOrNull(n.get("fat"));
+                carbs = doubleOrNull(n.get("carbs"));
             }
         }
 
@@ -121,13 +122,11 @@ public class FoodLogHistoryService {
         );
     }
 
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode v = node.get(field);
+    private static String textOrNull(JsonNode v) {
         return (v == null || v.isNull()) ? null : v.asText();
     }
 
-    private static Double doubleOrNull(JsonNode node, String field) {
-        JsonNode v = node.get(field);
+    private static Double doubleOrNull(JsonNode v) {
         return (v == null || v.isNull()) ? null : v.asDouble();
     }
 }
