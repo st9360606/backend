@@ -97,4 +97,30 @@ class CapturedTimeResolverTest {
         assertEquals(TimeSource.SERVER_RECEIVED, out.source());
         assertFalse(out.suspect());
     }
+
+    @Test
+    void exifWinsWhenNotSkewed() {
+        CapturedTimeResolver r = new CapturedTimeResolver();
+        Instant server = Instant.parse("2026-01-14T00:00:00Z");
+        Instant exif = Instant.parse("2026-01-13T23:59:00Z");
+
+        var out = r.resolve(exif, null, server);
+
+        assertEquals(exif, out.capturedAtUtc());
+        assertEquals(TimeSource.EXIF, out.source());
+        assertFalse(out.suspect());
+    }
+
+    @Test
+    void tooSkewedFallsBackToServerAndSuspect() {
+        CapturedTimeResolver r = new CapturedTimeResolver();
+        Instant server = Instant.parse("2026-01-14T00:00:00Z");
+        Instant exif = Instant.parse("2025-10-01T00:00:00Z"); // > 30d skew
+
+        var out = r.resolve(exif, null, server);
+
+        assertEquals(server, out.capturedAtUtc());
+        assertEquals(TimeSource.SERVER_RECEIVED, out.source());
+        assertTrue(out.suspect());
+    }
 }

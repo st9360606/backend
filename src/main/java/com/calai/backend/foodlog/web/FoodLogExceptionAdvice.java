@@ -116,6 +116,32 @@ public class FoodLogExceptionAdvice {
                 .body(err("INTERNAL_ERROR", e, req)); // ✅ 補齊 5 欄位
     }
 
+    @ExceptionHandler(TooManyInFlightException.class)
+    public ResponseEntity<FoodLogErrorResponse> handleInFlight(TooManyInFlightException e, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
+                .body(new FoodLogErrorResponse(
+                        "TOO_MANY_IN_FLIGHT",
+                        safeMsg(e),
+                        rid(req),
+                        e.clientAction(),
+                        e.retryAfterSec()
+                ));
+    }
+
+    @ExceptionHandler(RateLimitedException.class)
+    public ResponseEntity<FoodLogErrorResponse> handleRateLimited(RateLimitedException e, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
+                .body(new FoodLogErrorResponse(
+                        "RATE_LIMITED",
+                        safeMsg(e),
+                        rid(req),
+                        e.clientAction(),
+                        e.retryAfterSec()
+                ));
+    }
+
     // ===== helpers =====
 
     private static FoodLogErrorResponse err(String code, Throwable e, HttpServletRequest req) {

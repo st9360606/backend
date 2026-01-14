@@ -6,10 +6,7 @@ import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
-import com.calai.backend.foodlog.service.FoodLogService;
-import com.calai.backend.foodlog.service.IdempotencyService;
-import com.calai.backend.foodlog.service.ImageBlobService;
-import com.calai.backend.foodlog.service.QuotaService; // ✅ 加這個
+import com.calai.backend.foodlog.service.*;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,13 +37,17 @@ class FoodLogServiceTaskVisibilityTest {
     IdempotencyService idem;
     @Mock
     ImageBlobService imageblobservice;
+    @Mock
+    UserInFlightLimiter inFlight;
+    @Mock
+    UserRateLimiter rateLimiter;
 
     private FoodLogService service;
 
     @BeforeEach
     void setUp() {
         // ✅ 依照最新建構子：repo, taskRepo, storage, objectMapper, quota
-        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota, idem, imageblobservice);
+        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota, idem, imageblobservice, inFlight, rateLimiter);
     }
 
     @Test

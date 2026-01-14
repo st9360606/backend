@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.storage;
 
+import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -9,6 +10,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 
+@Getter
 @Service
 public class LocalDiskStorageService implements StorageService {
 
@@ -83,4 +85,5 @@ public class LocalDiskStorageService implements StorageService {
         if (!p.startsWith(baseDir)) throw new SecurityException("Invalid objectKey");
         return p;
     }
+
 }
