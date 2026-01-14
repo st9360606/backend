@@ -10,6 +10,7 @@
     </parent>
     <properties>
         <java.version>21</java.version><!-- 3.5.5 支援 Java 17~24，21 很穩 -->
+        <metadata-extractor.version>2.19.0</metadata-extractor.version>
     </properties>
     <groupId>com.calai</groupId>
     <artifactId>backend</artifactId>
@@ -97,6 +98,11 @@
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.drewnoakes</groupId>
+            <artifactId>metadata-extractor</artifactId>
+            <version>${metadata-extractor.version}</version>
         </dependency>
     </dependencies>
 

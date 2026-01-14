@@ -1,12 +1,16 @@
- package com.calai.backend.foodlog.time;
+package com.calai.backend.foodlog.time;
+
+import com.calai.backend.foodlog.dto.TimeSource;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 
+/**
+ * 決策順序：EXIF > DEVICE_CLOCK > SERVER_RECEIVED
+ * 若與 serverReceivedUtc 差距 > 30 天：降級 SERVER_RECEIVED，並 suspect=true
+ */
 public final class CapturedTimeResolver {
-
-    public enum TimeSource { EXIF, DEVICE_CLOCK, SERVER_RECEIVED }
 
     public record Result(Instant capturedAtUtc, TimeSource source, boolean suspect) {}
 
@@ -29,7 +33,6 @@ public final class CapturedTimeResolver {
 
         Duration skew = Duration.between(serverReceivedUtc, utc).abs();
         if (skew.compareTo(MAX_SKEW) > 0) {
-            // 超過 30 天：直接降級 SERVER_RECEIVED，並標 suspect=true
             return new Candidate(serverReceivedUtc, TimeSource.SERVER_RECEIVED, true);
         }
         return new Candidate(utc, src, false);

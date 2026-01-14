@@ -12,45 +12,28 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.Locale;
 
 @RequiredArgsConstructor
 @Service
 public class FoodLogHistoryService {
 
     private final FoodLogRepository logRepo;
-    private final FoodLogService foodLogService; // 重用 getOne(toEnvelope)
+    private final FoodLogService foodLogService;
 
     @Transactional
     public FoodLogEnvelope save(Long userId, String foodLogId, String requestId) {
-        // ✅ now 沒用到就刪掉（避免 IDE 警告）
         FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId);
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
 
-        if (log.getStatus() == FoodLogStatus.DELETED) {
-            throw new IllegalArgumentException("FOOD_LOG_DELETED");
-        }
+        if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
+        if (log.getStatus() == FoodLogStatus.SAVED) return foodLogService.getOne(userId, foodLogId, requestId);
+        if (log.getStatus() == FoodLogStatus.PENDING) throw new IllegalArgumentException("FOOD_LOG_NOT_READY");
+        if (log.getStatus() == FoodLogStatus.FAILED) throw new IllegalArgumentException("FOOD_LOG_FAILED");
+        if (log.getStatus() != FoodLogStatus.DRAFT) throw new IllegalArgumentException("FOOD_LOG_NOT_SAVABLE");
 
-        // ✅ 冪等：已 SAVED 直接回
-        if (log.getStatus() == FoodLogStatus.SAVED) {
-            return foodLogService.getOne(userId, foodLogId, requestId);
-        }
-
-        if (log.getStatus() == FoodLogStatus.PENDING) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_READY");
-        }
-
-        if (log.getStatus() == FoodLogStatus.FAILED) {
-            throw new IllegalArgumentException("FOOD_LOG_FAILED");
-        }
-
-        if (log.getStatus() != FoodLogStatus.DRAFT) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_SAVABLE");
-        }
-
-        // ✅ 最小：DRAFT -> SAVED
         log.setStatus(FoodLogStatus.SAVED);
         logRepo.save(log);
-
         return foodLogService.getOne(userId, foodLogId, requestId);
     }
 
@@ -63,29 +46,32 @@ public class FoodLogHistoryService {
             int size,
             String requestId
     ) {
+        return listByStatus(userId, "SAVED", fromLocalDate, toLocalDate, page, size, requestId);
+    }
+
+    @Transactional(readOnly = true)
+    public FoodLogListResponse listByStatus(
+            Long userId,
+            String statusRaw,
+            LocalDate fromLocalDate,
+            LocalDate toLocalDate,
+            int page,
+            int size,
+            String requestId
+    ) {
+        FoodLogStatus status = parseStatusOrThrow(statusRaw);
+
         if (size <= 0) size = 20;
         if (size > 50) throw new IllegalArgumentException("PAGE_SIZE_TOO_LARGE");
         if (page < 0) page = 0;
 
-        if (fromLocalDate == null || toLocalDate == null) {
-            throw new IllegalArgumentException("DATE_RANGE_REQUIRED");
-        }
-        if (fromLocalDate.isAfter(toLocalDate)) {
-            throw new IllegalArgumentException("DATE_RANGE_INVALID");
-        }
+        if (fromLocalDate == null || toLocalDate == null) throw new IllegalArgumentException("DATE_RANGE_REQUIRED");
+        if (fromLocalDate.isAfter(toLocalDate)) throw new IllegalArgumentException("DATE_RANGE_INVALID");
 
         var pageable = PageRequest.of(page, size);
-        var p = logRepo.findByUserIdAndStatusAndCapturedLocalDateRange(
-                userId,
-                FoodLogStatus.SAVED,
-                fromLocalDate,
-                toLocalDate,
-                pageable
-        );
+        var p = logRepo.findByUserIdAndStatusAndCapturedLocalDateRange(userId, status, fromLocalDate, toLocalDate, pageable);
 
-        var items = p.getContent().stream()
-                .map(this::toItem)
-                .toList();
+        var items = p.getContent().stream().map(this::toItem).toList();
 
         return new FoodLogListResponse(
                 items,
@@ -94,16 +80,23 @@ public class FoodLogHistoryService {
         );
     }
 
+    private static FoodLogStatus parseStatusOrThrow(String raw) {
+        if (raw == null) throw new IllegalArgumentException("BAD_REQUEST");
+        String v = raw.trim().toUpperCase(Locale.ROOT);
+        try {
+            return FoodLogStatus.valueOf(v);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("BAD_REQUEST");
+        }
+    }
+
     private FoodLogListResponse.Item toItem(FoodLogEntity e) {
         JsonNode eff = e.getEffective();
-
         String foodName = null;
         Double kcal = null, protein = null, fat = null, carbs = null;
 
         if (eff != null && eff.isObject()) {
-            // ✅ 不再傳 field 字串，避免「field 永遠固定」警告
             foodName = textOrNull(eff.get("foodName"));
-
             JsonNode n = eff.get("nutrients");
             if (n != null && n.isObject()) {
                 kcal = doubleOrNull(n.get("kcal"));
@@ -122,11 +115,6 @@ public class FoodLogHistoryService {
         );
     }
 
-    private static String textOrNull(JsonNode v) {
-        return (v == null || v.isNull()) ? null : v.asText();
-    }
-
-    private static Double doubleOrNull(JsonNode v) {
-        return (v == null || v.isNull()) ? null : v.asDouble();
-    }
+    private static String textOrNull(JsonNode v) { return (v == null || v.isNull()) ? null : v.asText(); }
+    private static Double doubleOrNull(JsonNode v) { return (v == null || v.isNull()) ? null : v.asDouble(); }
 }
