@@ -93,6 +93,7 @@ CREATE TABLE food_log_tasks
 
 
 -- === food_log_overrides（回溯覆寫）===
+DROP TABLE IF EXISTS food_log_overrides;
 CREATE TABLE IF NOT EXISTS food_log_overrides
 (
     id             CHAR(36)    NOT NULL,
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS food_log_overrides
 
 
 -- === usage_counters（配額：server_now + user_tz 的 local_date）===
+DROP TABLE IF EXISTS usage_counters;
 CREATE TABLE IF NOT EXISTS usage_counters
 (
     id             BIGINT      NOT NULL AUTO_INCREMENT,
@@ -135,6 +137,7 @@ CREATE TABLE IF NOT EXISTS usage_counters
 
 
 -- === user_entitlements（訂閱/試用）===
+DROP TABLE IF EXISTS user_entitlements;
 CREATE TABLE IF NOT EXISTS user_entitlements
 (
     id                   CHAR(36)    NOT NULL,
@@ -194,7 +197,7 @@ CREATE TABLE IF NOT EXISTS deletion_jobs
   COLLATE = utf8mb4_0900_ai_ci;
 
 
-
+DROP TABLE IF EXISTS food_log_requests;
 CREATE TABLE IF NOT EXISTS food_log_requests
 (
     id              BIGINT       NOT NULL AUTO_INCREMENT,
@@ -215,7 +218,7 @@ CREATE TABLE IF NOT EXISTS food_log_requests
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci;
 
-
+DROP TABLE IF EXISTS image_blobs;
 CREATE TABLE IF NOT EXISTS image_blobs
 (
     id              BIGINT      NOT NULL AUTO_INCREMENT,
@@ -240,7 +243,7 @@ CREATE TABLE IF NOT EXISTS image_blobs
   COLLATE = utf8mb4_0900_ai_ci;
 
 
-
+DROP TABLE IF EXISTS logmeal_accounts;
 CREATE TABLE IF NOT EXISTS logmeal_accounts
 (
     id                 BIGINT      NOT NULL AUTO_INCREMENT,
