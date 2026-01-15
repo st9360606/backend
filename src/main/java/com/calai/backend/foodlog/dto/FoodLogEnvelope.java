@@ -12,6 +12,7 @@ public record FoodLogEnvelope(
         ApiError error,
         Trace trace
 ) {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record NutritionResult(
             String foodName,
             Quantity quantity,
@@ -21,12 +22,29 @@ public record FoodLogEnvelope(
             Source source
     ) {}
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Quantity(Double value, String unit) {}
-    public record Nutrients(Double kcal, Double protein, Double fat, Double carbs, Double fiber, Double sugar, Double sodium) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Nutrients(
+            Double kcal,
+            Double protein,
+            Double fat,
+            Double carbs,
+            Double fiber,
+            Double sugar,
+            Double sodium
+    ) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Source(String method, String provider) {}
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Task(String taskId, Integer pollAfterSec) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ApiError(String errorCode, String clientAction, Integer retryAfterSec) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Trace(String requestId) {}
 }
-

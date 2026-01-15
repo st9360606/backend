@@ -93,26 +93,34 @@ public class FoodLogTaskWorker {
             } catch (Exception e) {
                 log.warn("task failed: {}", task.getId(), e);
 
+                ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(e);
+                String mappedCode = mapped.code();
+                String mappedMsg = mapped.message();
+
                 // ✅ 這次失敗後，如果已達最大嘗試次數 → GIVE UP → CANCELLED
                 if (task.getAttempts() >= TaskRetryPolicy.MAX_ATTEMPTS) {
-                    task.markCancelled(now, "PROVIDER_GIVE_UP", safeMsg(e));
+                    // 保持你原本測試期待的 code = PROVIDER_GIVE_UP
+                    String giveUpMsg = "[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg);
+                    giveUpMsg = giveUpMsg.trim();
+
+                    task.markCancelled(now, "PROVIDER_GIVE_UP", giveUpMsg);
                     taskRepo.save(task);
 
                     logEntity.setStatus(FoodLogStatus.FAILED);
-                    logEntity.setLastErrorCode("PROVIDER_GIVE_UP");   // ✅ 你的測試期待這個
-                    logEntity.setLastErrorMessage(safeMsg(e));
+                    logEntity.setLastErrorCode("PROVIDER_GIVE_UP");
+                    logEntity.setLastErrorMessage(giveUpMsg);
                     logRepo.save(logEntity);
                     continue;
                 }
 
-                // ✅ 未達上限 → 排程重試
+                // ✅ 未達上限 → 排程重試（用更可觀測的 mappedCode）
                 int delaySec = TaskRetryPolicy.nextDelaySec(task.getAttempts());
-                task.markFailed(now, "PROVIDER_FAILED", safeMsg(e), delaySec);
+                task.markFailed(now, mappedCode, mappedMsg, delaySec);
                 taskRepo.save(task);
 
                 logEntity.setStatus(FoodLogStatus.FAILED);
-                logEntity.setLastErrorCode("PROVIDER_FAILED");
-                logEntity.setLastErrorMessage(safeMsg(e));
+                logEntity.setLastErrorCode(mappedCode);
+                logEntity.setLastErrorMessage(mappedMsg);
                 logRepo.save(logEntity);
             }
         }

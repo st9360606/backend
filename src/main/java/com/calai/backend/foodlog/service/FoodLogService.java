@@ -322,6 +322,8 @@ public class FoodLogService {
     }
 
     private FoodLogEnvelope toEnvelope(FoodLogEntity e, FoodLogTaskEntity t, String requestId) {
+        Instant now = Instant.now();
+
         JsonNode eff = e.getEffective();
         FoodLogEnvelope.NutritionResult nr = null;
 
@@ -348,18 +350,13 @@ public class FoodLogService {
 
         FoodLogEnvelope.Task task = null;
         if (t != null && (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED)) {
-            task = new FoodLogEnvelope.Task(t.getId(), t.getPollAfterSec());
+            int poll = computePollAfterSec(e.getStatus(), t, now);
+            task = new FoodLogEnvelope.Task(t.getId(), poll);
         }
 
         FoodLogEnvelope.ApiError err = null;
         if (e.getStatus() == FoodLogStatus.FAILED) {
-            Integer retryAfter = null;
-            if (t != null && t.getNextRetryAtUtc() != null) {
-                long sec = Duration.between(Instant.now(), t.getNextRetryAtUtc()).getSeconds();
-                if (sec < 0) sec = 0;
-                if (sec > Integer.MAX_VALUE) sec = Integer.MAX_VALUE;
-                retryAfter = (int) sec;
-            }
+            Integer retryAfter = computeRetryAfterSecOrNull(t, now);
             err = new FoodLogEnvelope.ApiError(
                     e.getLastErrorCode(),
                     "RETRY_LATER",
@@ -486,5 +483,39 @@ public class FoodLogService {
     private static Double doubleOrNull(JsonNode node, String field) {
         JsonNode v = node.get(field);
         return (v == null || v.isNull()) ? null : v.asDouble();
+    }
+
+    private static Integer computeRetryAfterSecOrNull(FoodLogTaskEntity t, Instant now) {
+        if (t == null || t.getNextRetryAtUtc() == null) return null;
+        long sec = Duration.between(now, t.getNextRetryAtUtc()).getSeconds();
+        if (sec < 0) sec = 0;
+        if (sec > Integer.MAX_VALUE) sec = Integer.MAX_VALUE;
+        return (int) sec;
+    }
+
+    private static int computePollAfterSec(FoodLogStatus status, FoodLogTaskEntity t, Instant now) {
+        int base = Math.max(1, t.getPollAfterSec()); // DB 目前固定 2
+
+        // ✅ FAILED：用 nextRetryAtUtc 算剩餘秒數
+        if (status == FoodLogStatus.FAILED) {
+            Integer retryAfter = computeRetryAfterSecOrNull(t, now);
+            int v = (retryAfter == null) ? 5 : retryAfter;
+            return clamp(v, 2, 60);
+        }
+
+        // ✅ PENDING：QUEUED/RUNNING 先維持 2 秒（Demo 體感好）
+        if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.QUEUED
+                || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING) {
+            return clamp(base, 2, 10); // 通常就是 2
+        }
+
+        // ✅ 其他狀態（理論上很少）：輕度退避
+        int attempts = Math.max(0, t.getAttempts()); // attempts=0 就回 2，不要硬變 3
+        int v = base + Math.min(attempts, 6);        // 2,3,4,5,6,7,8 -> clamp 到 10
+        return clamp(v, 2, 10);
+    }
+
+    private static int clamp(int v, int min, int max) {
+        return Math.max(min, Math.min(max, v));
     }
 }
