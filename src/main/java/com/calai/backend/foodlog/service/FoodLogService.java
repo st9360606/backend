@@ -503,16 +503,42 @@ public class FoodLogService {
             return clamp(v, 2, 60);
         }
 
-        // ✅ PENDING：QUEUED/RUNNING 先維持 2 秒（Demo 體感好）
-        if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.QUEUED
-                || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING) {
-            return clamp(base, 2, 10); // 通常就是 2
+        // ✅ PENDING：針對 QUEUED 做「排隊退避」
+        if (status == FoodLogStatus.PENDING) {
+
+            // 1) QUEUED：依排隊時間退避（>30s→5、>60s→8、>120s→10）
+            if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.QUEUED) {
+                Instant created = t.getCreatedAtUtc();
+                if (created == null) {
+                    // createdAt 不存在：保守回 base（通常 2）
+                    return clamp(base, 2, 10);
+                }
+
+                long queuedSec = Duration.between(created, now).getSeconds();
+                if (queuedSec < 0) queuedSec = 0;
+
+                int v;
+                if (queuedSec > 120) v = 10;
+                else if (queuedSec > 60) v = 8;
+                else if (queuedSec > 30) v = 5;
+                else v = base; // 通常 2
+
+                return clamp(v, 2, 10);
+            }
+
+            // 2) RUNNING：維持原本（Demo 體感好）
+            if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING) {
+                return clamp(base, 2, 10);
+            }
+
+            // 3) 其他狀態（理論上少見）：輕度退避
+            int attempts = Math.max(0, t.getAttempts());
+            int v = base + Math.min(attempts, 6);
+            return clamp(v, 2, 10);
         }
 
-        // ✅ 其他狀態（理論上很少）：輕度退避
-        int attempts = Math.max(0, t.getAttempts()); // attempts=0 就回 2，不要硬變 3
-        int v = base + Math.min(attempts, 6);        // 2,3,4,5,6,7,8 -> clamp 到 10
-        return clamp(v, 2, 10);
+        // ✅ 其他狀態（理論上不會走到）：保守
+        return clamp(base, 2, 10);
     }
 
     private static int clamp(int v, int min, int max) {
