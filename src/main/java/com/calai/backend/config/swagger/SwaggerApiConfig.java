@@ -2,6 +2,7 @@ package com.calai.backend.config.swagger;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.info.Info;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;   // ✅ 新增
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import org.springframework.context.annotation.Configuration;
@@ -11,7 +12,9 @@ import org.springframework.context.annotation.Configuration;
         info = @Info(
                 title = "BiteCal AI Backend API",
                 version = "v1"
-        )
+        ),
+        // ✅ 重點：全域宣告需要 bearerAuth，Swagger 才會把 Authorization header 送出去
+        security = { @SecurityRequirement(name = "bearerAuth") }
 )
 @SecurityScheme(
         name = "bearerAuth",

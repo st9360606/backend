@@ -60,15 +60,17 @@ management:
 app:
   crypto:
     aesgcm:
-      key-b64: "${APP_CRYPTO_AESGCM_KEY_B64}"
+      key-b64: "${APP_CRYPTO_AESGCM_KEY_B64}"   #用 AES-GCM 把 LogMeal token 加密後存 DB（logmeal_accounts.api_user_token_enc）
   foodlog:
-    provider: "STUB"  # STUB / TODO 正式環境改 : LOGMEAL
+    provider: "LOGMEAL"  # STUB / TODO 正式環境改 : LOGMEAL
   provider:
     logmeal:
       base-url: "https://api.logmeal.com"
-      api-user-token: "${LOGMEAL_APIUSER_TOKEN}"
       connect-timeout: 5s
       read-timeout: 25s
+      # ✅ 你 LogMealProviderClient 會用 authorizationPrefixOrDefault()
+      # 建議明確給 "Bearer"
+      authorization-prefix: "Bearer"
   google:
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
   auth:
@@ -130,3 +132,11 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+
+
+#jshell
+#import java.security.SecureRandom;
+#import java.util.Base64;
+#byte[] b=new byte[32]; new SecureRandom().nextBytes(b);
+#System.out.println(Base64.getEncoder().encodeToString(b));
+#/exit
