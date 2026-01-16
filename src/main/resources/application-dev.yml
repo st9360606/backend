@@ -124,3 +124,9 @@ logging:
 workout:
   estimate:
     blacklistPolicy: block   # 可選：generic（現狀）、block（阻擋）、audit（只記錄與回傳 not_found）
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html

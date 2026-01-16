@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog;
+package com.calai.backend.Integration_testing.config;
 
 import com.calai.backend.auth.security.AuthContext;
 import org.springframework.boot.test.context.TestConfiguration;

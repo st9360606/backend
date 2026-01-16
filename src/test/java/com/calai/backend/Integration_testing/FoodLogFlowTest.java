@@ -1,5 +1,6 @@
-package com.calai.backend.foodlog;
+package com.calai.backend.Integration_testing;
 
+import com.calai.backend.Integration_testing.config.TestAuthConfig;
 import com.calai.backend.foodlog.task.FoodLogTaskWorker;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +14,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -24,7 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc(addFilters = false) // ✅ 先讓 H-01 不被 Security 擋
 @Import(TestAuthConfig.class)             // ✅ 固定 auth.requireUserId() = 1L
-public class FoodLogE2eFlowTest {
+public class FoodLogFlowTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper om;
@@ -35,7 +37,9 @@ public class FoodLogE2eFlowTest {
     @Test
     void photo_pending_to_draft_then_override_save_list() throws Exception {
         // ✅ 最小 JPEG header，能過 ImageSniffer
-        byte[] jpg = new byte[] {(byte)0xFF, (byte)0xD8, (byte)0xFF, 0, 0, 0, 0};
+        // ✅ 產生「本次測試唯一」的 bytes（避免撞到舊資料）
+        // 但同一個測試內兩次上傳要用同一份 bytes（才能 dedup）
+        byte[] jpg = randomJpegLikeBytes(128);
 
         String deviceUtcStr = "2026-01-15T12:00:00Z";
         MockMultipartFile file = new MockMultipartFile(
@@ -114,5 +118,15 @@ public class FoodLogE2eFlowTest {
             if (id.equals(item.path("foodLogId").asText())) { found = true; break; }
         }
         assertThat(found).isTrue();
+    }
+
+    private static byte[] randomJpegLikeBytes(int size) {
+        byte[] b = new byte[Math.max(size, 16)];
+        new SecureRandom().nextBytes(b);
+        // JPEG magic bytes: FF D8 FF
+        b[0] = (byte) 0xFF;
+        b[1] = (byte) 0xD8;
+        b[2] = (byte) 0xFF;
+        return b;
     }
 }

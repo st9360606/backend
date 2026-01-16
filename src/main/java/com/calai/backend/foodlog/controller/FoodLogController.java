@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
 import com.calai.backend.foodlog.service.*;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -15,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 
+@Tag(name = "FoodLog", description = "Food log (photo/album) + override/save/history")
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/api/v1/food-logs")
