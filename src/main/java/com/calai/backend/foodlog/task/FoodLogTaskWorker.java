@@ -5,6 +5,7 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,6 +26,7 @@ public class FoodLogTaskWorker {
     private final FoodLogRepository logRepo;
     private final ProviderRouter router;
     private final StorageService storage;
+    private final EffectivePostProcessor postProcessor;
 
     @Scheduled(fixedDelay = 2000)
     @Transactional
@@ -74,14 +76,21 @@ public class FoodLogTaskWorker {
                 task.markRunning(now);
                 taskRepo.save(task);
 
-                ProviderClient client = router.pick(logEntity);
+                ProviderClient client = router.pickStrict(logEntity);
                 var result = client.process(logEntity, storage);
 
                 if (result == null || result.effective() == null) {
                     throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
                 }
+                // 需要 ObjectMapper 把 JsonNode 轉成 ObjectNode（避免 provider 回 Array/非 Object）
+                ObjectNode eff = (result.effective() != null && result.effective().isObject())
+                        ? ((ObjectNode) result.effective()).deepCopy()
+                        : null;
 
-                logEntity.setEffective(result.effective());
+                if (eff == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
+                // ✅ 後處理：統一計分/降級/加 meta
+                ObjectNode finalEff = postProcessor.apply(eff, result.provider());
+                logEntity.setEffective(finalEff);
                 logEntity.setProvider(result.provider());
                 logEntity.setStatus(FoodLogStatus.DRAFT);
                 logEntity.setLastErrorCode(null);
@@ -98,8 +107,9 @@ public class FoodLogTaskWorker {
                 ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(e);
                 String mappedCode = mapped.code();
                 String mappedMsg = mapped.message();
+                Integer retryAfter = mapped.retryAfterSec();
 
-                // ✅ 1) 不可重試：直接取消，不要燒 5 次
+                // ✅ 1) 不可重試：直接取消
                 if (isNonRetryable(mappedCode)) {
                     task.markCancelled(now, mappedCode, mappedMsg);
                     taskRepo.save(task);
@@ -126,8 +136,9 @@ public class FoodLogTaskWorker {
                     continue;
                 }
 
-                // ✅ 3) 未達上限 → 排程重試
+                // ✅ 3) 未達上限 → 排程重試（429 時尊重 Retry-After）
                 int delaySec = TaskRetryPolicy.nextDelaySec(task.getAttempts());
+                if (retryAfter != null) delaySec = Math.max(delaySec, retryAfter);
                 task.markFailed(now, mappedCode, mappedMsg, delaySec);
                 taskRepo.save(task);
 
@@ -144,7 +155,6 @@ public class FoodLogTaskWorker {
      * - PROVIDER_NOT_CONFIGURED：程式/設定問題，重試也不會好
      * - PROVIDER_AUTH_FAILED：API key/token 錯，重試只會一直 401/403
      * - PROVIDER_BAD_REQUEST：你的 request 組裝錯/不符合 API，重試無效
-     *
      * 你之後可以再加：
      * - GEMINI_API_KEY_MISSING
      * - PROVIDER_BLOCKED (視策略：通常也不該重試)
@@ -153,6 +163,7 @@ public class FoodLogTaskWorker {
         if (code == null || code.isBlank()) return false;
         return switch (code) {
             case "PROVIDER_NOT_CONFIGURED",
+                 "PROVIDER_NOT_AVAILABLE",    // ✅ 新增：嚴格模式下 provider 不存在
                  "PROVIDER_AUTH_FAILED",
                  "PROVIDER_BAD_REQUEST",
                  "GEMINI_API_KEY_MISSING",

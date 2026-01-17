@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import java.util.Locale;
+import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 @RequiredArgsConstructor
 @Service
@@ -53,6 +55,7 @@ public class FoodLogService {
     private final ImageBlobService blobService;
     private final UserInFlightLimiter inFlight;
     private final UserRateLimiter rateLimiter;
+    private final EffectivePostProcessor postProcessor;
 
     // MVP：先 new（後續要 DI 也可以）
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
@@ -126,9 +129,15 @@ public class FoodLogService {
                 e.setTimeSource(TimeSource.SERVER_RECEIVED);
                 e.setTimeSuspect(false);
 
-                if (hit.isPresent() && hit.get().getEffective() != null) {
+                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
                     e.setProvider(hit.get().getProvider());
-                    e.setEffective(hit.get().getEffective());
+
+                    ObjectNode copied = hit.get().getEffective().deepCopy();
+
+                    // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
+
+                    e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
                     quota.consumeAiOrThrow(userId, tz, serverNow);
@@ -136,6 +145,7 @@ public class FoodLogService {
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
                 }
+
 
                 repo.save(e);
                 idem.attach(userId, requestId, e.getId(), serverNow);
@@ -263,9 +273,15 @@ public class FoodLogService {
                 e.setTimeSource(TimeSource.valueOf(r.source().name()));
                 e.setTimeSuspect(r.suspect());
 
-                if (hit.isPresent() && hit.get().getEffective() != null) {
+                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
                     e.setProvider(hit.get().getProvider());
-                    e.setEffective(hit.get().getEffective());
+
+                    ObjectNode copied = hit.get().getEffective().deepCopy();
+
+                    // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
+
+                    e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
                     quota.consumeAiOrThrow(userId, tz, serverNow);

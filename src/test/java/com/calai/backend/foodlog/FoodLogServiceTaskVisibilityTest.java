@@ -10,6 +10,7 @@ import com.calai.backend.foodlog.service.*;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,24 +33,32 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock
     StorageService storage;
 
-    // ✅ 新增：缺的第 5 個依賴
     @Mock
     QuotaService quota;
     @Mock
     IdempotencyService idem;
     @Mock
-    ImageBlobService imageblobservice;
+    ImageBlobService imageBlobService;
     @Mock
     UserInFlightLimiter inFlight;
     @Mock
     UserRateLimiter rateLimiter;
 
+    // ✅ 新增：PostProcessor（建構子新增依賴）
+    @Mock
+    EffectivePostProcessor postProcessor;
+
     private FoodLogService service;
 
     @BeforeEach
     void setUp() {
-        // ✅ 依照最新建構子：repo, taskRepo, storage, objectMapper, quota
-        service = new FoodLogService(repo, taskRepo, storage, new ObjectMapper(), quota, idem, imageblobservice, inFlight, rateLimiter);
+        service = new FoodLogService(
+                repo, taskRepo, storage,
+                new ObjectMapper(),
+                quota, idem, imageBlobService,
+                inFlight, rateLimiter,
+                postProcessor
+        );
     }
 
     @Test
@@ -98,7 +107,7 @@ class FoodLogServiceTaskVisibilityTest {
 
         assertNull(env.task());
         verify(taskRepo, never()).findByFoodLogId(anyString());
-        verifyNoInteractions(quota); // ✅
+        verifyNoInteractions(quota);
     }
 
     @Test
@@ -131,6 +140,6 @@ class FoodLogServiceTaskVisibilityTest {
         assertEquals("PROVIDER_FAILED", env.error().errorCode());
 
         verify(taskRepo, times(1)).findByFoodLogId("log-3");
-        verifyNoInteractions(quota); // ✅
+        verifyNoInteractions(quota);
     }
 }

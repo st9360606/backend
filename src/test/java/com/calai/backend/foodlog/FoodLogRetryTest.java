@@ -9,6 +9,7 @@ import com.calai.backend.foodlog.service.*;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -31,11 +32,14 @@ class FoodLogRetryTest {
         ObjectMapper om = new ObjectMapper();
         QuotaService quota = Mockito.mock(QuotaService.class);
         IdempotencyService idem = Mockito.mock(IdempotencyService.class);
-        FoodLogEntity log = new FoodLogEntity();
-        ImageBlobService imageblobservice = Mockito.mock(ImageBlobService.class);
+        ImageBlobService imageBlobService = Mockito.mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
 
+        // ✅ 新增：PostProcessor（建構子新增依賴）
+        EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
+
+        FoodLogEntity log = new FoodLogEntity();
         log.setId("log1");
         log.setUserId(1L);
         log.setStatus(FoodLogStatus.FAILED);
@@ -55,8 +59,13 @@ class FoodLogRetryTest {
         Mockito.when(repo.findByIdAndUserId("log1", 1L)).thenReturn(Optional.of(log));
         Mockito.when(taskRepo.findByFoodLogId("log1")).thenReturn(Optional.of(task));
 
-        // ✅ 注意：consumeAiOrThrow 是 non-void，不需要 doNothing；mock 預設回 null 即可
-        FoodLogService svc = new FoodLogService(repo, taskRepo, storage, om, quota, idem, imageblobservice,inFlight, rateLimiter);
+        // ✅ 依照最新建構子補齊 postProcessor
+        FoodLogService svc = new FoodLogService(
+                repo, taskRepo, storage, om,
+                quota, idem, imageBlobService,
+                inFlight, rateLimiter,
+                postProcessor
+        );
 
         svc.retry(1L, "log1", "rid-1");
 
@@ -80,18 +89,26 @@ class FoodLogRetryTest {
         ObjectMapper om = new ObjectMapper();
         QuotaService quota = Mockito.mock(QuotaService.class);
         IdempotencyService idem = Mockito.mock(IdempotencyService.class);
-        FoodLogEntity log = new FoodLogEntity();
-        ImageBlobService imageblobservice = Mockito.mock(ImageBlobService.class);
+        ImageBlobService imageBlobService = Mockito.mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
 
+        // ✅ 新增：PostProcessor（建構子新增依賴）
+        EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
+
+        FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
         log.setUserId(1L);
         log.setStatus(FoodLogStatus.DRAFT);
 
         Mockito.when(repo.findByIdForUpdate("log2")).thenReturn(log);
 
-        FoodLogService svc = new FoodLogService(repo, taskRepo, storage, om, quota, idem,imageblobservice,inFlight, rateLimiter);
+        FoodLogService svc = new FoodLogService(
+                repo, taskRepo, storage, om,
+                quota, idem, imageBlobService,
+                inFlight, rateLimiter,
+                postProcessor
+        );
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> svc.retry(1L, "log2", "rid-2"));

@@ -60,4 +60,15 @@ public class ProviderRouter {
         String v = s.trim().toUpperCase(Locale.ROOT);
         return v.isEmpty() ? null : v;
     }
+
+    public ProviderClient pickStrict(FoodLogEntity log) {
+        String code = norm(log == null ? null : log.getProvider());
+        if (code != null) {
+            ProviderClient c = mapByCode.get(code);
+            if (c != null) return c;
+            // ✅ 不存在就直接炸（不要 fallback）
+            throw new IllegalStateException("PROVIDER_NOT_AVAILABLE");
+        }
+        return pick(log);
+    }
 }

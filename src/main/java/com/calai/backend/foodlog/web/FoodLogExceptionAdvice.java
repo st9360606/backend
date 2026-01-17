@@ -57,11 +57,12 @@ public class FoodLogExceptionAdvice {
         HttpStatus status = switch (code) {
             case "IMAGE_OBJECT_KEY_MISSING" -> HttpStatus.CONFLICT;
             case "EMPTY_IMAGE" -> HttpStatus.BAD_REQUEST;
+            case "PROVIDER_NOT_AVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE; // 503 供應商不可用（嚴格模式用）
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
 
         return ResponseEntity.status(status)
-                .body(err(code, e, req)); // ✅ 補齊 5 欄位
+                .body(err(code, e, req));
     }
 
     @ExceptionHandler(RequestInProgressException.class)

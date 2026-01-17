@@ -1,7 +1,6 @@
 package com.calai.backend.foodlog.provider;
 
 import com.calai.backend.foodlog.entity.FoodLogEntity;
-import com.calai.backend.foodlog.service.HealthScoreService;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.ProviderClient;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,13 +18,11 @@ public class GeminiProviderClient implements ProviderClient {
 
     private final RestClient http;
     private final GeminiProperties props;
-    private final HealthScoreService healthScore;
     private final ObjectMapper om;
 
-    public GeminiProviderClient(RestClient http, GeminiProperties props, HealthScoreService healthScore, ObjectMapper om) {
+    public GeminiProviderClient(RestClient http, GeminiProperties props, ObjectMapper om) {
         this.http = http;
         this.props = props;
-        this.healthScore = healthScore;
         this.om = om;
     }
 
@@ -57,25 +54,18 @@ public class GeminiProviderClient implements ProviderClient {
                 .retrieve()
                 .body(JsonNode.class);
 
-        // ✅ 串接所有 parts 的 text（解決你現在 JSON 被拆段而截斷）
+        // ✅ 串接所有 parts 的 text（解決 JSON 被拆段截斷）
         String text = extractJoinedTextOrThrow(resp, entity.getId());
 
         // ✅ preview（只印前 200 字）
-        String preview = safeOneLine(text, 200);
-        log.info("geminiTextPreview foodLogId={} preview={}", entity.getId(), preview);
+        log.info("geminiTextPreview foodLogId={} preview={}", entity.getId(), safeOneLine(text, 200));
 
         JsonNode parsed = parseJsonStrictOrThrow(text);
 
+        // ✅ 只做「provider 專責」：把 Gemini 的 JSON 正規化成 effective
         ObjectNode effective = normalizeToEffective(parsed);
 
-        // ✅ healthScore：先用後端 v0 規則（Step 3 再版本化）
-        ObjectNode nutrients = getOrCreateObject(effective, "nutrients");
-        Double fiber = doubleOrNull(nutrients.get("fiber"));
-        Double sugar = doubleOrNull(nutrients.get("sugar"));
-        Double sodium = doubleOrNull(nutrients.get("sodium"));
-        Integer hs = healthScore.score(fiber, sugar, sodium);
-        if (hs != null) effective.put("healthScore", hs);
-
+        // ✅ 注意：healthScore 不在這裡算（統一交給 EffectivePostProcessor）
         return new ProviderResult(effective, "GEMINI");
     }
 
@@ -171,8 +161,7 @@ public class GeminiProviderClient implements ProviderClient {
     }
 
     /**
-     * ✅ 關鍵修正：把 candidates[0].content.parts[*].text 全部串起來
-     * 同時印 meta：finishReason / tokens / partsCount，方便判斷是否 MAX_TOKENS 截斷
+     * ✅ 把 candidates[0].content.parts[*].text 全部串起來
      */
     private String extractJoinedTextOrThrow(JsonNode resp, String foodLogIdForLog) {
         if (resp == null || resp.isNull()) throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
@@ -208,13 +197,6 @@ public class GeminiProviderClient implements ProviderClient {
         return joined;
     }
 
-    /**
-     * ✅ 超穩 parse：
-     * 1) 去 code fence
-     * 2) 擷取第一個 { 到最後一個 }
-     * 3) 移除 BOM / NULL
-     * 4) 修正 JSON string 內的 CR/LF（轉成 \\n）與控制字元
-     */
     private JsonNode parseJsonStrictOrThrow(String text) {
         String s = (text == null) ? "" : text.trim();
 
@@ -244,9 +226,11 @@ public class GeminiProviderClient implements ProviderClient {
         try {
             return om.readTree(s);
         } catch (Exception e) {
-            String head = safeOneLine(s, 120);
-            String tail = safeOneLine(s.length() > 120 ? s.substring(Math.max(0, s.length() - 120)) : s, 120);
-            log.warn("geminiJsonParseFailed len={} head={} tail={}", s.length(), head, tail);
+            log.warn("geminiJsonParseFailed len={} head={} tail={}",
+                    s.length(),
+                    safeOneLine(s, 120),
+                    safeOneLine(s.length() > 120 ? s.substring(Math.max(0, s.length() - 120)) : s, 120)
+            );
             throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
         }
     }
@@ -307,18 +291,6 @@ public class GeminiProviderClient implements ProviderClient {
         to.put(key, d);
     }
 
-    private static Double doubleOrNull(JsonNode v) {
-        return (v == null || v.isNull() || !v.isNumber()) ? null : v.asDouble();
-    }
-
-    private static ObjectNode getOrCreateObject(ObjectNode root, String field) {
-        JsonNode n = root.get(field);
-        if (n != null && n.isObject()) return (ObjectNode) n;
-        ObjectNode created = JsonNodeFactory.instance.objectNode();
-        root.set(field, created);
-        return created;
-    }
-
     private static String safeOneLine(String s, int maxLen) {
         if (s == null) return null;
         String t = s.replace("\r", " ").replace("\n", " ").trim();
@@ -332,9 +304,6 @@ public class GeminiProviderClient implements ProviderClient {
         return s.replace("\u0000", "");
     }
 
-    /**
-     * 把 JSON 字串內的「非法控制字元」修掉（重點：CR/LF）
-     */
     private static String escapeBadCharsInsideJsonStrings(String s) {
         if (s == null || s.isEmpty()) return s;
 

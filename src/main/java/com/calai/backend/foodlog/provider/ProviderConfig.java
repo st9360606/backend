@@ -1,6 +1,5 @@
 package com.calai.backend.foodlog.provider;
 
-import com.calai.backend.foodlog.service.HealthScoreService;
 import com.calai.backend.foodlog.service.LogMealTokenService;
 import com.calai.backend.foodlog.task.ProviderClient;
 import com.calai.backend.foodlog.task.StubProviderClient;
@@ -16,13 +15,11 @@ import org.springframework.web.client.RestClient;
 @EnableConfigurationProperties({LogMealProperties.class, GeminiProperties.class})
 public class ProviderConfig {
 
-    /** ✅ STUB 永遠存在（Router 保底、dev/test 必備） */
     @Bean
     public ProviderClient stubProviderClient(ObjectMapper om) {
         return new StubProviderClient(om);
     }
 
-    /** ✅ GEMINI RestClient（只在 enabled=true 才建立） */
     @Bean
     @ConditionalOnProperty(prefix = "app.provider.gemini", name = "enabled", havingValue = "true")
     public RestClient geminiRestClient(GeminiProperties props) {
@@ -36,19 +33,17 @@ public class ProviderConfig {
                 .build();
     }
 
-    /** ✅ GEMINI ProviderClient */
     @Bean
     @ConditionalOnProperty(prefix = "app.provider.gemini", name = "enabled", havingValue = "true")
     public ProviderClient geminiProviderClient(
             RestClient geminiRestClient,
             GeminiProperties props,
-            HealthScoreService healthScoreService,
             ObjectMapper om
     ) {
-        return new GeminiProviderClient(geminiRestClient, props, healthScoreService, om);
+        return new GeminiProviderClient(geminiRestClient, props, om);
     }
 
-    /** ✅ 只有 LOGMEAL 時才建立 RestClient（避免切 GEMINI 後還吃 logmeal 設定） */
+    // ---- LOGMEAL (先留到 Step 5 再移除) ----
     @Bean
     @ConditionalOnProperty(name = "app.foodlog.provider", havingValue = "LOGMEAL")
     public RestClient logMealRestClient(LogMealProperties props) {
@@ -62,7 +57,6 @@ public class ProviderConfig {
                 .build();
     }
 
-    /** ✅ 只有 LOGMEAL 時才建立 provider */
     @Bean
     @ConditionalOnProperty(name = "app.foodlog.provider", havingValue = "LOGMEAL")
     public ProviderClient logMealProviderClient(

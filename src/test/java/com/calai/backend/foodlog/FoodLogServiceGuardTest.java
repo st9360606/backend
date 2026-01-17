@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.service.*;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,8 +32,14 @@ class FoodLogServiceGuardTest {
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
 
+        // ✅ 新增：PostProcessor（建構子新增依賴）
+        EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
+
         FoodLogService svc = new FoodLogService(
-                repo, taskRepo, storage, om, quota, idem, blobService, inFlight, rateLimiter
+                repo, taskRepo, storage, om,
+                quota, idem, blobService,
+                inFlight, rateLimiter,
+                postProcessor
         );
 
         when(idem.reserveOrGetExisting(anyLong(), anyString(), any())).thenReturn(null);
