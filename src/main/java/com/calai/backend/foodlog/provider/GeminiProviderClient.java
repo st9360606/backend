@@ -57,11 +57,12 @@ public class GeminiProviderClient implements ProviderClient {
                 .retrieve()
                 .body(JsonNode.class);
 
-        String text = extractTextOrThrow(resp);
+        // ✅ 串接所有 parts 的 text（解決你現在 JSON 被拆段而截斷）
+        String text = extractJoinedTextOrThrow(resp, entity.getId());
 
-        // ✅ 只印前 200 字（你要看完整可把 200 調大）
+        // ✅ preview（只印前 200 字）
         String preview = safeOneLine(text, 200);
-        GeminiProviderClient.log.info("geminiTextPreview foodLogId={} preview={}", entity.getId(), preview);
+        log.info("geminiTextPreview foodLogId={} preview={}", entity.getId(), preview);
 
         JsonNode parsed = parseJsonStrictOrThrow(text);
 
@@ -89,12 +90,12 @@ public class GeminiProviderClient implements ProviderClient {
 
         ObjectNode root = om.createObjectNode();
 
-        // systemInstruction（降低 prompt injection + 要求單行 JSON）
+        // systemInstruction（降低 prompt injection + 要求 JSON）
         ObjectNode sys = root.putObject("systemInstruction");
         ArrayNode sysParts = sys.putArray("parts");
         sysParts.addObject().put("text",
                 "You are a food nutrition estimation engine. " +
-                "Return ONLY a single-line JSON object that matches the provided JSON Schema. " +
+                "Return ONLY a JSON object that matches the provided JSON Schema. " +
                 "Do NOT include markdown fences. Do NOT include extra text."
         );
 
@@ -113,7 +114,7 @@ public class GeminiProviderClient implements ProviderClient {
         inline.put("mime_type", mimeType);
         inline.put("data", b64);
 
-        // generationConfig
+        // generationConfig (Structured Output)
         ObjectNode gen = root.putObject("generationConfig");
         gen.put("responseMimeType", "application/json");
         gen.set("responseJsonSchema", nutritionJsonSchema());
@@ -124,8 +125,7 @@ public class GeminiProviderClient implements ProviderClient {
     }
 
     /**
-     * ✅ 重要：不要用 type:["number","null"] 這種 union（容易讓輸出更飄）
-     * 改成：欄位可缺省（不放 required），normalize 會接受缺值。
+     * ✅ schema：欄位可缺省（不要 union null），由 normalize 接住缺值
      */
     private ObjectNode nutritionJsonSchema() {
         ObjectNode schema = om.createObjectNode();
@@ -154,7 +154,6 @@ public class GeminiProviderClient implements ProviderClient {
         for (String k : new String[]{"kcal","protein","fat","carbs","fiber","sugar","sodium"}) {
             np.putObject(k).put("type", "number").put("minimum", 0);
         }
-        // ✅ nutrients 的子欄位不 required（可缺省）
 
         props.putObject("confidence")
                 .put("type", "number")
@@ -165,24 +164,48 @@ public class GeminiProviderClient implements ProviderClient {
         w.put("type", "array");
         w.putObject("items").put("type", "string");
 
-        // ✅ root required：至少 quantity + nutrients 要有（foodName 可缺）
+        // root required：至少 quantity + nutrients 要有（foodName 可缺）
         schema.putArray("required").add("quantity").add("nutrients");
 
         return schema;
     }
 
-    private String extractTextOrThrow(JsonNode resp) {
+    /**
+     * ✅ 關鍵修正：把 candidates[0].content.parts[*].text 全部串起來
+     * 同時印 meta：finishReason / tokens / partsCount，方便判斷是否 MAX_TOKENS 截斷
+     */
+    private String extractJoinedTextOrThrow(JsonNode resp, String foodLogIdForLog) {
         if (resp == null || resp.isNull()) throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
 
-        JsonNode parts = resp.path("candidates").path(0).path("content").path("parts");
+        JsonNode cand0 = resp.path("candidates").path(0);
+        JsonNode parts = cand0.path("content").path("parts");
+
+        String finishReason = cand0.path("finishReason").asText(null);
+
+        JsonNode usage = resp.path("usageMetadata");
+        int promptTok = usage.path("promptTokenCount").asInt(-1);
+        int candTok = usage.path("candidatesTokenCount").asInt(-1);
+        int totalTok = usage.path("totalTokenCount").asInt(-1);
+
+        StringBuilder sb = new StringBuilder(256);
+        int partCount = 0;
+
         if (parts.isArray()) {
             for (JsonNode p : parts) {
-                String text = p.path("text").asText(null);
-                if (text != null && !text.isBlank()) return text;
+                String t = p.path("text").asText(null);
+                if (t == null) continue;
+                sb.append(t);
+                partCount++;
             }
         }
 
-        throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
+        String joined = sb.toString();
+        if (joined.isBlank()) throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
+
+        log.info("geminiRespMeta foodLogId={} finishReason={} parts={} tokens[prompt={},cand={},total={}] len={}",
+                foodLogIdForLog, finishReason, partCount, promptTok, candTok, totalTok, joined.length());
+
+        return joined;
     }
 
     /**
@@ -221,10 +244,9 @@ public class GeminiProviderClient implements ProviderClient {
         try {
             return om.readTree(s);
         } catch (Exception e) {
-            // ✅ 這段 log 會讓你一眼看出是「截斷」還是「字串內有怪字」
             String head = safeOneLine(s, 120);
             String tail = safeOneLine(s.length() > 120 ? s.substring(Math.max(0, s.length() - 120)) : s, 120);
-            GeminiProviderClient.log.warn("geminiJsonParseFailed len={} head={} tail={}", s.length(), head, tail);
+            log.warn("geminiJsonParseFailed len={} head={} tail={}", s.length(), head, tail);
             throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
         }
     }
@@ -306,16 +328,12 @@ public class GeminiProviderClient implements ProviderClient {
 
     private static String stripBomAndNulls(String s) {
         if (s == null) return "";
-        // BOM
         if (!s.isEmpty() && s.charAt(0) == '\uFEFF') s = s.substring(1);
-        // NULLs
         return s.replace("\u0000", "");
     }
 
     /**
      * 把 JSON 字串內的「非法控制字元」修掉（重點：CR/LF）
-     * - 只有在字串內（"..."）才會把 \r/\n 轉成 \\n
-     * - 其他控制字元 (< 0x20) 轉成空白
      */
     private static String escapeBadCharsInsideJsonStrings(String s) {
         if (s == null || s.isEmpty()) return s;
@@ -329,14 +347,12 @@ public class GeminiProviderClient implements ProviderClient {
 
             if (!inString) {
                 if (ch == '"') inString = true;
-                // 字串外：移除不可見控制字元（保留常見空白）
                 if (ch == '\u0000') continue;
                 if (ch < 0x20 && ch != '\n' && ch != '\r' && ch != '\t') continue;
                 out.append(ch);
                 continue;
             }
 
-            // inString
             if (escaped) {
                 out.append(ch);
                 escaped = false;
