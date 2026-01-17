@@ -11,6 +11,8 @@ import static org.assertj.core.api.Assertions.*;
 public class EffectivePostProcessorTest {
 
     private final ObjectMapper om = new ObjectMapper();
+    private final HealthScore healthScore = new HealthScore();
+    private final EffectivePostProcessor pp = new EffectivePostProcessor(healthScore);
 
     @Test
     void apply_should_add_healthScoreMeta_and_score_when_food() throws Exception {
@@ -69,5 +71,41 @@ public class EffectivePostProcessorTest {
         // meta exists
         assertThat(out.get("healthScoreMeta")).isNotNull();
         assertThat(out.get("healthScoreMeta").get("version").asText()).isEqualTo("v1");
+    }
+
+    @Test
+    void nonFood_should_add_warning_and_clamp_confidence_and_remove_healthScore() throws Exception {
+        ObjectNode eff = (ObjectNode) om.readTree("""
+          {
+            "foodName":"Empty glass mug",
+            "confidence": 0.95,
+            "quantity":{"value":1,"unit":"SERVING"},
+            "nutrients":{"kcal":0,"protein":0,"fat":0,"carbs":0,"fiber":0,"sugar":0,"sodium":0}
+          }
+        """);
+
+        ObjectNode out = pp.apply(eff, "GEMINI");
+
+        assertThat(out.get("confidence").asDouble()).isEqualTo(0.3);
+        assertThat(out.get("healthScore")).isNull(); // 被 remove
+        assertThat(out.get("warnings").toString()).contains("NON_FOOD_SUSPECT");
+        assertThat(out.get("healthScoreMeta").get("version").asText()).isEqualTo("v1");
+    }
+
+    @Test
+    void normalFood_should_have_healthScore() throws Exception {
+        ObjectNode eff = (ObjectNode) om.readTree("""
+          {
+            "foodName":"Toast",
+            "confidence": 0.8,
+            "quantity":{"value":1,"unit":"SERVING"},
+            "nutrients":{"kcal":75,"protein":2.5,"fat":1,"carbs":14,"fiber":0.8,"sugar":1.5,"sodium":140}
+          }
+        """);
+
+        ObjectNode out = pp.apply(eff, "GEMINI");
+
+        assertThat(out.get("healthScore").asInt()).isBetween(1, 10);
+        assertThat(out.get("healthScoreMeta").get("provider").asText()).isEqualTo("GEMINI");
     }
 }
