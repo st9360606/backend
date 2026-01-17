@@ -58,9 +58,6 @@ management:
         include: health,info,scheduledtasks
 
 app:
-  crypto:
-    aesgcm:
-      key-b64: "${APP_CRYPTO_AESGCM_KEY_B64:}"   #用 AES-GCM 把 LogMeal token 加密後存 DB（logmeal_accounts.api_user_token_enc）
   foodlog:
     provider: "GEMINI"  # STUB / TODO 正式環境改 : GEMINI
   provider:
@@ -73,13 +70,9 @@ app:
       read-timeout: 30s
       max-output-tokens: 512
       temperature: 0.2
-    logmeal:
-      base-url: "https://api.logmeal.com"
-      connect-timeout: 5s
-      read-timeout: 25s
-      # ✅ 你 LogMealProviderClient 會用 authorizationPrefixOrDefault()
-      # 建議明確給 "Bearer"
-      authorization-prefix: "Bearer"
+  features:
+    dev-image-endpoint: true   # TODO 上線要改成 false
+    dev-debug-endpoints: true  # TODO 上線要改成 false
   google:
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
   auth:
@@ -106,9 +99,6 @@ app:
         initial-delay: "PT1M"       # 啟動後 1 分鐘第一次執行
         max-depth: 8                # 避免深層走訪拖慢
         delete-empty-dirs: true
-  features:
-    dev-image-endpoint: true   # TODO 上線要改成 false
-    dev-debug-endpoints: true  # TODO 上線要改成 false
 alias:
   promotion:
     # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲
