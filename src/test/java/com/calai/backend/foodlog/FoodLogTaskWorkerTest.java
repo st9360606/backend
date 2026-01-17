@@ -11,7 +11,7 @@ import com.calai.backend.foodlog.task.ProviderClient;
 import com.calai.backend.foodlog.task.TaskRetryPolicy;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-
+import com.calai.backend.foodlog.task.ProviderRouter;
 import java.time.Instant;
 import java.util.List;
 
@@ -25,7 +25,8 @@ class FoodLogTaskWorkerTest {
     void deleted_log_should_cancel_without_calling_provider() throws Exception {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
-        ProviderClient provider = Mockito.mock(ProviderClient.class);
+        ProviderRouter router = Mockito.mock(ProviderRouter.class);     // ✅ 改這裡
+        ProviderClient provider = Mockito.mock(ProviderClient.class);   // ✅ 仍可保留，用於 verify
         StorageService storage = Mockito.mock(StorageService.class);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -42,20 +43,24 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log1"))
                 .thenReturn(log);
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, provider, storage);
+        // ✅ 注意：DELETED 會在 pick 前就 continue，所以不用 stub router.pick
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage);
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
 
-        // ✅ 新簽名驗證：不應呼叫 provider.process(FoodLogEntity, StorageService)
         Mockito.verify(provider, never()).process(any(FoodLogEntity.class), any(StorageService.class));
+        Mockito.verify(router, never()).pick(any()); // ✅ 甚至可加這個
     }
+
 
     @Test
     void transient_failure_should_schedule_retry() throws Exception {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
-        ProviderClient provider = Mockito.mock(ProviderClient.class);
+
+        ProviderRouter router = Mockito.mock(ProviderRouter.class);     // ✅
+        ProviderClient provider = Mockito.mock(ProviderClient.class);   // ✅
         StorageService storage = Mockito.mock(StorageService.class);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -73,16 +78,19 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log2"))
                 .thenReturn(log);
 
-        // ✅ 新簽名 stubbing
-        Mockito.when(provider.process(any(FoodLogEntity.class), eq(storage)))
+        // ✅ router.pick(log) 回 provider
+        Mockito.when(router.pick(eq(log))).thenReturn(provider);
+
+        // ✅ provider.process 丟錯
+        Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("boom"));
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, provider, storage);
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage);
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.FAILED, task.getTaskStatus());
         assertNotNull(task.getNextRetryAtUtc());
-        assertEquals(1, task.getAttempts()); // markRunning 後 +1
+        assertEquals(1, task.getAttempts());
         assertEquals(FoodLogStatus.FAILED, log.getStatus());
     }
 
@@ -90,14 +98,16 @@ class FoodLogTaskWorkerTest {
     void reach_max_attempts_should_give_up() throws Exception {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
-        ProviderClient provider = Mockito.mock(ProviderClient.class);
+
+        ProviderRouter router = Mockito.mock(ProviderRouter.class);     // ✅
+        ProviderClient provider = Mockito.mock(ProviderClient.class);   // ✅
         StorageService storage = Mockito.mock(StorageService.class);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t3");
         task.setFoodLogId("log3");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-        task.setAttempts(TaskRetryPolicy.MAX_ATTEMPTS - 1); // 下一次就達上限
+        task.setAttempts(TaskRetryPolicy.MAX_ATTEMPTS - 1);
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log3");
@@ -109,16 +119,17 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log3"))
                 .thenReturn(log);
 
-        // ✅ 新簽名 stubbing
-        Mockito.when(provider.process(any(FoodLogEntity.class), eq(storage)))
+        Mockito.when(router.pick(eq(log))).thenReturn(provider);
+
+        Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("always fail"));
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, provider, storage);
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage);
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
         assertNull(task.getNextRetryAtUtc());
-        assertEquals(TaskRetryPolicy.MAX_ATTEMPTS, task.getAttempts()); // markRunning 後 +1
+        assertEquals(TaskRetryPolicy.MAX_ATTEMPTS, task.getAttempts());
         assertEquals("PROVIDER_GIVE_UP", log.getLastErrorCode());
     }
 }

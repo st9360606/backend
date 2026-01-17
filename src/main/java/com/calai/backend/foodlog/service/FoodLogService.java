@@ -25,10 +25,22 @@ import java.io.PushbackInputStream;
 import java.time.*;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Value;
+import java.util.Locale;
 
 @RequiredArgsConstructor
 @Service
 public class FoodLogService {
+
+    @Value("${app.foodlog.provider:STUB}")
+    private String defaultProviderRaw;
+
+    private String defaultProvider() {
+        if (defaultProviderRaw == null) return "STUB";
+        String v = defaultProviderRaw.trim();
+        if (v.isEmpty()) return "STUB";
+        return v.toUpperCase(Locale.ROOT);
+    }
 
     private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024; // 8MB（先保守）
 
@@ -120,7 +132,7 @@ public class FoodLogService {
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
                     quota.consumeAiOrThrow(userId, tz, serverNow);
-                    e.setProvider("STUB");
+                    e.setProvider(defaultProvider());
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
                 }
@@ -257,7 +269,7 @@ public class FoodLogService {
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
                     quota.consumeAiOrThrow(userId, tz, serverNow);
-                    e.setProvider("STUB");
+                    e.setProvider(defaultProvider());
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
                 }

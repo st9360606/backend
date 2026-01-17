@@ -31,6 +31,12 @@ public class LogMealProviderClient implements ProviderClient {
     }
 
     @Override
+    public String providerCode() {
+        return "LOGMEAL";
+    }
+
+
+    @Override
     public ProviderResult process(FoodLogEntity log, StorageService storage) throws Exception {
         byte[] bytes;
         try (InputStream in = storage.open(log.getImageObjectKey()).inputStream()) {

@@ -13,12 +13,17 @@ public class StubProviderClient implements ProviderClient {
     }
 
     @Override
+    public String providerCode() {
+        return "STUB";
+    }
+
+    @Override
     public ProviderResult process(FoodLogEntity log, StorageService storage) throws Exception {
         var effective = om.readTree("""
           {
             "foodName": "Stub result",
             "quantity": {"value": 1, "unit": "SERVING"},
-            "nutrients": {"kcal": 222, "protein": 10, "fat": 8, "carbs": 28},
+            "nutrients": {"kcal": 222, "protein": 10, "fat": 8, "carbs": 28, "fiber": 3, "sugar": 5, "sodium": 200},
             "healthScore": 7,
             "confidence": 0.55
           }

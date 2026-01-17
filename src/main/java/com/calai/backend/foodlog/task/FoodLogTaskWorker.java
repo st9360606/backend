@@ -23,7 +23,7 @@ public class FoodLogTaskWorker {
 
     private final FoodLogTaskRepository taskRepo;
     private final FoodLogRepository logRepo;
-    private final ProviderClient providerClient;
+    private final ProviderRouter router;
     private final StorageService storage;
 
     @Scheduled(fixedDelay = 2000)
@@ -71,10 +71,12 @@ public class FoodLogTaskWorker {
             }
 
             try {
-                task.markRunning(now); // 你目前的語意：markRunning 會 attempts +1
+                task.markRunning(now);
                 taskRepo.save(task);
 
-                var result = providerClient.process(logEntity, storage);
+                ProviderClient client = router.pick(logEntity);
+                var result = client.process(logEntity, storage);
+
                 if (result == null || result.effective() == null) {
                     throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
                 }
@@ -97,9 +99,20 @@ public class FoodLogTaskWorker {
                 String mappedCode = mapped.code();
                 String mappedMsg = mapped.message();
 
-                // ✅ 這次失敗後，如果已達最大嘗試次數 → GIVE UP → CANCELLED
+                // ✅ 1) 不可重試：直接取消，不要燒 5 次
+                if (isNonRetryable(mappedCode)) {
+                    task.markCancelled(now, mappedCode, mappedMsg);
+                    taskRepo.save(task);
+
+                    logEntity.setStatus(FoodLogStatus.FAILED);
+                    logEntity.setLastErrorCode(mappedCode);
+                    logEntity.setLastErrorMessage(mappedMsg);
+                    logRepo.save(logEntity);
+                    continue;
+                }
+
+                // ✅ 2) 可重試：到上限就 GIVE UP
                 if (task.getAttempts() >= TaskRetryPolicy.MAX_ATTEMPTS) {
-                    // 保持你原本測試期待的 code = PROVIDER_GIVE_UP
                     String giveUpMsg = "[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg);
                     giveUpMsg = giveUpMsg.trim();
 
@@ -113,7 +126,7 @@ public class FoodLogTaskWorker {
                     continue;
                 }
 
-                // ✅ 未達上限 → 排程重試（用更可觀測的 mappedCode）
+                // ✅ 3) 未達上限 → 排程重試
                 int delaySec = TaskRetryPolicy.nextDelaySec(task.getAttempts());
                 task.markFailed(now, mappedCode, mappedMsg, delaySec);
                 taskRepo.save(task);
@@ -126,8 +139,25 @@ public class FoodLogTaskWorker {
         }
     }
 
-    private static String safeMsg(Throwable t) {
-        String m = t.getMessage();
-        return (m == null || m.isBlank()) ? t.getClass().getSimpleName() : m;
+    /**
+     * ✅ 不可重試錯誤（配置/授權/請求格式問題）
+     * - PROVIDER_NOT_CONFIGURED：程式/設定問題，重試也不會好
+     * - PROVIDER_AUTH_FAILED：API key/token 錯，重試只會一直 401/403
+     * - PROVIDER_BAD_REQUEST：你的 request 組裝錯/不符合 API，重試無效
+     *
+     * 你之後可以再加：
+     * - GEMINI_API_KEY_MISSING
+     * - PROVIDER_BLOCKED (視策略：通常也不該重試)
+     */
+    private static boolean isNonRetryable(String code) {
+        if (code == null || code.isBlank()) return false;
+        return switch (code) {
+            case "PROVIDER_NOT_CONFIGURED",
+                 "PROVIDER_AUTH_FAILED",
+                 "PROVIDER_BAD_REQUEST",
+                 "GEMINI_API_KEY_MISSING",
+                 "PROVIDER_BLOCKED" -> true;
+            default -> false;
+        };
     }
 }

@@ -60,10 +60,19 @@ management:
 app:
   crypto:
     aesgcm:
-      key-b64: "${APP_CRYPTO_AESGCM_KEY_B64}"   #用 AES-GCM 把 LogMeal token 加密後存 DB（logmeal_accounts.api_user_token_enc）
+      key-b64: "${APP_CRYPTO_AESGCM_KEY_B64:}"   #用 AES-GCM 把 LogMeal token 加密後存 DB（logmeal_accounts.api_user_token_enc）
   foodlog:
-    provider: "LOGMEAL"  # STUB / TODO 正式環境改 : LOGMEAL
+    provider: "GEMINI"  # STUB / TODO 正式環境改 : GEMINI
   provider:
+    gemini:
+      enabled: true
+      api-key: "${GEMINI_API_KEY}"
+      base-url: "https://generativelanguage.googleapis.com"
+      model: "gemini-3-flash-preview"
+      connect-timeout: 5s
+      read-timeout: 30s
+      max-output-tokens: 512
+      temperature: 0.2
     logmeal:
       base-url: "https://api.logmeal.com"
       connect-timeout: 5s
