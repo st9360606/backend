@@ -92,17 +92,36 @@ public class FoodLogHistoryService {
 
     private FoodLogListResponse.Item toItem(FoodLogEntity e) {
         JsonNode eff = e.getEffective();
+
         String foodName = null;
-        Double kcal = null, protein = null, fat = null, carbs = null;
+
+        Double kcal = null;
+        Double protein = null;
+        Double fat = null;
+        Double carbs = null;
+        Double fiber = null;
+        Double sugar = null;
+        Double sodium = null;
+
+        Integer healthScore = null;
+        Double confidence = null;
 
         if (eff != null && eff.isObject()) {
             foodName = textOrNull(eff.get("foodName"));
+
+            // confidence / healthScore 在 effective root
+            healthScore = intOrNull(eff.get("healthScore"));
+            confidence = doubleOrNull(eff.get("confidence"));
+
             JsonNode n = eff.get("nutrients");
             if (n != null && n.isObject()) {
                 kcal = doubleOrNull(n.get("kcal"));
                 protein = doubleOrNull(n.get("protein"));
                 fat = doubleOrNull(n.get("fat"));
                 carbs = doubleOrNull(n.get("carbs"));
+                fiber = doubleOrNull(n.get("fiber"));
+                sugar = doubleOrNull(n.get("sugar"));
+                sodium = doubleOrNull(n.get("sodium"));
             }
         }
 
@@ -111,10 +130,30 @@ public class FoodLogHistoryService {
                 e.getStatus().name(),
                 e.getCapturedLocalDate() == null ? null : e.getCapturedLocalDate().toString(),
                 e.getCapturedAtUtc() == null ? null : e.getCapturedAtUtc().toString(),
-                new FoodLogListResponse.Nutrition(foodName, kcal, protein, fat, carbs)
+                new FoodLogListResponse.Nutrition(
+                        foodName,
+                        kcal,
+                        protein,
+                        fat,
+                        carbs,
+                        fiber,
+                        sugar,
+                        sodium,
+                        healthScore,
+                        confidence
+                )
         );
     }
 
-    private static String textOrNull(JsonNode v) { return (v == null || v.isNull()) ? null : v.asText(); }
-    private static Double doubleOrNull(JsonNode v) { return (v == null || v.isNull()) ? null : v.asDouble(); }
+    private static String textOrNull(JsonNode v) {
+        return (v == null || v.isNull()) ? null : v.asText();
+    }
+
+    private static Double doubleOrNull(JsonNode v) {
+        return (v == null || v.isNull() || !v.isNumber()) ? null : v.asDouble();
+    }
+
+    private static Integer intOrNull(JsonNode v) {
+        return (v == null || v.isNull() || !v.isIntegralNumber()) ? null : v.asInt();
+    }
 }

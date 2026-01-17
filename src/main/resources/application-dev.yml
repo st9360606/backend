@@ -108,6 +108,7 @@ app:
         delete-empty-dirs: true
   features:
     dev-image-endpoint: true   # TODO 上線要改成 false
+    dev-debug-endpoints: true  # TODO 上線要改成 false
 alias:
   promotion:
     # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲
@@ -141,11 +142,3 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
-
-
-#jshell
-#import java.security.SecureRandom;
-#import java.util.Base64;
-#byte[] b=new byte[32]; new SecureRandom().nextBytes(b);
-#System.out.println(Base64.getEncoder().encodeToString(b));
-#/exit
