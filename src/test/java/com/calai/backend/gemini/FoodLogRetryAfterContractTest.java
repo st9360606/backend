@@ -3,6 +3,7 @@ package com.calai.backend.gemini;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.task.FoodLogTaskWorker;
+import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import org.junit.jupiter.api.*;
@@ -30,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class FoodLogRetryAfterContractTest {
+public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
 
     static WireMockServer wm;
 

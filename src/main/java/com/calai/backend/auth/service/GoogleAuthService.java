@@ -6,7 +6,7 @@ import com.calai.backend.auth.entity.AuthProvider;
 import com.calai.backend.fasting.service.FastingPlanService;
 import com.calai.backend.fasting.support.ClientTimeZoneResolver;
 import com.calai.backend.users.user.entity.User;
-import com.calai.backend.auth.repo.UserRepo;
+import com.calai.backend.users.user.repo.UserRepo;
 import com.calai.backend.users.profile.service.UserProfileService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;

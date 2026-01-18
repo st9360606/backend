@@ -5,13 +5,15 @@ import com.calai.backend.users.profile.common.WaterMode;
 import com.calai.backend.users.user.entity.User;
 import jakarta.persistence.*;
 import lombok.Data;
+import org.springframework.data.domain.Persistable;
 
 import java.time.Instant;
 
 @Data
 @Entity
 @Table(name = "user_profiles")
-public class UserProfile {
+public class UserProfile implements Persistable<Long> {
+
     @Id
     @Column(name = "user_id")
     private Long userId;
@@ -22,28 +24,22 @@ public class UserProfile {
     private User user;
 
     @Column(name = "gender") private String gender;
-
     @Column(name = "age") private Integer age;
 
     @Column(name = "height_cm") private Double heightCm;
-
     @Column(name = "height_feet") private Short heightFeet;
-
     @Column(name = "height_inches") private Short heightInches;
 
     @Column(name = "weight_kg") private Double weightKg;
-
     @Column(name = "weight_lbs") private Double weightLbs;
 
     @Column(name = "exercise_level") private String exerciseLevel;
-
     @Column(name = "goal") private String goal;
 
     @Column(name = "daily_step_goal", nullable = false)
     private Integer dailyStepGoal = 10000;
 
     @Column(name = "goal_weight_kg") private Double goalWeightKg;
-
     @Column(name = "goal_weight_lbs") private Double goalWeightLbs;
 
     @Column(name = "unit_preference", nullable = false)
@@ -97,9 +93,7 @@ public class UserProfile {
     private String calcVersion = "healthcalc_v1";
 
     @Column(name = "referral_source") private String referralSource;
-
     @Column(name = "locale") private String locale;
-
     @Column(name = "timezone") private String timezone;
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -108,6 +102,35 @@ public class UserProfile {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
+    // ===== Persistable: 關鍵修正 =====
+    @Transient
+    private boolean isNew = true;
+
+    @Override
+    public Long getId() {
+        return this.userId;
+    }
+
+    @Override
+    public boolean isNew() {
+        return this.isNew;
+    }
+
+    @PostLoad
+    @PostPersist
+    void markNotNew() {
+        this.isNew = false;
+    }
+
     @PreUpdate
-    void onUpdate() { this.updatedAt = Instant.now(); }
+    void onUpdate() {
+        this.updatedAt = Instant.now();
+    }
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        if (this.createdAt == null) this.createdAt = now;
+        this.updatedAt = now;
+    }
 }

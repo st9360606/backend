@@ -1,11 +1,12 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.auth.security.AccessTokenFilter;
-import com.calai.backend.foodlog.controller.FoodLogController;
-import com.calai.backend.foodlog.service.FoodLogService;
-import com.calai.backend.foodlog.web.FoodLogExceptionAdvice;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.common.web.RequestIdFilter;
+import com.calai.backend.foodlog.controller.FoodLogController;
+import com.calai.backend.foodlog.controller.FoodLogImageController;
+import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.web.FoodLogExceptionAdvice;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,14 +29,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@ActiveProfiles("test") // ✅ 避免你現在預設跑到 dev profile
+@ActiveProfiles("test")
 @WebMvcTest(
-        controllers = FoodLogController.class,
-        excludeAutoConfiguration = { // ✅ 1) 直接關掉 Spring Security 自動配置
+        controllers = { FoodLogController.class, FoodLogImageController.class }, // ✅ 關鍵：把 image controller 加進來
+        excludeAutoConfiguration = {
                 SecurityAutoConfiguration.class,
                 SecurityFilterAutoConfiguration.class
         },
-        excludeFilters = { // ✅ 2) 排除 AccessTokenFilter，不讓它當成 Servlet Filter 被註冊
+        excludeFilters = {
                 @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = AccessTokenFilter.class)
         }
 )
@@ -49,6 +50,10 @@ class FoodLogExceptionAdviceTest {
 
     @MockitoBean AuthContext auth;
     @MockitoBean FoodLogService service;
+
+    @MockitoBean com.calai.backend.foodlog.service.FoodLogDeleteService deleteService;
+    @MockitoBean com.calai.backend.foodlog.service.FoodLogOverrideService overrideService;
+    @MockitoBean com.calai.backend.foodlog.service.FoodLogHistoryService historyService;
 
     @Test
     void upload_unsupported_format_should_400_with_requestId() throws Exception {

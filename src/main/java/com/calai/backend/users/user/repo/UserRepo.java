@@ -1,4 +1,4 @@
-package com.calai.backend.auth.repo;
+package com.calai.backend.users.user.repo;
 
 import com.calai.backend.users.user.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;

@@ -1,6 +1,6 @@
 package com.calai.backend.users.profile.service;
 
-import com.calai.backend.auth.repo.UserRepo;
+import com.calai.backend.users.user.repo.UserRepo;
 import com.calai.backend.users.auto_generate_goals.dto.AutoGoalsRequest;
 import com.calai.backend.users.auto_generate_goals.exception.MissingFieldsException;
 import com.calai.backend.users.profile.common.*;

@@ -53,4 +53,15 @@ public class User {
     public void setEmail(String email) {
         this.email = (email == null) ? null : email.trim().toLowerCase();
     }
+
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) createdAt = Instant.now();
+        if (updatedAt == null) updatedAt = Instant.now();
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
+    }
 }

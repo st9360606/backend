@@ -1,6 +1,6 @@
 package com.calai.backend.users.user.controller;
 
-import com.calai.backend.auth.repo.UserRepo;
+import com.calai.backend.users.user.repo.UserRepo;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.users.user.dto.MeDto;
 import com.calai.backend.users.user.dto.UpdateNameRequest;

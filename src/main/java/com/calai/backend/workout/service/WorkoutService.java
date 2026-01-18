@@ -224,9 +224,19 @@ public class WorkoutService {
 
         // 關鍵：長詞在前，避免只吃掉「分」而殘留「鐘/钟」
         String MIN_UNITS_NORM =
-                "(?:min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
-                        +  "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|phut|นาที|menit|minit|"
-                        +  "分鐘|分钟|分|분)";
+                "(?:"
+                + "minutos|minuto|minuta|"
+                + "minutes|minute|mins|min|"
+                // 其他語系（維持你原本的清單，但把短的放後面）
+                + "minuty|minut|minuten|minuut|minuter|"
+                + "dakika|"
+                + "минуты|минута|минут|мин|"
+                + "دقائق|دقيقة|"
+                + "דקות|"
+                + "phut|นาที|menit|minit|"
+                + "分鐘|分钟|分|분"
+                + ")";
+
         String HR_UNITS_NORM  =
                 "(?:h|hr|hrs|hour|hours|hora|horas|ore|uur|std|stunden|godz|saat|час|часы|ساعة|ساعات|שעה|"
                         +  "gio|ชั่วโมง|jam|小时|小時|時間|시간)";

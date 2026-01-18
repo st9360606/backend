@@ -28,7 +28,11 @@ public class ProviderRouter {
 
             ProviderClient prev = m.putIfAbsent(code, c);
             if (prev != null) {
-                throw new IllegalStateException("DUPLICATE_PROVIDER_CODE: " + code);
+                throw new IllegalStateException(
+                        "DUPLICATE_PROVIDER_CODE: " + code
+                        + ", prev=" + prev.getClass().getName()
+                        + ", dup=" + c.getClass().getName()
+                );
             }
         }
         this.mapByCode = Collections.unmodifiableMap(m);

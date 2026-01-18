@@ -7,22 +7,23 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.net.SocketTimeoutException;
 import java.util.Locale;
+import java.util.concurrent.TimeoutException;
 
 public final class ProviderErrorMapper {
 
     private ProviderErrorMapper() {}
 
-    /**
-     * ✅ 新增 retryAfterSec：
-     * - 429 時從 Retry-After 讀秒數（若沒有就 null）
-     * - worker 會用 max(delay, retryAfterSec) 決定下次重試時間
-     */
     public record Mapped(String code, String message, Integer retryAfterSec) {}
 
     public static Mapped map(Throwable e) {
         if (e == null) return new Mapped("PROVIDER_FAILED", null, null);
 
-        // ✅ 你自己 throw 的明確 code（例如 PROVIDER_BAD_RESPONSE / PROVIDER_NOT_AVAILABLE / GEMINI_API_KEY_MISSING）
+        // ✅ NEW: 先攔截「任何 timeout」，包含你 test 直接丟 SocketTimeoutException 的情況
+        if (isTimeoutThrowable(e)) {
+            return new Mapped("PROVIDER_TIMEOUT", safeMsg(e), null);
+        }
+
+        // ✅ 你自己 throw 的明確 code
         if (e instanceof IllegalStateException ise) {
             String m = ise.getMessage();
             if (m != null && (m.startsWith("PROVIDER_") || m.startsWith("GEMINI_") || m.equals("EMPTY_IMAGE"))) {
@@ -30,12 +31,11 @@ public final class ProviderErrorMapper {
             }
         }
 
-        // ✅ RestClient 4xx/5xx（Gemini / LogMeal 都走這裡）
+        // ✅ RestClient 4xx/5xx
         if (e instanceof RestClientResponseException re) {
             var sc = re.getStatusCode();
             int status = sc.value();
 
-            // 讀 Retry-After（只處理秒數格式）
             Integer retryAfter = null;
             HttpHeaders headers = re.getResponseHeaders();
             if (headers != null) {
@@ -43,7 +43,6 @@ public final class ProviderErrorMapper {
                 retryAfter = parseRetryAfterSecondsOrNull(ra);
             }
 
-            // Gemini 常見 blocked：從 body 關鍵字判斷（不要把 body 原樣回傳給 client）
             String body = nullSafe(re.getResponseBodyAsString());
             String lower = body.toLowerCase(Locale.ROOT);
             if (lower.contains("safety") || lower.contains("blocked") || lower.contains("recitation")) {
@@ -60,18 +59,18 @@ public final class ProviderErrorMapper {
             return new Mapped("PROVIDER_FAILED", "http error", retryAfter);
         }
 
-        // ✅ timeout / network
+        // ✅ network (非 timeout)
         if (e instanceof ResourceAccessException rae) {
-            if (isTimeout(rae)) return new Mapped("PROVIDER_TIMEOUT", safeMsg(rae), null);
+            // timeout 已在 isTimeoutThrowable 擋掉，這裡就是純 network error
             return new Mapped("PROVIDER_NETWORK_ERROR", safeMsg(rae), null);
         }
 
         if (e instanceof RestClientException rce) {
-            // 沒有 status code 的 client exception（例如序列化、未知連線錯）
+            // ✅ 沒有 status code 的 client exception（序列化、連線錯）
+            // timeout 已在 isTimeoutThrowable 擋掉
             return new Mapped("PROVIDER_CLIENT_ERROR", safeMsg(rce), null);
         }
 
-        // fallback
         return new Mapped("PROVIDER_FAILED", safeMsg(e), null);
     }
 
@@ -79,23 +78,36 @@ public final class ProviderErrorMapper {
         if (ra == null || ra.isBlank()) return null;
         try {
             int v = Integer.parseInt(ra.trim());
-            // ✅ MVP：上限 1 小時
-            v = Math.max(0, Math.min(v, 3600));
+            v = Math.max(0, Math.min(v, 3600)); // 上限 1 小時
             return v;
         } catch (Exception ignored) {
-            // HTTP-date 格式先不處理（MVP）
-            return null;
+            return null; // HTTP-date 格式 MVP 先不處理
         }
     }
 
-    private static boolean isTimeout(ResourceAccessException e) {
-        Throwable c = e.getCause();
-        if (c instanceof SocketTimeoutException) return true;
+    /**
+     * ✅ NEW: 判斷「任何 Throwable」是不是 timeout（含 cause chain）
+     * - 你 test 直接丟 SocketTimeoutException
+     * - Spring RestClient 常把 timeout 包在 ResourceAccessException / RestClientException cause 裡
+     * - JDK HttpClient 可能是 java.net.http.HttpTimeoutException（用 class name 判斷避免編譯依賴）
+     */
+    private static boolean isTimeoutThrowable(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c instanceof SocketTimeoutException) return true;
+            if (c instanceof TimeoutException) return true;
 
-        String m = e.getMessage();
-        if (m == null) return false;
-        String s = m.toLowerCase(Locale.ROOT);
-        return s.contains("timeout") || s.contains("timed out");
+            // 避免直接引用 java.net.http.HttpTimeoutException（有些 JDK/環境不一定）
+            String cn = c.getClass().getName();
+            if ("java.net.http.HttpTimeoutException".equals(cn)) return true;
+
+            // 有些 library 只在 message 放 timed out
+            String m = c.getMessage();
+            if (m != null) {
+                String s = m.toLowerCase(Locale.ROOT);
+                if (s.contains("timeout") || s.contains("timed out")) return true;
+            }
+        }
+        return false;
     }
 
     private static String safeMsg(Throwable t) {

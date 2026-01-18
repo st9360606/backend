@@ -1,6 +1,7 @@
 package com.calai.backend.gemini;
 
 import com.calai.backend.foodlog.task.FoodLogTaskWorker;
+import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
@@ -32,7 +33,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.*;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
-public class FoodLogApiContractTest {
+public class FoodLogApiContractTest extends MySqlContainerBaseTest {
 
     static WireMockServer wm;
 

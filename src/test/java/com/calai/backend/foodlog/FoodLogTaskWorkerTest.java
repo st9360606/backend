@@ -6,7 +6,11 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.*;
+import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.task.FoodLogTaskWorker;
+import com.calai.backend.foodlog.task.ProviderClient;
+import com.calai.backend.foodlog.task.ProviderRouter;
+import com.calai.backend.foodlog.task.TaskRetryPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -26,9 +30,8 @@ class FoodLogTaskWorkerTest {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
-        ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
-        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class); // ✅ 新增
+        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t1");
@@ -44,14 +47,14 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log1"))
                 .thenReturn(log);
 
-        // ✅ DELETED 會在 pick 前就 continue，所以不用 stub router.pick
+        // ✅ DELETED 會在 pick 前就 continue
         FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
 
-        Mockito.verify(provider, never()).process(any(FoodLogEntity.class), any(StorageService.class));
         Mockito.verify(router, never()).pick(any());
+        Mockito.verify(router, never()).pickStrict(any());
         Mockito.verify(postProcessor, never()).apply(any(ObjectNode.class), anyString());
     }
 
@@ -62,7 +65,7 @@ class FoodLogTaskWorkerTest {
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
-        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class); // ✅ 新增
+        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t2");
@@ -79,9 +82,14 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log2"))
                 .thenReturn(log);
 
+        // ✅ worker 可能用 pick 或 pickStrict，兩個都 stub
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
+        Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
 
-        // ✅ provider.process 丟錯（會被 ProviderErrorMapper 映射成 PROVIDER_FAILED）
+        // ✅ 避免 providerCode() 回 null 造成流程炸掉
+        Mockito.when(provider.providerCode()).thenReturn("GEMINI");
+
+        // ✅ provider.process 丟錯（會被你的 error mapping 處理）
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("boom"));
 
@@ -104,7 +112,7 @@ class FoodLogTaskWorkerTest {
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
-        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class); // ✅ 新增
+        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t3");
@@ -122,7 +130,12 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log3"))
                 .thenReturn(log);
 
+        // ✅ worker 可能用 pick 或 pickStrict，兩個都 stub
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
+        Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
+
+        // ✅ 避免 providerCode() 回 null
+        Mockito.when(provider.providerCode()).thenReturn("GEMINI");
 
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("always fail"));
@@ -164,7 +177,12 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log4"))
                 .thenReturn(log);
 
+        // ✅ worker 可能用 pick 或 pickStrict，兩個都 stub
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
+        Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
+
+        // ✅ 很重要：避免 worker 取 providerCode() 取到 null
+        Mockito.when(provider.providerCode()).thenReturn("GEMINI");
 
         ObjectMapper om = new ObjectMapper();
         ObjectNode eff = (ObjectNode) om.readTree("""
@@ -179,7 +197,7 @@ class FoodLogTaskWorkerTest {
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenReturn(new ProviderClient.ProviderResult(eff, "GEMINI"));
 
-        // 後處理：這裡簡化直接回傳原 eff（你的真實後處理會加 healthScoreMeta 等）
+        // ✅ 後處理：這裡簡化直接回傳原 eff
         Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI")))
                 .thenAnswer(inv -> inv.getArgument(0));
 

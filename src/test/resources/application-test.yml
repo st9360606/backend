@@ -1,24 +1,74 @@
 spring:
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8
-    username: root
-    password: root
-  jpa:
-    hibernate:
-      ddl-auto: none
-    open-in-view: false
+  main:
+    allow-bean-definition-overriding: true
 
+  task:
+    scheduling:
+      enabled: false   # ✅ 測試不要啟動 @Scheduled（你 log 裡的 cleanup job 就會消失）
+
+  datasource:
+    url: jdbc:h2:mem:calai;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+  jpa:
+    defer-datasource-initialization: true   # ✅ 先 Hibernate 建表，再跑 data.sql
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  sql:
+    init:
+      mode: always                          # ✅ 一定跑（不然 data.sql 不會執行）
+      data-locations: classpath:sql/data.sql
+
+  flyway:
+    enabled: false  # ✅ 若你專案有 flyway，測試 profile 先關掉避免互打（需要 flyway 的測試再自行開）
+
+  # 減少測試外部依賴
   mail:
+    host: localhost
+    port: 2525
     test-connection: false
 
   data:
     redis:
+      host: localhost
       port: 0
 
-logging.level:
-  com.calai.backend: INFO
+server:
+  port: 0
 
 app:
+  google:
+    web-client-id: "test-dummy"
+
+  foodlog:
+    provider: "STUB"       # ✅ 測試預設 STUB，避免被 GEMINI 汙染
+
+  provider:
+    gemini:
+      enabled: false       # ✅ 需要 GEMINI 的測試用 DynamicPropertySource / TestPropertySource 開啟
+
+  features:
+    dev-image-endpoint: false
+    dev-debug-endpoints: false
+
   email:
     enabled: false
+
+  storage:
+    local:
+      tmp-cleaner:
+        enabled: false     # ✅ 測試別跑掃檔排程
+
+logging:
+  level:
+    org.springframework.jdbc.datasource.init.ScriptUtils: DEBUG   # ✅ 建議暫時打開，確認 data.sql 有跑
+    org.springframework.boot.sql.init: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE

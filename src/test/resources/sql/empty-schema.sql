@@ -1,0 +1,1 @@
+-- empty on purpose (Hibernate ddl-auto will create tables)

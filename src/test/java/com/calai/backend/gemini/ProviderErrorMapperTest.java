@@ -2,6 +2,9 @@ package com.calai.backend.gemini;
 
 import com.calai.backend.foodlog.task.ProviderErrorMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClientException;
+
+import java.net.SocketTimeoutException;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -21,5 +24,17 @@ public class ProviderErrorMapperTest {
 
         Integer bad = (Integer) m.invoke(null, "Mon, 01 Jan 2026 00:00:00 GMT");
         assertThat(bad).isNull();
+    }
+    @Test
+    void socket_timeout_should_map_to_PROVIDER_TIMEOUT() {
+        var m = ProviderErrorMapper.map(new SocketTimeoutException("x"));
+        assertThat(m.code()).isEqualTo("PROVIDER_TIMEOUT");
+    }
+
+    @Test
+    void rest_client_with_timeout_cause_should_map_to_PROVIDER_TIMEOUT() {
+        var e = new RestClientException("io", new SocketTimeoutException("x"));
+        var m = ProviderErrorMapper.map(e);
+        assertThat(m.code()).isEqualTo("PROVIDER_TIMEOUT");
     }
 }

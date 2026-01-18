@@ -1,6 +1,6 @@
 package com.calai.backend;
 
-import com.calai.backend.auth.repo.UserRepo;
+import com.calai.backend.users.user.repo.UserRepo;
 import com.calai.backend.users.profile.dto.UpsertProfileRequest;
 import com.calai.backend.users.profile.entity.UserProfile;
 import com.calai.backend.users.profile.repo.UserProfileRepository;
