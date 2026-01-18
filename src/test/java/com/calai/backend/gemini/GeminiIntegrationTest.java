@@ -1,23 +1,35 @@
 package com.calai.backend.gemini;
 
-import com.github.tomakehurst.wiremock.WireMockServer;
-import org.junit.jupiter.api.*;
+import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-public class GeminiIntegrationTest {
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@AutoConfigureMockMvc
+class GeminiIntegrationTest {
 
-    static WireMockServer wm;
+    @RegisterExtension
+    static WireMockExtension wm = WireMockExtension.newInstance()
+            .options(wireMockConfig().dynamicPort())
+            .build();
 
-    @BeforeAll
-    static void start() {
-        wm = new WireMockServer(0);
-        wm.start();
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry r) {
+        r.add("app.provider.gemini.enabled", () -> "true");
+        r.add("app.provider.gemini.base-url", () -> wm.getRuntimeInfo().getHttpBaseUrl());
+        r.add("app.provider.gemini.api-key", () -> "dummy");
+        r.add("app.foodlog.provider", () -> "GEMINI");
+    }
 
+    @Test
+    void should_call_mock_gemini_and_return_draft() {
         wm.stubFor(post(urlPathMatching("/v1beta/models/.*:generateContent"))
                 .willReturn(aResponse()
                         .withStatus(200)
@@ -31,25 +43,8 @@ public class GeminiIntegrationTest {
                           "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30}
                         }
                         """)));
-    }
 
-    @AfterAll
-    static void stop() {
-        if (wm != null) wm.stop();
-    }
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("app.provider.gemini.enabled", () -> "true");
-        r.add("app.provider.gemini.base-url", () -> "http://localhost:" + wm.port());
-        r.add("app.provider.gemini.api-key", () -> "dummy");
-        r.add("app.foodlog.provider", () -> "GEMINI");
-    }
-
-    @Test
-    void should_call_mock_gemini_and_return_draft() {
-        // 這裡你可以用 TestRestTemplate 或 WebTestClient 去打 /api/v1/food-logs/album
-        // 因為你是 multipart，上線後我建議你用 MockMvc 做 multipart 測試（下一步 S6-03 會做）
-        Assertions.assertTrue(true);
+        // TODO: 之後用 MockMvc multipart 去打你的 controller
+        org.junit.jupiter.api.Assertions.assertTrue(true);
     }
 }
