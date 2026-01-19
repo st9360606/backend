@@ -9,7 +9,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @ActiveProfiles("test")
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 // ✅ 關鍵：避免 Spring Context 被 cache 到 JVM 結束才關
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class MySqlContainerBaseTest {
@@ -28,7 +28,9 @@ public abstract class MySqlContainerBaseTest {
         r.add("spring.datasource.driver-class-name", () -> "com.mysql.cj.jdbc.Driver");
 
         // ✅ 關鍵：不要 create-drop（避免 close 時還要連 DB 做 drop）
-        r.add("spring.jpa.hibernate.ddl-auto", () -> "create");
+        r.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        // ✅ 減少不必要的外部依賴/排程（保險）
+        r.add("spring.task.scheduling.enabled", () -> "false");
         r.add("spring.jpa.properties.hibernate.jdbc.time_zone", () -> "UTC");
 
         // ✅ 關鍵：就算遇到 DB 不可用，也不要卡 30 秒
