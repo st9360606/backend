@@ -1,3 +1,8 @@
 spring:
   profiles:
     default: dev
+
+app:
+  features:
+    dev-image-endpoint: false
+    dev-debug-endpoints: false

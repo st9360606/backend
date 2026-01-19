@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.DateTimeException;
 import java.util.HashMap;
@@ -80,6 +81,13 @@ public class ApiExceptionHandler {
                         e.getMessage()
                 )
         );
+    }
+
+    // 404 static/resource not found
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResource(NoResourceFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(err("NOT_FOUND", "No resource"));
     }
 
     // ===== 500 Fallback =====
