@@ -22,6 +22,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.io.ByteArrayInputStream;
 
@@ -112,7 +113,14 @@ class FoodLogExceptionAdviceTest {
         Mockito.when(service.openImageStream(eq("obj-1")))
                 .thenReturn(new ByteArrayInputStream(new byte[]{9, 8, 7}));
 
-        mvc.perform(get("/api/v1/food-logs/id-1/image").header("X-Request-Id", "RID-200"))
+        // ✅ 第一步：觸發 async
+        MvcResult result = mvc.perform(get("/api/v1/food-logs/id-1/image")
+                        .header("X-Request-Id", "RID-200"))
+                .andExpect(request().asyncStarted())   // ✅ 這行會讓測試更「鎖行為」
+                .andReturn();
+
+        // ✅ 第二步：dispatch async 結果，才會有 body
+        mvc.perform(asyncDispatch(result))
                 .andExpect(status().isOk())
                 .andExpect(header().string("X-Request-Id", "RID-200"))
                 .andExpect(header().string("Content-Type", "image/jpeg"))
