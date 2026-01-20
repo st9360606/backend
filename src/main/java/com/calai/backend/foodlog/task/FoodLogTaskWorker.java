@@ -109,6 +109,19 @@ public class FoodLogTaskWorker {
                 String mappedMsg = mapped.message();
                 Integer retryAfter = mapped.retryAfterSec();
 
+                // ✅ 供應商回傳 JSON 格式不穩：BAD_RESPONSE 最多重試 1 次，避免燒錢
+                if ("PROVIDER_BAD_RESPONSE".equals(mappedCode) && task.getAttempts() >= 2) {
+                    String msg = "bad json from provider (give up) attempts=" + task.getAttempts();
+                    task.markCancelled(now, "PROVIDER_BAD_RESPONSE", msg);
+                    taskRepo.save(task);
+
+                    logEntity.setStatus(FoodLogStatus.FAILED);
+                    logEntity.setLastErrorCode("PROVIDER_BAD_RESPONSE");
+                    logEntity.setLastErrorMessage(msg);
+                    logRepo.save(logEntity);
+                    continue;
+                }
+
                 // ✅ 1) 不可重試：直接取消
                 if (isNonRetryable(mappedCode)) {
                     task.markCancelled(now, mappedCode, mappedMsg);

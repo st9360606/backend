@@ -2,6 +2,7 @@ package com.calai.backend.gemini;
 
 import com.calai.backend.foodlog.provider.GeminiProperties;
 import com.calai.backend.foodlog.provider.GeminiProviderClient;
+import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -16,7 +17,9 @@ public class GeminiProviderClientTest {
     void normalize_ok_should_keep_nutrients() throws Exception {
         GeminiProperties props = new GeminiProperties();
         props.setApiKey("dummy"); // 不會用到（因為不打 http）
-        GeminiProviderClient client = new GeminiProviderClient(null, props, om);
+
+        ProviderTelemetry telemetry = new ProviderTelemetry();
+        GeminiProviderClient client = new GeminiProviderClient(null, props, om, telemetry);
 
         var raw = om.readTree("""
           {
@@ -45,7 +48,9 @@ public class GeminiProviderClientTest {
     void normalize_negative_number_should_fail() throws Exception {
         GeminiProperties props = new GeminiProperties();
         props.setApiKey("dummy");
-        GeminiProviderClient client = new GeminiProviderClient(null, props, om);
+
+        ProviderTelemetry telemetry = new ProviderTelemetry();
+        GeminiProviderClient client = new GeminiProviderClient(null, props, om, telemetry);
 
         var raw = om.readTree("""
           {
@@ -62,7 +67,6 @@ public class GeminiProviderClientTest {
         m.setAccessible(true);
 
         assertThatThrownBy(() -> m.invoke(client, raw))
-                // reflection 會包 InvocationTargetException
                 .hasRootCauseInstanceOf(IllegalStateException.class);
     }
 }

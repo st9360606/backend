@@ -75,8 +75,8 @@ app:
       model: "gemini-3-flash-preview"
       connect-timeout: 5s
       read-timeout: 30s
-      max-output-tokens: 512
-      temperature: 0.2
+      max-output-tokens: 1024
+      temperature: 1.0
   features:
     dev-image-endpoint: true
     dev-debug-endpoints: true

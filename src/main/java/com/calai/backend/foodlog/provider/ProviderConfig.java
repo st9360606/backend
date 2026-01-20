@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.provider;
 
 import com.calai.backend.foodlog.task.ProviderClient;
+import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.calai.backend.foodlog.task.StubProviderClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -37,7 +38,8 @@ public class ProviderConfig {
     public ProviderClient geminiProviderClient(
             RestClient geminiRestClient,
             GeminiProperties props,
-            ObjectMapper om
+            ObjectMapper om,
+            ProviderTelemetry telemetry
     ) {
         // ✅ Fail-fast：啟動時就抓到 key 缺失
         String k = props.getApiKey();
@@ -53,7 +55,7 @@ public class ProviderConfig {
             throw new IllegalStateException("GEMINI_MODEL_MISSING");
         }
 
-        return new GeminiProviderClient(geminiRestClient, props, om);
+        return new GeminiProviderClient(geminiRestClient, props, om, telemetry);
     }
 
 }
