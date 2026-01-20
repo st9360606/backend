@@ -1,3 +1,4 @@
+#src/main/resources/application-prod.yml
 server:
   port: 8080
   address: 0.0.0.0
@@ -61,8 +62,14 @@ management:
     web:
       exposure:
         include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
 
 app:
+  actuator:
+    user: "${APP_ACTUATOR_USER:actuator}"
+    pass: "${APP_ACTUATOR_PASS:change-me}"
   foodlog:
     provider: "GEMINI"
   provider:

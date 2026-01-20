@@ -39,6 +39,20 @@ public class ProviderConfig {
             GeminiProperties props,
             ObjectMapper om
     ) {
+        // ✅ Fail-fast：啟動時就抓到 key 缺失
+        String k = props.getApiKey();
+        if (k == null || k.isBlank()) {
+            throw new IllegalStateException("GEMINI_API_KEY_MISSING");
+        }
+
+        // 也檢查 baseUrl/model 不是空，避免配置錯
+        if (props.getBaseUrl() == null || props.getBaseUrl().isBlank()) {
+            throw new IllegalStateException("GEMINI_BASE_URL_MISSING");
+        }
+        if (props.getModel() == null || props.getModel().isBlank()) {
+            throw new IllegalStateException("GEMINI_MODEL_MISSING");
+        }
+
         return new GeminiProviderClient(geminiRestClient, props, om);
     }
 

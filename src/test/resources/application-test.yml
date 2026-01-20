@@ -1,3 +1,4 @@
+#src/test/resources/application-test.yml
 spring:
   main:
     allow-bean-definition-overriding: true

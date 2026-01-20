@@ -32,10 +32,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(reg -> reg
                         // ✅ 公開讀取：體重照片 (只放行 GET)
                         .requestMatchers(HttpMethod.GET, "/static/weight-photos/**").permitAll()
-
-                        // 你原本放行的
-                        .requestMatchers("/auth/**", "/actuator/**").permitAll()
-
+                        .requestMatchers("/auth/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 // 把我們的 Bearer 過濾器掛進 Security 鏈
