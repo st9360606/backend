@@ -4,6 +4,7 @@ import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.*;
@@ -26,27 +27,20 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceTaskVisibilityTest {
 
-    @Mock
-    FoodLogRepository repo;
-    @Mock
-    FoodLogTaskRepository taskRepo;
-    @Mock
-    StorageService storage;
+    @Mock FoodLogRepository repo;
+    @Mock FoodLogTaskRepository taskRepo;
+    @Mock StorageService storage;
 
-    @Mock
-    QuotaService quota;
-    @Mock
-    IdempotencyService idem;
-    @Mock
-    ImageBlobService imageBlobService;
-    @Mock
-    UserInFlightLimiter inFlight;
-    @Mock
-    UserRateLimiter rateLimiter;
+    @Mock QuotaService quota;
+    @Mock IdempotencyService idem;
+    @Mock ImageBlobService imageBlobService;
+    @Mock UserInFlightLimiter inFlight;
+    @Mock UserRateLimiter rateLimiter;
 
-    // ✅ 新增：PostProcessor（建構子新增依賴）
-    @Mock
-    EffectivePostProcessor postProcessor;
+    @Mock EffectivePostProcessor postProcessor;
+
+    // ✅ 新增：ClientActionMapper
+    @Mock ClientActionMapper clientActionMapper;
 
     private FoodLogService service;
 
@@ -57,7 +51,8 @@ class FoodLogServiceTaskVisibilityTest {
                 new ObjectMapper(),
                 quota, idem, imageBlobService,
                 inFlight, rateLimiter,
-                postProcessor
+                postProcessor,
+                clientActionMapper
         );
     }
 
@@ -87,7 +82,7 @@ class FoodLogServiceTaskVisibilityTest {
         assertEquals("task-1", env.task().taskId());
 
         verify(taskRepo, times(1)).findByFoodLogId("log-1");
-        verifyNoInteractions(quota); // ✅ getOne 不應該扣點
+        verifyNoInteractions(quota);
     }
 
     @Test

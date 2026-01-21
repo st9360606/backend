@@ -4,7 +4,7 @@ import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.FoodLogWarning;
 import com.calai.backend.foodlog.task.ProviderClient;
-import com.calai.backend.foodlog.task.ProviderErrorMapper;
+import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
 import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

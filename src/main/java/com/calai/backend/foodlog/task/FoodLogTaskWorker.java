@@ -2,6 +2,7 @@ package com.calai.backend.foodlog.task;
 
 import com.calai.backend.foodlog.dto.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;

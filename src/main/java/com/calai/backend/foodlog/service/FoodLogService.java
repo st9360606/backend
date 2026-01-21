@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.dto.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.image.ImageSniffer;
+import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
@@ -56,7 +57,7 @@ public class FoodLogService {
     private final UserInFlightLimiter inFlight;
     private final UserRateLimiter rateLimiter;
     private final EffectivePostProcessor postProcessor;
-
+    private final ClientActionMapper clientActionMapper;
     // MVP：先 new（後續要 DI 也可以）
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
 
@@ -419,9 +420,11 @@ public class FoodLogService {
                 retryAfter = 20;
             }
 
+            String action = clientActionMapper.fromErrorCode(e.getLastErrorCode()).name();
+
             err = new FoodLogEnvelope.ApiError(
                     e.getLastErrorCode(),
-                    "RETRY_LATER",
+                    action,
                     retryAfter
             );
         }

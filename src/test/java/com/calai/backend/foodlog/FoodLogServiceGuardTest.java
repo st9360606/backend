@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog;
 
+import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.*;
@@ -32,21 +33,21 @@ class FoodLogServiceGuardTest {
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
 
-        // ✅ 新增：PostProcessor（建構子新增依賴）
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
+        ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
 
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
                 quota, idem, blobService,
                 inFlight, rateLimiter,
-                postProcessor
+                postProcessor,
+                clientActionMapper
         );
 
         when(idem.reserveOrGetExisting(anyLong(), anyString(), any())).thenReturn(null);
         doNothing().when(rateLimiter).checkOrThrow(anyLong(), any());
         doNothing().when(idem).failAndReleaseIfNeeded(anyLong(), anyString(), anyString(), anyString(), anyBoolean());
 
-        // 隨便塞一個不是圖片的 bytes → ImageSniffer.detect 會回 null → UNSUPPORTED_IMAGE_FORMAT
         MockMultipartFile file = new MockMultipartFile(
                 "file",
                 "x.bin",

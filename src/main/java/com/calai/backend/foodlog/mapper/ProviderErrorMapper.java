@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.task;
+package com.calai.backend.foodlog.mapper;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.client.ResourceAccessException;
