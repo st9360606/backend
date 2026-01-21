@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.query.Param;
+
+import java.util.List;
 import java.util.Optional;
 import java.time.LocalDate;
 
@@ -50,4 +52,23 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
             @Param("objectKey") String objectKey,
             @Param("deletedStatus") FoodLogStatus deletedStatus
     );
+
+    @Query(
+            value = """
+    SELECT *
+    FROM food_logs
+    WHERE status IN (:statuses)
+      AND server_received_at_utc <= :cutoff
+    ORDER BY server_received_at_utc ASC
+    LIMIT :limit
+    FOR UPDATE SKIP LOCKED
+    """,
+            nativeQuery = true
+    )
+    List<FoodLogEntity> claimExpiredForUpdate(
+            @Param("statuses") java.util.List<String> statuses,
+            @Param("cutoff") java.time.Instant cutoff,
+            @Param("limit") int limit
+    );
+
 }

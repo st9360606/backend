@@ -106,6 +106,15 @@ app:
         initial-delay: "PT1M"       # 啟動後 1 分鐘第一次執行
         max-depth: 8                # 避免深層走訪拖慢
         delete-empty-dirs: true
+
+  retention:
+    foodlog:
+      enabled: true           #FoodLogRetentionWorker
+      keep-draft: "PT72H"     # 3 天
+      keep-saved: "PT768H"    # 32 天
+      batch-size: 200
+      purge-after: "PT168H"   # 可選：DELETED 後 7 天再做 hard purge（下一步）
+
 alias:
   promotion:
     # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲

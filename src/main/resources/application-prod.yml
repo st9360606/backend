@@ -7,7 +7,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 6                 # 由 2 提升到 6：promotion/purge/retention 等可並行
+        size: 6
       thread-name-prefix: "sched-"
       shutdown:
         await-termination: true
@@ -108,24 +108,32 @@ app:
         initial-delay: "PT1M"       # 啟動後 1 分鐘第一次執行
         max-depth: 8                # 避免深層走訪拖慢
         delete-empty-dirs: true
-  alias:
-    promotion:
-      # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲
-      fixedDelay: "PT72H"
-      initialDelay: "PT5M"
-      windowDays: 30
-      minUsers: 3
-      minCount: 7
-      minMedian: 0.88
 
-    events:
-      purge:
-        enabled: true
-        cron: "0 10 4 * * *"      # 每天 04:10 清一次（可調）
-        retentionDays: 45         # 留存 45 天（promotion 只看 45 天）
-        batchSize: 50000          # 依你資料量調整（1~10萬都可）
-        maxTotalPerRun: 1000000   # 新增：單次 run 總上限
-        pauseMsBetweenBatches: 50 # 新增：批次間暫停，降低鎖壓力
+  retention:
+    foodlog:
+      enabled: true           #FoodLogRetentionWorker
+      keep-draft: "PT72H"     # 3 天
+      keep-saved: "PT768H"    # 32 天
+      batch-size: 200
+      purge-after: "PT168H"   # 可選：DELETED 後 7 天再做 hard purge（下一步）
+
+alias:
+  promotion:
+    fixedDelay: "PT72H"
+    initialDelay: "PT5M"
+    windowDays: 30
+    minUsers: 3
+    minCount: 7
+    minMedian: 0.88
+
+  events:
+    purge:
+      enabled: true
+      cron: "0 10 4 * * *"      # 每天 04:10 清一次（可調）
+      retentionDays: 45         # 留存 45 天（promotion 只看 45 天）
+      batchSize: 50000          # 依你資料量調整（1~10萬都可）
+      maxTotalPerRun: 1000000   # 新增：單次 run 總上限
+      pauseMsBetweenBatches: 50 # 新增：批次間暫停，降低鎖壓力
 
 workout:
   estimate:

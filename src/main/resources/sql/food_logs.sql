@@ -58,6 +58,10 @@ CREATE TABLE food_logs
   COLLATE = utf8mb4_0900_ai_ci;
 
 
+CREATE INDEX idx_food_logs_status_received
+    ON food_logs (status, server_received_at_utc);
+
+
 -- === food_log_tasks（承接 PENDING）===
 DROP TABLE IF EXISTS food_log_tasks;
 
