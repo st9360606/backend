@@ -5,12 +5,13 @@ import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.dto.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.task.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import java.util.List;
 import java.time.LocalDate;
 import java.util.Locale;
 
@@ -95,21 +96,15 @@ public class FoodLogHistoryService {
 
         String foodName = null;
 
-        Double kcal = null;
-        Double protein = null;
-        Double fat = null;
-        Double carbs = null;
-        Double fiber = null;
-        Double sugar = null;
-        Double sodium = null;
-
+        Double kcal = null, protein = null, fat = null, carbs = null, fiber = null, sugar = null, sodium = null;
         Integer healthScore = null;
         Double confidence = null;
 
+        List<String> warnings = null;
+        String degradedReason = null;
+
         if (eff != null && eff.isObject()) {
             foodName = textOrNull(eff.get("foodName"));
-
-            // confidence / healthScore 在 effective root
             healthScore = intOrNull(eff.get("healthScore"));
             confidence = doubleOrNull(eff.get("confidence"));
 
@@ -122,6 +117,28 @@ public class FoodLogHistoryService {
                 fiber = doubleOrNull(n.get("fiber"));
                 sugar = doubleOrNull(n.get("sugar"));
                 sodium = doubleOrNull(n.get("sodium"));
+            }
+
+            // warnings（array -> List<String>）只回白名單
+            JsonNode w = eff.get("warnings");
+            if (w != null && w.isArray()) {
+                warnings = new java.util.ArrayList<>();
+                for (JsonNode it : w) {
+                    if (it == null || it.isNull()) continue;
+                    FoodLogWarning ww = FoodLogWarning.parseOrNull(it.asText());
+                    if (ww != null) warnings.add(ww.name());
+                }
+                if (warnings.isEmpty()) warnings = null;
+            }
+
+            // degradedReason：優先讀 aiMeta.degradedReason；沒有就 fallback 看 warnings
+            JsonNode aiMeta = eff.get("aiMeta");
+            if (aiMeta != null && aiMeta.isObject()) {
+                degradedReason = textOrNull(aiMeta.get("degradedReason"));
+            }
+            if (degradedReason == null && warnings != null) {
+                if (warnings.contains("NO_FOOD_DETECTED")) degradedReason = "NO_FOOD";
+                else if (warnings.contains("UNKNOWN_FOOD")) degradedReason = "UNKNOWN_FOOD";
             }
         }
 
@@ -140,7 +157,9 @@ public class FoodLogHistoryService {
                         sugar,
                         sodium,
                         healthScore,
-                        confidence
+                        confidence,
+                        warnings,
+                        degradedReason
                 )
         );
     }

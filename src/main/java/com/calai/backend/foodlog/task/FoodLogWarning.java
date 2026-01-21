@@ -8,7 +8,11 @@ public enum FoodLogWarning {
     LOW_CONFIDENCE,
     MIXED_MEAL,
     BLURRY_IMAGE,
-    UNKNOWN_FOOD;
+    UNKNOWN_FOOD,
+    QUANTITY_OUTLIER,
+    KCAL_OUTLIER,
+    MACRO_OUTLIER,
+    UNIT_UNKNOWN;
 
     public static FoodLogWarning parseOrNull(String s) {
         if (s == null) return null;

@@ -1,5 +1,7 @@
 package com.calai.backend.foodlog.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 
 public record FoodLogListResponse(
@@ -10,14 +12,12 @@ public record FoodLogListResponse(
     public record Item(
             String foodLogId,
             String status,
-            String capturedLocalDate, // yyyy-MM-dd
-            String capturedAtUtc,     // ISO-8601
+            String capturedLocalDate,
+            String capturedAtUtc,
             Nutrition nutrition
     ) {}
 
-    /**
-     * ✅ 擴充欄位（向下相容：新增欄位不會破壞舊 client）
-     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Nutrition(
             String foodName,
             Double kcal,
@@ -28,7 +28,9 @@ public record FoodLogListResponse(
             Double sugar,
             Double sodium,
             Integer healthScore,
-            Double confidence
+            Double confidence,
+            List<String> warnings,
+            String degradedReason
     ) {}
 
     public record Page(

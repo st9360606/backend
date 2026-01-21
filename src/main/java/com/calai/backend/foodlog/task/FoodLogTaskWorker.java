@@ -31,26 +31,29 @@ public class FoodLogTaskWorker {
     @Scheduled(fixedDelay = 2000)
     @Transactional
     public void runOnce() {
-        Instant now = Instant.now();
-        List<FoodLogTaskEntity> tasks = taskRepo.claimRunnableForUpdate(now, BATCH_SIZE);
+        // ✅ 僅用於「claim 任務」；不要拿這個時間當作 retry/狀態的時間點
+        Instant claimAt = Instant.now();
+        List<FoodLogTaskEntity> tasks = taskRepo.claimRunnableForUpdate(claimAt, BATCH_SIZE);
 
         for (FoodLogTaskEntity task : tasks) {
             var logEntity = logRepo.findByIdForUpdate(task.getFoodLogId());
 
+            // ===== early exit =====
             if (logEntity.getStatus() == FoodLogStatus.DELETED) {
-                task.markCancelled(now, "LOG_DELETED", "food_log already deleted");
+                task.markCancelled(Instant.now(), "LOG_DELETED", "food_log already deleted");
                 taskRepo.save(task);
                 continue;
             }
 
             if (logEntity.getStatus() == FoodLogStatus.DRAFT || logEntity.getStatus() == FoodLogStatus.SAVED) {
-                task.markCancelled(now, "ALREADY_DONE", "food_log already processed");
+                task.markCancelled(Instant.now(), "ALREADY_DONE", "food_log already processed");
                 taskRepo.save(task);
                 continue;
             }
 
             if (logEntity.getImageObjectKey() == null || logEntity.getImageObjectKey().isBlank()) {
-                task.markCancelled(now, "IMAGE_OBJECT_KEY_MISSING", "missing imageObjectKey");
+                Instant failAt = Instant.now();
+                task.markCancelled(failAt, "IMAGE_OBJECT_KEY_MISSING", "missing imageObjectKey");
                 taskRepo.save(task);
 
                 logEntity.setStatus(FoodLogStatus.FAILED);
@@ -60,9 +63,9 @@ public class FoodLogTaskWorker {
                 continue;
             }
 
-            // ✅ 單一真相：使用 TaskRetryPolicy.MAX_ATTEMPTS
             if (task.getAttempts() >= TaskRetryPolicy.MAX_ATTEMPTS) {
-                task.markCancelled(now, "MAX_ATTEMPTS_EXCEEDED", "cancelled after max attempts");
+                Instant failAt = Instant.now();
+                task.markCancelled(failAt, "MAX_ATTEMPTS_EXCEEDED", "cancelled after max attempts");
                 taskRepo.save(task);
 
                 logEntity.setStatus(FoodLogStatus.FAILED);
@@ -73,7 +76,9 @@ public class FoodLogTaskWorker {
             }
 
             try {
-                task.markRunning(now);
+                // ✅ RUNNING：用「當下」最準（attempts 會 +1）
+                Instant startAt = Instant.now();
+                task.markRunning(startAt);
                 taskRepo.save(task);
 
                 ProviderClient client = router.pickStrict(logEntity);
@@ -82,13 +87,15 @@ public class FoodLogTaskWorker {
                 if (result == null || result.effective() == null) {
                     throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
                 }
-                // 需要 ObjectMapper 把 JsonNode 轉成 ObjectNode（避免 provider 回 Array/非 Object）
-                ObjectNode eff = (result.effective() != null && result.effective().isObject())
+
+                ObjectNode eff = (result.effective().isObject())
                         ? ((ObjectNode) result.effective()).deepCopy()
                         : null;
 
                 if (eff == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
-                // ✅ 後處理：統一計分/降級/加 meta
+
+                Instant doneAt = Instant.now();
+
                 ObjectNode finalEff = postProcessor.apply(eff, result.provider());
                 logEntity.setEffective(finalEff);
                 logEntity.setProvider(result.provider());
@@ -96,7 +103,7 @@ public class FoodLogTaskWorker {
                 logEntity.setLastErrorCode(null);
                 logEntity.setLastErrorMessage(null);
 
-                task.markSucceeded(now);
+                task.markSucceeded(doneAt);
 
                 logRepo.save(logEntity);
                 taskRepo.save(task);
@@ -109,10 +116,28 @@ public class FoodLogTaskWorker {
                 String mappedMsg = mapped.message();
                 Integer retryAfter = mapped.retryAfterSec();
 
-                // ✅ 供應商回傳 JSON 格式不穩：BAD_RESPONSE 最多重試 1 次，避免燒錢
+                // ✅ failAt 一定用「當下」(避免 latency 吃掉 retryAfter)
+                Instant failAt = Instant.now();
+
+                // ✅ 429：一律不自動重試（避免上線羊群效應）
+                if ("PROVIDER_RATE_LIMITED".equals(mappedCode)) {
+                    String msg = buildRateLimitedMsg(mappedMsg, retryAfter, task.getAttempts());
+
+                    task.markCancelled(failAt, "PROVIDER_RATE_LIMITED", msg);
+                    taskRepo.save(task);
+
+                    logEntity.setStatus(FoodLogStatus.FAILED);
+                    logEntity.setLastErrorCode("PROVIDER_RATE_LIMITED");
+                    logEntity.setLastErrorMessage(msg);
+                    logRepo.save(logEntity);
+                    continue;
+                }
+
+                // ✅ BAD_RESPONSE：最多重試 1 次（attempts>=2 直接停）
                 if ("PROVIDER_BAD_RESPONSE".equals(mappedCode) && task.getAttempts() >= 2) {
                     String msg = "bad json from provider (give up) attempts=" + task.getAttempts();
-                    task.markCancelled(now, "PROVIDER_BAD_RESPONSE", msg);
+
+                    task.markCancelled(failAt, "PROVIDER_BAD_RESPONSE", msg);
                     taskRepo.save(task);
 
                     logEntity.setStatus(FoodLogStatus.FAILED);
@@ -122,9 +147,9 @@ public class FoodLogTaskWorker {
                     continue;
                 }
 
-                // ✅ 1) 不可重試：直接取消
+                // ✅ 不可重試：直接取消
                 if (isNonRetryable(mappedCode)) {
-                    task.markCancelled(now, mappedCode, mappedMsg);
+                    task.markCancelled(failAt, mappedCode, mappedMsg);
                     taskRepo.save(task);
 
                     logEntity.setStatus(FoodLogStatus.FAILED);
@@ -134,12 +159,11 @@ public class FoodLogTaskWorker {
                     continue;
                 }
 
-                // ✅ 2) 可重試：到上限就 GIVE UP
+                // ✅ 達到上限：give up
                 if (task.getAttempts() >= TaskRetryPolicy.MAX_ATTEMPTS) {
-                    String giveUpMsg = "[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg);
-                    giveUpMsg = giveUpMsg.trim();
+                    String giveUpMsg = ("[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg)).trim();
 
-                    task.markCancelled(now, "PROVIDER_GIVE_UP", giveUpMsg);
+                    task.markCancelled(failAt, "PROVIDER_GIVE_UP", giveUpMsg);
                     taskRepo.save(task);
 
                     logEntity.setStatus(FoodLogStatus.FAILED);
@@ -149,10 +173,11 @@ public class FoodLogTaskWorker {
                     continue;
                 }
 
-                // ✅ 3) 未達上限 → 排程重試（429 時尊重 Retry-After）
+                // ✅ 可重試：用 failAt 計算 nextRetryAt
                 int delaySec = TaskRetryPolicy.nextDelaySec(task.getAttempts());
                 if (retryAfter != null) delaySec = Math.max(delaySec, retryAfter);
-                task.markFailed(now, mappedCode, mappedMsg, delaySec);
+
+                task.markFailed(failAt, mappedCode, mappedMsg, delaySec);
                 taskRepo.save(task);
 
                 logEntity.setStatus(FoodLogStatus.FAILED);
@@ -164,19 +189,19 @@ public class FoodLogTaskWorker {
     }
 
     /**
-     * ✅ 不可重試錯誤（配置/授權/請求格式問題）
-     * - PROVIDER_NOT_CONFIGURED：程式/設定問題，重試也不會好
-     * - PROVIDER_AUTH_FAILED：API key/token 錯，重試只會一直 401/403
-     * - PROVIDER_BAD_REQUEST：你的 request 組裝錯/不符合 API，重試無效
-     * 你之後可以再加：
-     * - GEMINI_API_KEY_MISSING
-     * - PROVIDER_BLOCKED (視策略：通常也不該重試)
+     * ✅ 讓 FoodLogService.parseRetryAfterFromMessageOrNull 抽得到 suggestedRetryAfterSec=xx
      */
+    private static String buildRateLimitedMsg(String mappedMsg, Integer retryAfterSec, int attempts) {
+        String base = (mappedMsg == null || mappedMsg.isBlank()) ? "rate limited" : mappedMsg.trim();
+        if (retryAfterSec != null) base = base + " suggestedRetryAfterSec=" + retryAfterSec;
+        return base + " attempts=" + attempts;
+    }
+
     private static boolean isNonRetryable(String code) {
         if (code == null || code.isBlank()) return false;
         return switch (code) {
             case "PROVIDER_NOT_CONFIGURED",
-                 "PROVIDER_NOT_AVAILABLE",    // ✅ 新增：嚴格模式下 provider 不存在
+                 "PROVIDER_NOT_AVAILABLE",
                  "PROVIDER_AUTH_FAILED",
                  "PROVIDER_BAD_REQUEST",
                  "GEMINI_API_KEY_MISSING",

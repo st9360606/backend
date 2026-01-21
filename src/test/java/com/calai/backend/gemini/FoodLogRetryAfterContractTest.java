@@ -18,9 +18,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.mock.web.MockMultipartFile;
-
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -110,7 +108,7 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
     @Test
     @Order(1)
     @WithMockUser(username = "test", roles = {"USER"})
-    void rateLimited_429_should_set_nextRetryAt_based_on_retryAfter_header() throws Exception {
+    void rateLimited_429_should_cancel_task_and_return_retryAfter_hint_in_api() throws Exception {
         // 1) Gemini mock：429 + Retry-After: 30
         wm.resetAll();
         wm.stubFor(post(urlPathMatching("/v1beta/models/.*:generateContent"))
@@ -120,7 +118,7 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
                         .withHeader("Retry-After", "30")
                         .withBody("{\"error\":{\"message\":\"rate limited\"}}")));
 
-        // 2) upload -> 必須是 PENDING + taskId 存在（避免去重命中）
+        // 2) upload -> 必須是 PENDING + taskId 存在（避免 SHA256 去重命中）
         String resp1 = mvc.perform(multipart("/api/v1/food-logs/album")
                         .file(dummyJpg("rate429-" + System.nanoTime()))
                         .header("X-Client-Timezone", "Asia/Taipei"))
@@ -131,39 +129,34 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
 
         String id = om.readTree(resp1).get("foodLogId").asText();
 
-        // 3) run worker until our task processed -> should FAIL task + set next_retry_at_utc
-        Instant before = Instant.now();
+        // 3) run worker until our task processed -> now should CANCEL (no auto retry)
         runWorkerUntilTaskLeavesQueued(id, 10);
 
         var task = taskRepo.findByFoodLogId(id).orElseThrow();
-        assertThat(task.getTaskStatus().name()).isEqualTo("FAILED");
+        assertThat(task.getTaskStatus().name()).isEqualTo("CANCELLED");
         assertThat(task.getLastErrorCode()).isEqualTo("PROVIDER_RATE_LIMITED");
-        assertThat(task.getNextRetryAtUtc()).isNotNull();
+        assertThat(task.getNextRetryAtUtc()).isNull(); // ✅ 你現在 429 不走 markFailed，所以不會有 nextRetryAtUtc
 
-        // 允許一些誤差，但要 >= before + 30s - 1s
-        assertThat(task.getNextRetryAtUtc()).isAfterOrEqualTo(before.plusSeconds(29));
-
-        // log 也應該 FAILED
+        // log 會是 FAILED + 帶 errorCode
         var log = logRepo.findById(id).orElseThrow();
         assertThat(log.getStatus().name()).isEqualTo("FAILED");
         assertThat(log.getLastErrorCode()).isEqualTo("PROVIDER_RATE_LIMITED");
+        assertThat(log.getLastErrorMessage()).contains("suggestedRetryAfterSec=30");
 
-        // 4) GET should return FAILED and task.pollAfterSec exists (clamped 2..60)
-        String resp2 = mvc.perform(get("/api/v1/food-logs/{id}", id))
+        // 4) GET should return FAILED and error.retryAfterSec=30; task 欄位通常不存在（因為 task 已 CANCELLED）
+        mvc.perform(get("/api/v1/food-logs/{id}", id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("FAILED"))
                 .andExpect(jsonPath("$.error.errorCode").value("PROVIDER_RATE_LIMITED"))
-                .andExpect(jsonPath("$.task.pollAfterSec").exists())
-                .andReturn().getResponse().getContentAsString();
-
-        int poll = om.readTree(resp2).path("task").path("pollAfterSec").asInt();
-        assertThat(poll).isBetween(2, 60);
+                .andExpect(jsonPath("$.error.retryAfterSec").value(30))
+                .andExpect(jsonPath("$.task").doesNotExist());
     }
+
 
     @Test
     @Order(2)
     @WithMockUser(username = "test", roles = {"USER"})
-    void blocked_should_cancel_not_retry() throws Exception {
+    void blocked_should_cancel_task_and_api_should_not_return_task() throws Exception {
         // 1) Gemini mock：400 + body contains "safety" => PROVIDER_BLOCKED
         wm.resetAll();
         wm.stubFor(post(urlPathMatching("/v1beta/models/.*:generateContent"))
@@ -186,12 +179,24 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
         // 3) run worker until processed
         runWorkerUntilTaskLeavesQueued(id, 10);
 
+        // task：blocked 屬於 non-retryable => CANCELLED
         var task = taskRepo.findByFoodLogId(id).orElseThrow();
-        assertThat(task.getTaskStatus().name()).isEqualTo("CANCELLED"); // isNonRetryable 包含 PROVIDER_BLOCKED
+        assertThat(task.getTaskStatus().name()).isEqualTo("CANCELLED");
         assertThat(task.getLastErrorCode()).isEqualTo("PROVIDER_BLOCKED");
+        assertThat(task.getNextRetryAtUtc()).isNull();
 
+        // log：FAILED + code
         var log = logRepo.findById(id).orElseThrow();
         assertThat(log.getStatus().name()).isEqualTo("FAILED");
         assertThat(log.getLastErrorCode()).isEqualTo("PROVIDER_BLOCKED");
+
+        // 4) GET：FAILED + errorCode=PROVIDER_BLOCKED；task 不存在（因為 task=CANCELLED 不再 meaningful）
+        mvc.perform(get("/api/v1/food-logs/{id}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.error.errorCode").value("PROVIDER_BLOCKED"))
+                .andExpect(jsonPath("$.error.clientAction").value("RETRY_LATER")) // ✅ 你目前 toEnvelope() 對 FAILED 都回這個
+                .andExpect(jsonPath("$.error.retryAfterSec").doesNotExist())
+                .andExpect(jsonPath("$.task").doesNotExist());
     }
 }

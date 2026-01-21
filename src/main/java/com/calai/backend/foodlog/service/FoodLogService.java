@@ -336,19 +336,32 @@ public class FoodLogService {
         }
     }
 
+    // ===== FoodLogService.getOne()：只在 QUEUED/RUNNING/FAILED 才回 task =====
     @Transactional(readOnly = true)
     public FoodLogEnvelope getOne(Long userId, String id, String requestId) {
         FoodLogEntity e = repo.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
 
         FoodLogTaskEntity t = null;
-        if (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED) {
-            t = taskRepo.findByFoodLogId(e.getId()).orElse(null);
-        }
 
+        if (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED) {
+            FoodLogTaskEntity tmp = taskRepo.findByFoodLogId(e.getId()).orElse(null);
+
+            if (tmp != null) {
+                var ts = tmp.getTaskStatus();
+                if (ts == FoodLogTaskEntity.TaskStatus.QUEUED
+                    || ts == FoodLogTaskEntity.TaskStatus.RUNNING
+                    || ts == FoodLogTaskEntity.TaskStatus.FAILED) {
+                    t = tmp;
+                }
+            }
+        }
         return toEnvelope(e, t, requestId);
     }
 
+    // ===== FoodLogService.toEnvelope()：
+// 1) task 只回 meaningful（QUEUED/RUNNING/FAILED）
+// 2) FAILED 時 error 一定回；retryAfterSec 優先 nextRetryAt，其次從 lastErrorMessage 解析 =====
     private FoodLogEnvelope toEnvelope(FoodLogEntity e, FoodLogTaskEntity t, String requestId) {
         Instant now = Instant.now();
 
@@ -376,15 +389,36 @@ public class FoodLogService {
             );
         }
 
+        // ✅ task：只在「還會自動跑」時回給前端
         FoodLogEnvelope.Task task = null;
-        if (t != null && (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED)) {
+        boolean taskMeaningful = (t != null);
+
+        if (taskMeaningful && (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED)) {
             int poll = computePollAfterSec(e.getStatus(), t, now);
             task = new FoodLogEnvelope.Task(t.getId(), poll);
         }
 
+        // ✅ error：FAILED 一定回；retryAfterSec 優先 nextRetryAt，其次解析 message
         FoodLogEnvelope.ApiError err = null;
         if (e.getStatus() == FoodLogStatus.FAILED) {
-            Integer retryAfter = computeRetryAfterSecOrNull(t, now);
+
+            Integer retryAfter = computeRetryAfterSecOrNull(t, now); // 1) nextRetryAtUtc（若 t==null -> null）
+
+            if (retryAfter == null && t != null) {
+                // 2) task.lastErrorMessage（若你將來有 markFailed 的路徑）
+                retryAfter = parseRetryAfterFromMessageOrNull(t.getLastErrorMessage());
+            }
+
+            if (retryAfter == null) {
+                // 3) log.lastErrorMessage（你 429 CANCELLED 會塞 suggestedRetryAfterSec 在這裡）
+                retryAfter = parseRetryAfterFromMessageOrNull(e.getLastErrorMessage());
+            }
+
+            // 4) 429 fallback（UI 至少有提示）
+            if (retryAfter == null && "PROVIDER_RATE_LIMITED".equalsIgnoreCase(e.getLastErrorCode())) {
+                retryAfter = 20;
+            }
+
             err = new FoodLogEnvelope.ApiError(
                     e.getLastErrorCode(),
                     "RETRY_LATER",
@@ -473,6 +507,36 @@ public class FoodLogService {
     // =========================
     // helpers
     // =========================
+
+    // ===== FoodLogService 新增/保留這段 helper：從 message 抽 retryAfterSec =====
+// 放在 FoodLogService helpers 區塊即可（你原本若已有就用這版覆蓋）
+
+    private static final java.util.regex.Pattern P_SUGGESTED_RETRY_AFTER =
+            java.util.regex.Pattern.compile("suggestedRetryAfterSec=(\\d+)");
+    private static final java.util.regex.Pattern P_RETRY_AFTER =
+            java.util.regex.Pattern.compile("retryAfterSec=(\\d+)");
+
+    private static Integer parseRetryAfterFromMessageOrNull(String msg) {
+        if (msg == null || msg.isBlank()) return null;
+
+        java.util.regex.Matcher m1 = P_SUGGESTED_RETRY_AFTER.matcher(msg);
+        if (m1.find()) {
+            try { return clampInt(Integer.parseInt(m1.group(1)), 0, 3600); }
+            catch (Exception ignored) {}
+        }
+
+        java.util.regex.Matcher m2 = P_RETRY_AFTER.matcher(msg);
+        if (m2.find()) {
+            try { return clampInt(Integer.parseInt(m2.group(1)), 0, 3600); }
+            catch (Exception ignored) {}
+        }
+
+        return null;
+    }
+
+    private static int clampInt(int v, int min, int max) {
+        return Math.max(min, Math.min(max, v));
+    }
 
     private static Instant parseInstantOrNull(String raw) {
         try {
