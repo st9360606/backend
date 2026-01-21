@@ -195,7 +195,7 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("FAILED"))
                 .andExpect(jsonPath("$.error.errorCode").value("PROVIDER_BLOCKED"))
-                .andExpect(jsonPath("$.error.clientAction").value("RETRY_LATER")) // ✅ 你目前 toEnvelope() 對 FAILED 都回這個
+                .andExpect(jsonPath("$.error.clientAction").value("RETAKE_PHOTO"))
                 .andExpect(jsonPath("$.error.retryAfterSec").doesNotExist())
                 .andExpect(jsonPath("$.task").doesNotExist());
     }
