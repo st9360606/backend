@@ -15,3 +15,11 @@ CREATE TABLE IF NOT EXISTS users
     UNIQUE KEY uq_users_email (email)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4;
+
+
+ALTER TABLE users
+    ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' AFTER provider,
+  ADD COLUMN deleted_at_utc DATETIME(6) NULL AFTER status,
+  ADD COLUMN deleted_email_hash CHAR(64) NULL AFTER deleted_at_utc;
+
+CREATE INDEX idx_users_status ON users(status);

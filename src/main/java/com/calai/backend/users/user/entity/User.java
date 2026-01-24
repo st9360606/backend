@@ -27,7 +27,7 @@ public class User {
     private String googleSub;
 
     // 把 email 視為唯一、不可為空（若你 DB 目前允許 null，先清理/補上再上線）
-    @Column(name = "email", nullable = false, unique = true, length = 320)
+    @Column(name = "email", nullable = true, unique = true, length = 320)
     private String email;
 
     @Column private String name;
@@ -37,6 +37,15 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(name = "provider", length = 20)
     private AuthProvider provider;
+
+    @Column(name = "status", nullable = false, length = 16)
+    private String status = "ACTIVE";
+
+    @Column(name = "deleted_at_utc")
+    private Instant deletedAtUtc;
+
+    @Column(name = "deleted_email_hash", length = 64)
+    private String deletedEmailHash;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
