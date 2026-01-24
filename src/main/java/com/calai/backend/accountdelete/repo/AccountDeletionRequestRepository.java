@@ -21,13 +21,15 @@ public interface AccountDeletionRequestRepository extends JpaRepository<AccountD
     Optional<AccountDeletionRequestEntity> findByUserIdForUpdate(@Param("userId") Long userId);
 
     @Query(value = """
-      SELECT *
-      FROM account_deletion_requests
-      WHERE (req_status='REQUESTED')
-         OR (req_status='FAILED' AND next_retry_at_utc IS NOT NULL AND next_retry_at_utc <= :now)
-      ORDER BY requested_at_utc ASC
-      LIMIT :limit
-      FOR UPDATE SKIP LOCKED
-    """, nativeQuery = true)
+              SELECT *
+              FROM account_deletion_requests
+              WHERE (req_status='REQUESTED')
+                 OR (req_status='RUNNING' AND next_retry_at_utc IS NOT NULL AND next_retry_at_utc <= :now)
+                 OR (req_status='FAILED' AND next_retry_at_utc IS NOT NULL AND next_retry_at_utc <= :now)
+              ORDER BY requested_at_utc ASC
+              LIMIT :limit
+              FOR UPDATE SKIP LOCKED
+            """, nativeQuery = true)
     List<AccountDeletionRequestEntity> claimRunnableForUpdate(@Param("now") Instant now, @Param("limit") int limit);
+
 }

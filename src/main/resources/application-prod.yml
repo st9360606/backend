@@ -117,6 +117,15 @@ app:
       batch-size: 200
       purge-after: "PT168H"   # 可選：DELETED 後 7 天再做 hard purge（下一步）
 
+  account-deletion:
+    worker:
+      enabled: true
+      claim-limit: 5
+      per-table-delete-limit: 500
+      food-batch: 200
+      check-interval: "PT30S"
+      base-retry-delay: "PT10S"
+
 alias:
   promotion:
     fixedDelay: "PT72H"

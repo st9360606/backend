@@ -115,6 +115,15 @@ app:
       batch-size: 200
       purge-after: "PT168H"   # 可選：DELETED 後 7 天再做 hard purge（下一步）
 
+  account-deletion:
+    worker:
+      enabled: true
+      claim-limit: 5
+      per-table-delete-limit: 500
+      food-batch: 200
+      check-interval: "PT30S"
+      base-retry-delay: "PT10S"
+
 alias:
   promotion:
     # 不再用 cron（避免 */3 的曆法語意），改 72h 固定延遲
