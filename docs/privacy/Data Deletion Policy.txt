@@ -1,0 +1,24 @@
+Data Deletion Policy (Account Deletion)
+You can request deletion of your account and associated personal data directly in the app:
+Settings → Delete Account? → Delete.
+
+What happens after you request deletion
+We process account deletion in two phases:
+
+1. Immediate lock & de-identification (usually within seconds): your account is locked and identifiers (such as email and profile identifiers) are removed, and you are signed out.
+
+2. Background purge (batch deletion): we delete remaining data in batches (including photos and derived nutrition results). This process may take additional time depending on queue load and retry conditions.
+
+Retention schedule
+
+ ● Draft/Pending/Failed food logs: retained up to 3 days, then photos and results are automatically deleted.
+
+ ● Saved food logs: retained up to 32 days, then photos and saved nutrition history are automatically deleted.
+
+Re-registering
+If you delete your account and later sign up again using the same email, it will be treated as a new account (new user ID).
+
+Subscriptions
+If you have an active subscription, we may automatically re-check and restore your subscription status after you sign in again.
+
+（你也可以加一行客服信箱：Support Email）

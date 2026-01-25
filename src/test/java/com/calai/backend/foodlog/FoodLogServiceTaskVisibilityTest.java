@@ -127,6 +127,10 @@ class FoodLogServiceTaskVisibilityTest {
         when(repo.findByIdAndUserId("log-3", 1L)).thenReturn(Optional.of(e));
         when(taskRepo.findByFoodLogId("log-3")).thenReturn(Optional.of(t));
 
+        // ✅ 新增：stub ClientActionMapper
+        when(clientActionMapper.fromErrorCode("PROVIDER_FAILED"))
+                .thenReturn(com.calai.backend.foodlog.dto.ClientAction.RETRY_LATER);
+
         FoodLogEnvelope env = service.getOne(1L, "log-3", "rid-3");
 
         assertNotNull(env.task());
@@ -137,4 +141,5 @@ class FoodLogServiceTaskVisibilityTest {
         verify(taskRepo, times(1)).findByFoodLogId("log-3");
         verifyNoInteractions(quota);
     }
+
 }

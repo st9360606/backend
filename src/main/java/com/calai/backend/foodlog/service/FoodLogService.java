@@ -420,7 +420,9 @@ public class FoodLogService {
                 retryAfter = 20;
             }
 
-            String action = clientActionMapper.fromErrorCode(e.getLastErrorCode()).name();
+            String action = java.util.Optional.ofNullable(clientActionMapper.fromErrorCode(e.getLastErrorCode()))
+                    .orElse(com.calai.backend.foodlog.dto.ClientAction.RETRY_LATER)
+                    .name();
 
             err = new FoodLogEnvelope.ApiError(
                     e.getLastErrorCode(),
