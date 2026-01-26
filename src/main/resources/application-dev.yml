@@ -84,12 +84,12 @@ app:
     play:
       enabled: true
       package-name: "com.calai.app"
-      service-account-json-path: "${GOOGLE_PLAY_SA_JSON_PATH:}"  # dev 可用
+      service-account-json-path: "${GOOGLE_PLAY_BITE_CAL_SA_JSON_PATH:}"  # dev 可用
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
   billing:
     products:
-      monthly: [ "monthly001", "bitecal_monthly" ]  # 你實際的 productId
-      yearly: [ "yearly001", "bitecal_yearly" ]
+      monthly: [ "bitecal_monthly" ]
+      yearly: [ "bitecal_yearly" ]
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000
