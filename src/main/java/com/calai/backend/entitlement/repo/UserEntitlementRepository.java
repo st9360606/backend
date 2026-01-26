@@ -1,7 +1,6 @@
-package com.calai.backend.foodlog.repo;
+package com.calai.backend.entitlement.repo;
 
-
-import com.calai.backend.foodlog.entity.UserEntitlementEntity;
+import com.calai.backend.entitlement.entity.UserEntitlementEntity;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;

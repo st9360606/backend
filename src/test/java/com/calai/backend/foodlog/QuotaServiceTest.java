@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.repo.UsageCounterRepository;
-import com.calai.backend.foodlog.service.EntitlementService;
+import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.service.QuotaService;
 import com.calai.backend.foodlog.web.QuotaExceededException;
 import com.calai.backend.foodlog.web.SubscriptionRequiredException;

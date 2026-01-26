@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 
+import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.quota.QuotaDayKey;
 import com.calai.backend.foodlog.repo.UsageCounterRepository;
 import com.calai.backend.foodlog.web.QuotaExceededException;

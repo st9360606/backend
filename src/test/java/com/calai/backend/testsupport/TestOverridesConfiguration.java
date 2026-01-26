@@ -1,7 +1,7 @@
 package com.calai.backend.testsupport;
 
-import com.calai.backend.foodlog.repo.UserEntitlementRepository;
-import com.calai.backend.foodlog.service.EntitlementService;
+import com.calai.backend.entitlement.repo.UserEntitlementRepository;
+import com.calai.backend.entitlement.service.EntitlementService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;

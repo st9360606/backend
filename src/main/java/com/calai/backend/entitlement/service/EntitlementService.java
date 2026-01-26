@@ -1,6 +1,6 @@
-package com.calai.backend.foodlog.service;
+package com.calai.backend.entitlement.service;
 
-import com.calai.backend.foodlog.repo.UserEntitlementRepository;
+import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;

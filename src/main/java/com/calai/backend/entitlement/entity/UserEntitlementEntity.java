@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.entity;
+package com.calai.backend.entitlement.entity;
 
 import jakarta.persistence.*;
 import lombok.Getter;
