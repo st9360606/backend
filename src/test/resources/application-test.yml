@@ -47,6 +47,8 @@ server:
 app:
   google:
     web-client-id: "test-dummy"
+    play:
+      enabled: false
 
   foodlog:
     provider: "STUB"       # ✅ 測試預設 STUB，避免被 GEMINI 汙染

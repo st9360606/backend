@@ -133,6 +133,29 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Google Play Android Developer API (Android Publisher) -->
+        <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-androidpublisher</artifactId>
+            <version>v3-rev20251215-2.0.0</version>
+        </dependency>
+
+        <!-- Google Auth (service account / ADC) -->
+        <dependency>
+            <groupId>com.google.auth</groupId>
+            <artifactId>google-auth-library-oauth2-http</artifactId>
+            <version>1.23.0</version>
+        </dependency>
+
+        <!-- JSON factory（你也可用 jackson，這裡用 gson factory 與 google lib 搭配） -->
+        <dependency>
+            <groupId>com.google.http-client</groupId>
+            <artifactId>google-http-client-gson</artifactId>
+            <version>2.0.2</version>
+        </dependency>
+
+
     </dependencies>
 
     <dependencyManagement>

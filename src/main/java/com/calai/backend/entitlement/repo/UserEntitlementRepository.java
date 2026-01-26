@@ -3,6 +3,7 @@ package com.calai.backend.entitlement.repo;
 import com.calai.backend.entitlement.entity.UserEntitlementEntity;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -20,4 +21,16 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
         order by e.validToUtc desc
     """)
     List<UserEntitlementEntity> findActive(@Param("userId") Long userId, @Param("now") Instant now, Pageable pageable);
+
+    @Modifying
+    @Query("""
+        update UserEntitlementEntity e
+           set e.status = 'EXPIRED',
+               e.updatedAtUtc = :now,
+               e.validToUtc = case when e.validToUtc > :now then :now else e.validToUtc end
+         where e.userId = :userId
+           and e.status = 'ACTIVE'
+           and e.validToUtc > :now
+    """)
+    int expireActiveByUserId(@Param("userId") Long userId, @Param("now") Instant now);
 }
