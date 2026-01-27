@@ -369,6 +369,35 @@ public class FoodLogService {
         JsonNode eff = e.getEffective();
         FoodLogEnvelope.NutritionResult nr = null;
 
+        java.util.List<String> warnings = null;
+        String degradedReason = null;
+
+        if (eff != null && eff.isObject()) {
+
+            // warnings
+            JsonNode w = eff.get("warnings");
+            if (w != null && w.isArray()) {
+                warnings = new java.util.ArrayList<>();
+                for (JsonNode it : w) {
+                    if (it == null || it.isNull()) continue;
+                    String s = it.asText(null);
+                    if (s != null && !s.isBlank()) warnings.add(s);
+                }
+                if (warnings.isEmpty()) warnings = null;
+            }
+
+            // degradedReason
+            JsonNode aiMeta = eff.get("aiMeta");
+            if (aiMeta != null && aiMeta.isObject()) {
+                JsonNode dr = aiMeta.get("degradedReason");
+                if (dr != null && !dr.isNull()) degradedReason = dr.asText(null);
+            }
+            if (degradedReason == null && warnings != null) {
+                if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) degradedReason = "NO_FOOD";
+                else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) degradedReason = "UNKNOWN_FOOD";
+            }
+        }
+
         if (eff != null && !eff.isNull()) {
             JsonNode n = eff.get("nutrients");
             JsonNode q = eff.get("quantity");
@@ -386,6 +415,8 @@ public class FoodLogService {
                     ),
                     intOrNull(eff, "healthScore"),
                     doubleOrNull(eff, "confidence"),
+                    warnings,
+                    degradedReason,
                     new FoodLogEnvelope.Source(e.getMethod(), e.getProvider())
             );
         }

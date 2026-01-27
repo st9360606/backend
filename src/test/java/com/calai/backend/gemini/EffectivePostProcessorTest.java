@@ -1,8 +1,9 @@
 package com.calai.backend.gemini;
 
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.task.FoodLogWarning;
 import com.calai.backend.foodlog.task.HealthScore;
-import com.calai.backend.foodlog.task.NutritionSanityChecker; // ✅ 你新增的 checker
+import com.calai.backend.foodlog.task.NutritionSanityChecker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -13,8 +14,6 @@ public class EffectivePostProcessorTest {
 
     private final ObjectMapper om = new ObjectMapper();
     private final HealthScore healthScore = new HealthScore();
-
-    // ✅ 若你的 NutritionSanityChecker 需要參數，改成 new NutritionSanityChecker(om) 或用 stub
     private final NutritionSanityChecker sanity = new NutritionSanityChecker();
 
     private final EffectivePostProcessor pp = new EffectivePostProcessor(healthScore, sanity);
@@ -41,13 +40,13 @@ public class EffectivePostProcessorTest {
     }
 
     @Test
-    void apply_should_mark_non_food_and_cap_confidence() throws Exception {
-        // ✅ 用 warnings=NO_FOOD_DETECTED 觸發 non-food，最穩
+    void apply_when_no_food_detected_should_set_degraded_reason_and_not_add_non_food_suspect() throws Exception {
+        // ✅ NO_FOOD_DETECTED：新規則是「降級優先」，不混 NON_FOOD_SUSPECT
         ObjectNode eff = (ObjectNode) om.readTree("""
           {
             "foodName": null,
             "quantity":{"value":1,"unit":"SERVING"},
-            "nutrients":{"kcal":0,"protein":0,"fat":0,"carbs":0,"fiber":0,"sugar":0,"sodium":0},
+            "nutrients":{"kcal":null,"protein":null,"fat":null,"carbs":null,"fiber":null,"sugar":null,"sodium":null},
             "confidence":0.1,
             "warnings":["NO_FOOD_DETECTED"]
           }
@@ -55,12 +54,23 @@ public class EffectivePostProcessorTest {
 
         ObjectNode out = pp.apply(eff, "GEMINI");
 
+        // ✅ warnings：保留 NO_FOOD_DETECTED + LOW_CONFIDENCE（你原規則）
         assertThat(out.get("warnings")).isNotNull();
-        assertThat(out.get("warnings").toString()).contains("NON_FOOD_SUSPECT");
+        String w = out.get("warnings").toString();
+        assertThat(w).contains(FoodLogWarning.NO_FOOD_DETECTED.name());
+        assertThat(w).contains(FoodLogWarning.LOW_CONFIDENCE.name());
 
-        assertThat(out.get("confidence").asDouble()).isLessThanOrEqualTo(0.3d);
+        // ✅ 關鍵：不再追加 NON_FOOD_SUSPECT（避免 UI 混亂）
+        assertThat(w).doesNotContain(FoodLogWarning.NON_FOOD_SUSPECT.name());
+
+        // ✅ degradedReason 寫入 aiMeta
+        assertThat(out.path("aiMeta").path("degradedReason").asText()).isEqualTo("NO_FOOD");
+        assertThat(out.path("aiMeta").path("degradedAtUtc").asText()).isNotBlank();
+
+        // ✅ 降級不計分
         assertThat(out.get("healthScore")).isNull();
 
+        // ✅ healthScoreMeta 仍會存在（方便 trace）
         assertThat(out.get("healthScoreMeta")).isNotNull();
         assertThat(out.get("healthScoreMeta").get("version").asText()).isEqualTo("v1");
     }

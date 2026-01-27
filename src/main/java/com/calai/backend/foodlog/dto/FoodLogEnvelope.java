@@ -2,6 +2,8 @@ package com.calai.backend.foodlog.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
+import java.util.List;
+
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record FoodLogEnvelope(
         String foodLogId,
@@ -19,6 +21,8 @@ public record FoodLogEnvelope(
             Nutrients nutrients,
             Integer healthScore,
             Double confidence,
+            List<String> warnings,
+            String degradedReason,
             Source source
     ) {}
 

@@ -22,15 +22,15 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
     """)
     List<UserEntitlementEntity> findActive(@Param("userId") Long userId, @Param("now") Instant now, Pageable pageable);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
-        update UserEntitlementEntity e
-           set e.status = 'EXPIRED',
-               e.updatedAtUtc = :now,
-               e.validToUtc = case when e.validToUtc > :now then :now else e.validToUtc end
-         where e.userId = :userId
-           and e.status = 'ACTIVE'
-           and e.validToUtc > :now
-    """)
+    update UserEntitlementEntity e
+       set e.status = 'EXPIRED',
+           e.updatedAtUtc = :now,
+           e.validToUtc = case when e.validToUtc > :now then :now else e.validToUtc end
+     where e.userId = :userId
+       and e.status = 'ACTIVE'
+       and e.validToUtc > :now
+""")
     int expireActiveByUserId(@Param("userId") Long userId, @Param("now") Instant now);
 }

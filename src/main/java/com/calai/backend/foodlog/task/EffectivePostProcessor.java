@@ -25,9 +25,41 @@ public class EffectivePostProcessor {
                 ? effective.get("confidence").asDouble()
                 : null;
 
-        boolean nonFood = isNonFoodSuspect(effective, conf);
+        // ✅ 1) 降級優先：NO_FOOD / UNKNOWN_FOOD 時，不再追加 NON_FOOD_SUSPECT（避免 UI 混亂）
+        boolean noFood = hasWarning(effective, FoodLogWarning.NO_FOOD_DETECTED.name());
+        boolean unknown = hasWarning(effective, FoodLogWarning.UNKNOWN_FOOD.name());
+        boolean degraded = noFood || unknown;
 
         Integer score = null;
+
+        if (degraded) {
+            // 直接移除 healthScore（降級不計分）
+            effective.remove("healthScore");
+
+            // LOW_CONFIDENCE（保留）
+            if (conf == null || conf <= 0.4) addWarningWhitelist(effective, FoodLogWarning.LOW_CONFIDENCE);
+
+            // ✅ sanity check（保留：會補 UNIT_UNKNOWN / OUTLIER 等，但 nutrients all-null 會早退）
+            sanityChecker.apply(effective);
+
+            // ✅ degradedReason 寫入 aiMeta（你原本就有）
+            setDegradedReasonIfAny(effective);
+
+            // healthScore meta（保留你原本格式，但 score=null）
+            ObjectNode meta = JsonNodeFactory.instance.objectNode();
+            meta.put("version", "v1");
+            meta.put("computedAtUtc", Instant.now().toString());
+            meta.put("provider", norm(providerCode));
+            effective.set("healthScoreMeta", meta);
+
+            // warnings 白名單化
+            sanitizeWarningsToWhitelist(effective);
+            return effective;
+        }
+
+        // ✅ 2) 非降級：才做 NON_FOOD_SUSPECT 判斷
+        boolean nonFood = isNonFoodSuspect(effective, conf);
+
         if (!nonFood) {
             score = healthScore.score(nutrients);
             if (score != null) effective.put("healthScore", score);
@@ -43,10 +75,8 @@ public class EffectivePostProcessor {
             addWarningWhitelist(effective, FoodLogWarning.LOW_CONFIDENCE);
         }
 
-        // ✅ Step 7-06：sanity check（只加 warnings，不改值）
         sanityChecker.apply(effective);
 
-        // healthScore meta（保留你原本）
         ObjectNode meta = JsonNodeFactory.instance.objectNode();
         meta.put("version", "v1");
         meta.put("computedAtUtc", Instant.now().toString());
@@ -54,10 +84,7 @@ public class EffectivePostProcessor {
         if (score != null) meta.put("score", score);
         effective.set("healthScoreMeta", meta);
 
-        // ✅ Step 7-05B：degradedReason 寫入 aiMeta（只在 NO_FOOD / UNKNOWN_FOOD）
         setDegradedReasonIfAny(effective);
-
-        // warnings 白名單化（保留你原本）
         sanitizeWarningsToWhitelist(effective);
 
         return effective;
