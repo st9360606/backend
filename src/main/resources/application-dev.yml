@@ -83,7 +83,7 @@ app:
   google:
     play:
       enabled: true
-      package-name: "com.calai.app"
+      package-name: "com.calai.bitecal"
       service-account-json-path: "${GOOGLE_PLAY_BITE_CAL_SA_JSON_PATH:}"  # dev 可用
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
   billing:
