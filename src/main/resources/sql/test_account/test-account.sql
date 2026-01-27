@@ -28,3 +28,14 @@ WHERE user_id = 1
   AND valid_to_utc > UTC_TIMESTAMP(6)
 ORDER BY valid_to_utc DESC;
 
+
+UPDATE user_entitlements
+SET status='EXPIRED',
+    valid_to_utc = UTC_TIMESTAMP(6),
+    updated_at_utc = UTC_TIMESTAMP(6)
+WHERE user_id = 1 AND status='ACTIVE';
+
+
+UPDATE usage_counters
+SET used_count = 200
+WHERE user_id=1 AND local_date='2026-01-27';
