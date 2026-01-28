@@ -55,6 +55,38 @@ public class FoodLogController {
         return service.createPhoto(uid, clientTz, deviceCapturedAtUtc, file, requestId);
     }
 
+    /**
+     * ✅ LABEL：營養標示（multipart）
+     * - provider 固定走 GEMINI（Gemini 3 Flash）
+     * - 最多重試一次：由 worker 的 method-aware attempts=2 控制
+     */
+    @PostMapping(value = "/label", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public FoodLogEnvelope label(
+            @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
+            @RequestPart("file") MultipartFile file,
+            @RequestPart(value = "deviceCapturedAtUtc", required = false) String deviceCapturedAtUtc,
+            HttpServletRequest req
+    ) throws Exception {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return service.createLabel(uid, clientTz, deviceCapturedAtUtc, file, requestId);
+    }
+
+    public record BarcodeRequest(String barcode) {}
+
+    /**
+     * ✅ BARCODE：MVP 先做「查不到 → TRY_LABEL」
+     * - 這裡先不扣 AI quota（因為沒有打 AI）
+     * - 仍會做 rateLimiter（避免被打爆）
+     */
+    @PostMapping(value = "/barcode", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public FoodLogEnvelope barcode(@RequestBody BarcodeRequest body, HttpServletRequest req) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return service.createBarcodeMvp(uid, body == null ? null : body.barcode(), requestId);
+    }
+
+
     @GetMapping("/{id}")
     public FoodLogEnvelope getOne(@PathVariable String id, HttpServletRequest req) {
         Long uid = auth.requireUserId();

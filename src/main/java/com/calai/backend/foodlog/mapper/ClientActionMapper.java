@@ -16,6 +16,8 @@ public class ClientActionMapper {
         if (errorCode == null || errorCode.isBlank()) return ClientAction.RETRY_LATER;
 
         return switch (errorCode) {
+            // ✅ 條碼查不到：引導 TRY_LABEL（符合你 MVP 規格）
+            case "BARCODE_NOT_FOUND" -> ClientAction.TRY_LABEL;
             case "PROVIDER_TIMEOUT", "PROVIDER_NETWORK_ERROR" -> ClientAction.CHECK_NETWORK;
             case "PROVIDER_BLOCKED", "PROVIDER_BAD_REQUEST", "PROVIDER_BAD_RESPONSE" -> ClientAction.RETAKE_PHOTO;
             case "PROVIDER_AUTH_FAILED", "GEMINI_API_KEY_MISSING", "PROVIDER_NOT_AVAILABLE" -> ClientAction.CONTACT_SUPPORT;
@@ -28,7 +30,9 @@ public class ClientActionMapper {
      */
     public ClientAction fromWarnings(List<String> warnings) {
         if (warnings == null || warnings.isEmpty()) return ClientAction.RETRY_LATER;
-
+        if (warnings.contains(FoodLogWarning.SERVING_SIZE_UNKNOWN.name())) return ClientAction.RETAKE_PHOTO;
+        // ✅ Label 沒讀到標示：引導重拍（UI 可顯示「重拍標籤」）
+        if (warnings.contains(FoodLogWarning.NO_LABEL_DETECTED.name())) return ClientAction.RETAKE_PHOTO;
         if (warnings.contains(FoodLogWarning.NO_FOOD_DETECTED.name())) return ClientAction.RETAKE_PHOTO;
         if (warnings.contains(FoodLogWarning.NON_FOOD_SUSPECT.name())) return ClientAction.RETAKE_PHOTO;
         if (warnings.contains(FoodLogWarning.UNKNOWN_FOOD.name())) return ClientAction.ENTER_MANUALLY;

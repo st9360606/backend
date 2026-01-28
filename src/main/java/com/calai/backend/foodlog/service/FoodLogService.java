@@ -45,6 +45,8 @@ public class FoodLogService {
         return v.toUpperCase(Locale.ROOT);
     }
 
+    private static final String LABEL_PROVIDER = "GEMINI";
+
     private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024; // 8MB（先保守）
 
     private final FoodLogRepository repo;
@@ -136,7 +138,7 @@ public class FoodLogService {
                     ObjectNode copied = hit.get().getEffective().deepCopy();
 
                     // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
 
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -146,7 +148,6 @@ public class FoodLogService {
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
                 }
-
 
                 repo.save(e);
                 idem.attach(userId, requestId, e.getId(), serverNow);
@@ -280,7 +281,7 @@ public class FoodLogService {
                     ObjectNode copied = hit.get().getEffective().deepCopy();
 
                     // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
 
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -336,6 +337,198 @@ public class FoodLogService {
             if (acquired) inFlight.release(userId);
         }
     }
+
+    // =========================
+    // LABEL：營養標示（Gemini 3 Flash）
+    // =========================
+    @Transactional
+    public FoodLogEnvelope createLabel(Long userId,
+                                       String clientTz,
+                                       String deviceCapturedAtUtc,
+                                       MultipartFile file,
+                                       String requestId) throws Exception {
+
+        ZoneId tz = parseTzOrUtc(clientTz);
+        Instant serverNow = Instant.now();
+        validateUploadBasics(file);
+
+        String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
+        if (existingLogId != null) return getOne(userId, existingLogId, requestId);
+
+        // ✅ 仍要限流，避免被打爆（雖然是 AI 才更需要，但 label 也會走 AI）
+        rateLimiter.checkOrThrow(userId, serverNow);
+
+        boolean acquired = false;
+        String tempKey = null;
+
+        try {
+            inFlight.acquireOrThrow(userId);
+            acquired = true;
+
+            ImageSniffer.Detection det;
+            StorageService.SaveResult saved;
+
+            // 1) 上傳 → tempKey
+            try (InputStream raw = file.getInputStream();
+                 PushbackInputStream in = new PushbackInputStream(raw, 16)) {
+
+                det = ImageSniffer.detect(in);
+                if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
+
+                tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();
+                saved = storage.save(tempKey, in, det.contentType());
+
+            } catch (Exception ex) {
+                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
+
+                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), true);
+                throw ex;
+            }
+
+            try {
+                // 2) EXIF / device / server time resolve（沿用 photo 規則）
+                Optional<Instant> exifUtc = ExifTimeExtractor.tryReadCapturedAtUtc(storage, tempKey, tz);
+                Instant deviceUtc = parseInstantOrNull(deviceCapturedAtUtc);
+                CapturedTimeResolver.Result r = timeResolver.resolve(exifUtc.orElse(null), deviceUtc, serverNow);
+
+                // 3) 去重命中（不扣 quota）
+                var hit = repo.findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+                        userId,
+                        saved.sha256(),
+                        List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
+                );
+
+                LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), tz).toLocalDate();
+
+                FoodLogEntity e = new FoodLogEntity();
+                e.setUserId(userId);
+                e.setMethod("LABEL");
+                e.setDegradeLevel("DG-0");
+
+                e.setCapturedAtUtc(r.capturedAtUtc());
+                e.setCapturedTz(tz.getId());
+                e.setCapturedLocalDate(localDate);
+                e.setServerReceivedAtUtc(serverNow);
+
+                e.setTimeSource(TimeSource.valueOf(r.source().name()));
+                e.setTimeSuspect(r.suspect());
+
+                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
+                    // ✅ 命中：直接複製 effective，不扣 quota、不建 task
+                    e.setProvider(hit.get().getProvider());
+
+                    ObjectNode copied = hit.get().getEffective().deepCopy();
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
+
+                    e.setEffective(processed);
+                    e.setStatus(FoodLogStatus.DRAFT);
+                } else {
+                    // ✅ 未命中：扣 AI quota，provider 固定 GEMINI
+                    quota.consumeAiOrThrow(userId, tz, serverNow);
+                    e.setProvider(LABEL_PROVIDER);
+                    e.setEffective(null);
+                    e.setStatus(FoodLogStatus.PENDING);
+                }
+
+                repo.save(e);
+                idem.attach(userId, requestId, e.getId(), serverNow);
+
+                // 4) temp -> blob + refCount
+                var retained = blobService.retainFromTemp(
+                        userId,
+                        tempKey,
+                        saved.sha256(),
+                        det.ext(),
+                        saved.contentType(),
+                        saved.sizeBytes()
+                );
+
+                e.setImageObjectKey(retained.objectKey());
+                e.setImageSha256(retained.sha256());
+                e.setImageContentType(saved.contentType());
+                e.setImageSizeBytes(saved.sizeBytes());
+                repo.save(e);
+
+                // 5) 命中：不建 task
+                if (e.getStatus() == FoodLogStatus.DRAFT) {
+                    return toEnvelope(e, null, requestId);
+                }
+
+                // 6) 未命中：建 task（worker 會跑 GEMINI）
+                FoodLogTaskEntity t = new FoodLogTaskEntity();
+                t.setFoodLogId(e.getId());
+                t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+                t.setPollAfterSec(2);
+                t.setNextRetryAtUtc(null);
+                taskRepo.save(t);
+
+                return toEnvelope(e, t, requestId);
+
+            } catch (Exception ex) {
+                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_LABEL_FAILED", safeMsg(ex), true);
+                throw ex;
+            }
+
+        } finally {
+            if (acquired) inFlight.release(userId);
+        }
+    }
+
+    // =========================
+    // BARCODE：MVP（查不到 → TRY_LABEL）
+    // =========================
+    @Transactional
+    public FoodLogEnvelope createBarcodeMvp(Long userId, String barcode, String requestId) {
+        Instant now = Instant.now();
+
+        if (barcode == null || barcode.isBlank()) {
+            throw new IllegalArgumentException("BARCODE_REQUIRED");
+        }
+        String bc = barcode.trim();
+
+        // ✅ 基本 sanity（避免亂打）
+        // EAN/UPC 常見 8~14 位數（先寬鬆）
+        if (bc.length() < 6 || bc.length() > 32) {
+            throw new IllegalArgumentException("BARCODE_INVALID");
+        }
+
+        String existingLogId = idem.reserveOrGetExisting(userId, requestId, now);
+        if (existingLogId != null) return getOne(userId, existingLogId, requestId);
+
+        // ✅ 仍要限流
+        rateLimiter.checkOrThrow(userId, now);
+
+        ZoneId tz = ZoneOffset.UTC;
+        LocalDate localDate = ZonedDateTime.ofInstant(now, tz).toLocalDate();
+
+        FoodLogEntity e = new FoodLogEntity();
+        e.setUserId(userId);
+        e.setMethod("BARCODE");
+        e.setDegradeLevel("DG-0");
+
+        e.setCapturedAtUtc(now);
+        e.setCapturedTz(tz.getId());
+        e.setCapturedLocalDate(localDate);
+        e.setServerReceivedAtUtc(now);
+
+        e.setTimeSource(TimeSource.SERVER_RECEIVED);
+        e.setTimeSuspect(false);
+
+        // ✅ MVP：直接失敗，引導 TRY_LABEL（不扣 quota、也不建 task）
+        e.setStatus(FoodLogStatus.FAILED);
+        e.setProvider("BARCODE"); // 隨便寫，主要是 trace；你也可寫 null
+        e.setEffective(null);
+        e.setLastErrorCode("BARCODE_NOT_FOUND");
+        e.setLastErrorMessage("barcode not found: " + bc);
+
+        repo.save(e);
+        idem.attach(userId, requestId, e.getId(), now);
+
+        return toEnvelope(e, null, requestId);
+    }
+
 
     // ===== FoodLogService.getOne()：只在 QUEUED/RUNNING/FAILED 才回 task =====
     @Transactional(readOnly = true)
@@ -395,6 +588,7 @@ public class FoodLogService {
             if (degradedReason == null && warnings != null) {
                 if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) degradedReason = "NO_FOOD";
                 else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) degradedReason = "UNKNOWN_FOOD";
+                else if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) degradedReason = "NO_LABEL";
             }
         }
 
@@ -460,6 +654,29 @@ public class FoodLogService {
                     action,
                     retryAfter
             );
+        }
+
+        // ✅ DRAFT 提示：若是 per100(gram/ml) 且缺淨重，提示 UI「把淨重一起拍進來」
+        if (err == null && e.getStatus() == FoodLogStatus.DRAFT && nr != null && warnings != null) {
+
+            boolean hasServingUnknown = warnings.stream()
+                    .anyMatch("SERVING_SIZE_UNKNOWN"::equalsIgnoreCase);
+
+            boolean isPer100GramOrMl = nr.quantity() != null
+                                       && nr.quantity().unit() != null
+                                       && ( "GRAM".equalsIgnoreCase(nr.quantity().unit()) || "ML".equalsIgnoreCase(nr.quantity().unit()) )
+                                       && nr.quantity().value() != null
+                                       && Math.abs(nr.quantity().value() - 100.0) < 0.0001;
+
+            if (hasServingUnknown && isPer100GramOrMl) {
+                // ✅ schema 不變：沿用 error 欄位當「提示型 action」
+                // UI 看到這個就顯示「請把淨重/內容量一起拍進來」
+                err = new FoodLogEnvelope.ApiError(
+                        "SERVING_SIZE_UNKNOWN",
+                        com.calai.backend.foodlog.dto.ClientAction.RETAKE_PHOTO.name(),
+                        null
+                );
+            }
         }
 
         return new FoodLogEnvelope(

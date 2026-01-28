@@ -13,70 +13,94 @@ import java.util.Locale;
 public class EffectivePostProcessor {
 
     private final HealthScore healthScore;
-    private final NutritionSanityChecker sanityChecker; // ✅ Step 7-06
+    private final NutritionSanityChecker sanityChecker;
 
+    /**
+     * ✅ 向後相容：舊呼叫點不傳 method 時，預設走非 LABEL 邏輯
+     */
     public ObjectNode apply(ObjectNode effective, String providerCode) {
+        return apply(effective, providerCode, null);
+    }
+
+    /**
+     * ✅ NEW：method-aware
+     * - LABEL：不套用 NON_FOOD_SUSPECT（避免誤傷），但仍計算 healthScore（你要求）
+     * - 其他：維持原本行為
+     */
+    public ObjectNode apply(ObjectNode effective, String providerCode, String method) {
         if (effective == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
 
         ObjectNode nutrients = getObj(effective, "nutrients");
         if (nutrients == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
 
+        String m = (method == null) ? "" : method.trim().toUpperCase(Locale.ROOT);
+        boolean isLabel = "LABEL".equals(m);
+
         Double conf = (effective.get("confidence") != null && effective.get("confidence").isNumber())
                 ? effective.get("confidence").asDouble()
                 : null;
 
-        // ✅ 1) 降級優先：NO_FOOD / UNKNOWN_FOOD 時，不再追加 NON_FOOD_SUSPECT（避免 UI 混亂）
-        boolean noFood = hasWarning(effective, FoodLogWarning.NO_FOOD_DETECTED.name());
+        // ✅ degraded 判斷：加入 NO_LABEL_DETECTED（Label 專用）
+        boolean noFood  = hasWarning(effective, FoodLogWarning.NO_FOOD_DETECTED.name());
         boolean unknown = hasWarning(effective, FoodLogWarning.UNKNOWN_FOOD.name());
-        boolean degraded = noFood || unknown;
+        boolean noLabel = hasWarning(effective, FoodLogWarning.NO_LABEL_DETECTED.name());
+
+        boolean degraded = noFood || unknown || noLabel;
 
         Integer score = null;
 
+        // ===== 1) degraded：不計分（因為 nutrients 通常全 null / 不可信）=====
         if (degraded) {
-            // 直接移除 healthScore（降級不計分）
             effective.remove("healthScore");
 
             // LOW_CONFIDENCE（保留）
             if (conf == null || conf <= 0.4) addWarningWhitelist(effective, FoodLogWarning.LOW_CONFIDENCE);
 
-            // ✅ sanity check（保留：會補 UNIT_UNKNOWN / OUTLIER 等，但 nutrients all-null 會早退）
+            // sanity check（保留）
             sanityChecker.apply(effective);
 
-            // ✅ degradedReason 寫入 aiMeta（你原本就有）
+            // degradedReason 寫入 aiMeta
             setDegradedReasonIfAny(effective);
 
-            // healthScore meta（保留你原本格式，但 score=null）
+            // healthScore meta（保留格式）
             ObjectNode meta = JsonNodeFactory.instance.objectNode();
             meta.put("version", "v1");
             meta.put("computedAtUtc", Instant.now().toString());
             meta.put("provider", norm(providerCode));
             effective.set("healthScoreMeta", meta);
 
-            // warnings 白名單化
             sanitizeWarningsToWhitelist(effective);
             return effective;
         }
 
-        // ✅ 2) 非降級：才做 NON_FOOD_SUSPECT 判斷
-        boolean nonFood = isNonFoodSuspect(effective, conf);
-
-        if (!nonFood) {
+        // ===== 2) 非 degraded：Label 跳過 NON_FOOD_SUSPECT，但仍計分 =====
+        if (isLabel) {
             score = healthScore.score(nutrients);
             if (score != null) effective.put("healthScore", score);
             else effective.remove("healthScore");
         } else {
-            effective.remove("healthScore");
-            addWarningWhitelist(effective, FoodLogWarning.NON_FOOD_SUSPECT);
-            clampConfidenceMax(effective, 0.3);
+            // 原本邏輯：非 Label 才做 NON_FOOD_SUSPECT
+            boolean nonFood = isNonFoodSuspect(effective, conf);
+
+            if (!nonFood) {
+                score = healthScore.score(nutrients);
+                if (score != null) effective.put("healthScore", score);
+                else effective.remove("healthScore");
+            } else {
+                effective.remove("healthScore");
+                addWarningWhitelist(effective, FoodLogWarning.NON_FOOD_SUSPECT);
+                clampConfidenceMax(effective, 0.3);
+            }
         }
 
-        // LOW_CONFIDENCE（保留你原本）
+        // LOW_CONFIDENCE（維持你原本）
         if (conf == null || conf <= 0.4) {
             addWarningWhitelist(effective, FoodLogWarning.LOW_CONFIDENCE);
         }
 
         sanityChecker.apply(effective);
 
+        // healthScore meta
         ObjectNode meta = JsonNodeFactory.instance.objectNode();
         meta.put("version", "v1");
         meta.put("computedAtUtc", Instant.now().toString());
@@ -91,17 +115,18 @@ public class EffectivePostProcessor {
     }
 
     private static void setDegradedReasonIfAny(ObjectNode eff) {
-        boolean noFood = hasWarning(eff, FoodLogWarning.NO_FOOD_DETECTED.name());
+        boolean noFood  = hasWarning(eff, FoodLogWarning.NO_FOOD_DETECTED.name());
         boolean unknown = hasWarning(eff, FoodLogWarning.UNKNOWN_FOOD.name());
+        boolean noLabel = hasWarning(eff, FoodLogWarning.NO_LABEL_DETECTED.name());
 
         String reason = null;
         if (noFood) reason = "NO_FOOD";
         else if (unknown) reason = "UNKNOWN_FOOD";
+        else if (noLabel) reason = "NO_LABEL";
 
         if (reason == null) return;
 
         ObjectNode aiMeta = ensureObj(eff, "aiMeta");
-        // 不覆蓋既有值（如果你未來在 provider 端先寫，也能保留）
         if (aiMeta.get("degradedReason") == null || aiMeta.get("degradedReason").isNull()) {
             aiMeta.put("degradedReason", reason);
         }

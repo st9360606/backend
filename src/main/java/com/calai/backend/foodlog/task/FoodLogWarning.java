@@ -5,6 +5,8 @@ import java.util.Locale;
 public enum FoodLogWarning {
     NON_FOOD_SUSPECT,
     NO_FOOD_DETECTED,
+    NO_LABEL_DETECTED,// ✅ NEW：Label 專用（不會誤傷 no-food 規則）
+    SERVING_SIZE_UNKNOWN,
     LOW_CONFIDENCE,
     MIXED_MEAL,
     BLURRY_IMAGE,

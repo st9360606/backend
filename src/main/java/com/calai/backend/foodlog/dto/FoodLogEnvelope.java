@@ -26,10 +26,10 @@ public record FoodLogEnvelope(
             Source source
     ) {}
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Quantity(Double value, String unit) {}
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Nutrients(
             Double kcal,
             Double protein,

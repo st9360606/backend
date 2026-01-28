@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,7 +65,9 @@ public class FoodLogTaskWorker {
                 continue;
             }
 
-            if (task.getAttempts() >= TaskRetryPolicy.MAX_ATTEMPTS) {
+            int maxAttempts = maxAttemptsForMethod(logEntity.getMethod());
+
+            if (task.getAttempts() >= maxAttempts) {
                 Instant failAt = Instant.now();
                 task.markCancelled(failAt, "MAX_ATTEMPTS_EXCEEDED", "cancelled after max attempts");
                 taskRepo.save(task);
@@ -97,7 +100,7 @@ public class FoodLogTaskWorker {
 
                 Instant doneAt = Instant.now();
 
-                ObjectNode finalEff = postProcessor.apply(eff, result.provider());
+                ObjectNode finalEff = postProcessor.apply(eff, result.provider(), logEntity.getMethod());
                 logEntity.setEffective(finalEff);
                 logEntity.setProvider(result.provider());
                 logEntity.setStatus(FoodLogStatus.DRAFT);
@@ -134,6 +137,29 @@ public class FoodLogTaskWorker {
                     continue;
                 }
 
+                // ✅ LABEL：最後一次仍 PROVIDER_BAD_RESPONSE → 不要留 FAILED，直接降級成 DRAFT + NO_LABEL_DETECTED
+                if ("LABEL".equalsIgnoreCase(logEntity.getMethod())
+                    && "PROVIDER_BAD_RESPONSE".equals(mappedCode)
+                    && task.getAttempts() >= maxAttempts) {
+
+                    ObjectNode fb = fallbackNoLabelDetectedEffective();
+                    ObjectNode finalEff = postProcessor.apply(fb, "GEMINI", "LABEL");
+
+                    logEntity.setEffective(finalEff);
+                    logEntity.setProvider("GEMINI");
+                    logEntity.setStatus(FoodLogStatus.DRAFT);
+                    logEntity.setLastErrorCode(null);
+                    logEntity.setLastErrorMessage(null);
+
+                    Instant doneAt = Instant.now();
+                    task.markSucceeded(doneAt);
+
+                    logRepo.save(logEntity);
+                    taskRepo.save(task);
+                    continue;
+                }
+
+
                 // ✅ BAD_RESPONSE：最多重試 1 次（attempts>=2 直接停）
                 if ("PROVIDER_BAD_RESPONSE".equals(mappedCode) && task.getAttempts() >= 2) {
                     String msg = "bad json from provider (give up) attempts=" + task.getAttempts();
@@ -161,7 +187,7 @@ public class FoodLogTaskWorker {
                 }
 
                 // ✅ 達到上限：give up
-                if (task.getAttempts() >= TaskRetryPolicy.MAX_ATTEMPTS) {
+                if (task.getAttempts() >= maxAttempts) {
                     String giveUpMsg = ("[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg)).trim();
 
                     task.markCancelled(failAt, "PROVIDER_GIVE_UP", giveUpMsg);
@@ -187,6 +213,34 @@ public class FoodLogTaskWorker {
                 logRepo.save(logEntity);
             }
         }
+    }
+
+    private static int maxAttemptsForMethod(String method) {
+        if (method == null) return TaskRetryPolicy.MAX_ATTEMPTS;
+        if ("LABEL".equalsIgnoreCase(method)) return 2; // ✅ 最多重試一次
+        return TaskRetryPolicy.MAX_ATTEMPTS;
+    }
+
+    private static ObjectNode fallbackNoLabelDetectedEffective() {
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        root.putNull("foodName");
+
+        ObjectNode q = root.putObject("quantity");
+        q.put("value", 1d);
+        q.put("unit", "SERVING");
+
+        ObjectNode n = root.putObject("nutrients");
+        n.putNull("kcal");
+        n.putNull("protein");
+        n.putNull("fat");
+        n.putNull("carbs");
+        n.putNull("fiber");
+        n.putNull("sugar");
+        n.putNull("sodium");
+
+        root.put("confidence", 0.1);
+        root.putArray("warnings").add(FoodLogWarning.NO_LABEL_DETECTED.name());
+        return root;
     }
 
     /**
