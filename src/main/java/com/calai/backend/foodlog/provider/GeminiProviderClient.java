@@ -14,7 +14,9 @@ import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 
 import java.io.InputStream;
+import java.util.ArrayDeque;
 import java.util.Base64;
+import java.util.Deque;
 import java.util.Locale;
 
 @Slf4j
@@ -40,74 +42,35 @@ public class GeminiProviderClient implements ProviderClient {
                     + "If the image contains food, ESTIMATE nutrition using typical values. "
                     + "Do not stop early.";
 
-    // ✅ 你選的 V4（加 393.4 + 400 近似）
-    private static final String USER_PROMPT_LABEL_MAIN =
-            "Act as a strict nutrition-label extraction engine. "
-                    + "Return ONLY a JSON object matching the schema. No markdown. No extra text. "
+    private static final String USER_PROMPT_LABEL_MAIN = """
+            You extract Nutrition Facts from a PRINTED nutrition table (not a food photo).
+            
+            Return ONLY ONE MINIFIED JSON object that matches the schema. No markdown. No extra text. No extra keys.
+            
+            Rules:
+            - Numbers only (no units in strings). kcal=Energy, g=macros, mg=sodium.
+            - If only kJ: kcal = kJ / 4.184. If only salt(g) and no sodium: sodium_mg = salt_g * 393.4.
+            - If label shows 0 or 0.0, output 0.0 (not null). If a nutrient is NOT visible, output null (do not guess).
+            
+            Serving logic:
+            - Prefer PER-SERVING values if present.
+              - If serving size is stated (e.g., 125ml/30g), set quantity to that (ML/GRAM).
+              - If servings-per-container exists, set labelMeta.servingsPerContainer = X and labelMeta.basis = "PER_SERVING".
+              - Do NOT multiply to whole package (backend will scale).
+            - Only set labelMeta.basis="WHOLE_PACKAGE" and quantity=1 SERVING when the table explicitly states values are for the whole container/package.
+            - If only per 100g/100ml exists, set quantity=100 with unit GRAM/ML, and labelMeta.basis = null.
+            
+            Food name:
+            - Set foodName only if a clear product name is printed; otherwise null. Do not guess.
+            """;
 
-                    + "1) SCOPE: The image is a Nutrition Facts / nutrition table (NOT a food photo). "
-                    + "IGNORE handwritten notes, colorful frames, stickers, or overlaid text (e.g., '成分表', '營養標籤'). "
-                    + "Focus ONLY on the printed nutrition table. "
-
-                    + "2) FOOD NAME (SAFE): "
-                    + "- Set foodName ONLY if a clear product name is printed (not addresses, dates, distributor info, UPC codes). "
-                    + "- If not clearly present, set foodName to null. Do NOT guess. "
-
-                    + "3) LANGUAGE: The label may be in ANY language. Do NOT refuse due to language. "
-                    + "Identify nutrients by context (Energy/Calories, Protein, Fat, Carbs, Sugars, Fiber, Sodium/Salt). "
-
-                    + "4) OUTPUT FORMAT (STRICT): "
-                    + "- ALL nutrient values MUST be pure numbers (no units in strings). "
-                    + "  Example: sodium: 312 (NOT \"312 mg\"), protein: 5.5 (NOT \"5.5g\"). "
-                    + "- Energy MUST be kcal (number). Macros MUST be grams (number). Sodium MUST be mg (number). "
-
-                    + "5) CONVERSIONS: "
-                    + "- If only kJ is present, convert to kcal: kcal = kJ / 4.184. "
-                    + "- If 'salt' is present but sodium missing, convert: sodium_mg = salt_g * 393.4 (≈ 400 acceptable approximation). "
-
-                    + "6) QUANTITY (PRIORITY): "
-                    + "- Highest priority: If 'per pack/container/package' (whole product) is present, "
-                    + "  set quantity.value=1, unit=SERVING, and nutrients must represent the WHOLE package. "
-                    + "- If both PER-SERVING nutrient values and per-100 values are present, ALWAYS prefer PER-SERVING nutrient values. "
-                    + "- Next: If the label shows 'servings per container' / '本包裝 X 份' / '本包裝含 X 份', "
-                    + "  and also shows PER-SERVING nutrient values, compute WHOLE package nutrients = (per-serving nutrients) * X, "
-                    + "  then set quantity.value=1, unit=SERVING (WHOLE package). "
-                    + "- If servings-per-container is present BUT per-serving nutrient values are NOT present, do NOT guess whole-package; "
-                    + "  fall back to per-100 as-is and add warning 'SERVING_SIZE_UNKNOWN'. "
-                    + "- Else: If 'per serving' size is shown (e.g., 30g, 250ml), prefer PER SERVING over per-100, "
-                    + "  set quantity.value/unit to that serving size, and nutrients must represent PER SERVING. "
-                    + "- If serving size is shown BUT the label does NOT provide per-serving nutrient values, do NOT guess; "
-                    + "  fall back to per-100 as-is and add warning 'SERVING_SIZE_UNKNOWN'. "
-                    + "- Else: If only 'per 100g/100ml' is shown, look for 'Net Weight/Net Wt/重量/淨重/內容量/容量'. "
-                    + "  If Net Weight is found (e.g., 250g or 1250ml), SCALE all nutrients by (Net Weight / 100) "
-                    + "  and set quantity to the Net Weight (unit=GRAM or ML). "
-                    + "- If Net Weight is NOT found, output per-100 as-is (nutrients represent PER 100): "
-                    + "  set quantity.value=100, unit=GRAM if the table says per 100g/100 g; "
-                    + "  set quantity.value=100, unit=ML if the table says per 100ml/100 ml; "
-                    + "  and add warning 'SERVING_SIZE_UNKNOWN'. "
-
-                    + "7) NO_LABEL_DETECTED RULE: "
-                    + "- DO NOT set NO_LABEL_DETECTED if ANY numeric nutrition value is readable (kcal/kJ/protein/fat/carbs/sodium/salt). "
-                    + "- DO NOT set NO_LABEL_DETECTED just because serving size or net weight is missing. "
-                    + "- Only if you truly cannot read the nutrition table at all, set warnings include NO_LABEL_DETECTED and confidence <= 0.2."
-
-                    + "8) META (REQUIRED IF PRESENT ON LABEL): "
-                    + "- If 'servings per container/本包裝含 X 份' exists, set labelMeta.servingsPerContainer = X. "
-                    + "- Set labelMeta.basis = 'PER_SERVING' if nutrients are per serving; 'WHOLE_PACKAGE' if already whole package. "
-                    + "Always include labelMeta object with keys (servingsPerContainer, basis). If not present on label, set both to null. ";
-
-    private static final String USER_PROMPT_LABEL_REPAIR =
-            "Your previous response may have been truncated or invalid JSON. "
-                    + "Re-run label extraction and output FULL valid JSON matching the schema. "
-                    + "Return ONLY JSON. No markdown. No extra text. "
-                    + "Keep the same conversion rules: kJ->kcal, salt->sodium(mg). "
-                    + "CRITICAL: If a nutrient row shows 0 or 0.0, output 0.0 (do NOT set null). "
-                    + "CRITICAL: Pay special attention to SODIUM/鈉 row and output a numeric mg value when visible. "
-                    + "CRITICAL: If 'servings per container/本包裝含 X 份' exists and per-serving values exist, output WHOLE package totals. "
-                    + "8) META (REQUIRED IF PRESENT ON LABEL): "
-                    + "- If 'servings per container/本包裝含 X 份' exists, set labelMeta.servingsPerContainer = X. "
-                    + "- Set labelMeta.basis = 'PER_SERVING' if nutrients are per serving; 'WHOLE_PACKAGE' if already whole package. "
-                    + "Always include labelMeta object with keys (servingsPerContainer, basis). If not present on label, set both to null. ";
+    private static final String USER_PROMPT_LABEL_REPAIR = """
+            Your previous output was invalid/truncated.
+            
+            Return ONLY ONE FULL MINIFIED JSON object matching the schema. No markdown. No extra text. No extra keys.
+            You MUST output ALL required keys (including warnings and labelMeta). If unknown, use null (0.0 stays 0.0).
+            Do NOT stop early. Do NOT output partial key:value. Ensure valid JSON.
+            """;
 
     private final RestClient http;
     private final GeminiProperties props;
@@ -144,7 +107,7 @@ public class GeminiProviderClient implements ProviderClient {
             final String promptRepair = isLabel ? USER_PROMPT_LABEL_REPAIR : USER_PROMPT_REPAIR;
 
             // ===== 1) main call =====
-            CallResult r1 = callAndExtract(bytes, mime, promptMain, entity.getId());
+            CallResult r1 = callAndExtract(bytes, mime, promptMain, isLabel, entity.getId());
             Tok tok = r1.tok;
 
             JsonNode parsed1 = tryParseJson(r1.text);
@@ -152,6 +115,18 @@ public class GeminiProviderClient implements ProviderClient {
 
             if (isLabel && parsed1 == null) {
                 log.warn("label_parse_failed foodLogId={} preview={}", entity.getId(), safeOneLine200(r1.text));
+            }
+
+            // ✅ 新增：处理截断的 JSON（LABEL 模式）
+            if (isLabel && parsed1 == null && isJsonTruncated(r1.text)) {
+                log.info("label_json_truncated_try_fix foodLogId={}", entity.getId());
+                ObjectNode fromTruncated = tryFixTruncatedJson(r1.text);
+                if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
+                    ObjectNode effective = normalizeToEffective(fromTruncated);
+                    applyWholePackageScalingIfNeeded(fromTruncated, effective);
+                    telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                    return new ProviderResult(effective, "GEMINI");
+                }
             }
 
             // ✅ LABEL：若已回 JSON 且含 NO_LABEL_DETECTED，直接接受（degraded DRAFT）
@@ -186,6 +161,16 @@ public class GeminiProviderClient implements ProviderClient {
                     if (isLabelIncomplete(parsed1)) {
                         log.warn("label_incomplete_main_force_repair foodLogId={} preview={}",
                                 entity.getId(), safeOneLine200(r1.text));
+                        // 尝试修复截断的 JSON
+                        if (isJsonTruncated(r1.text)) {
+                            ObjectNode fromTruncated = tryFixTruncatedJson(r1.text);
+                            if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
+                                ObjectNode effective = normalizeToEffective(fromTruncated);
+                                applyWholePackageScalingIfNeeded(fromTruncated, effective);
+                                telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                                return new ProviderResult(effective, "GEMINI");
+                            }
+                        }
                         // 不 return，讓流程往下走 repair
                     } else {
                         ObjectNode effective = normalizeToEffective(parsed1);
@@ -236,12 +221,24 @@ public class GeminiProviderClient implements ProviderClient {
 
             // ===== 2) repair loop（Photo/Album + LABEL(最多1次)）=====
             for (int i = 1; i <= maxRepair; i++) {
-                CallResult rn = callAndExtract(bytes, mime, promptRepair, entity.getId());
+                CallResult rn = callAndExtract(bytes, mime, promptRepair, isLabel, entity.getId());
                 tok = Tok.mergePreferNew(tok, rn.tok);
                 lastText = rn.text;
 
                 JsonNode parsedN = tryParseJson(rn.text);
                 parsedN = unwrapRootObjectOrNull(parsedN);
+
+                // ✅ 新增：修复循环中的截断 JSON
+                if (isLabel && parsedN == null && isJsonTruncated(rn.text)) {
+                    log.info("label_json_truncated_in_repair foodLogId={} attempt={}", entity.getId(), i);
+                    ObjectNode fromTruncated = tryFixTruncatedJson(rn.text);
+                    if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
+                        ObjectNode effective = normalizeToEffective(fromTruncated);
+                        applyWholePackageScalingIfNeeded(fromTruncated, effective);
+                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        return new ProviderResult(effective, "GEMINI");
+                    }
+                }
 
                 if (isLabel && parsedN != null && hasWarning(parsedN, FoodLogWarning.NO_LABEL_DETECTED.name())) {
                     ObjectNode effective = normalizeToEffective(parsedN);
@@ -255,6 +252,16 @@ public class GeminiProviderClient implements ProviderClient {
                     if (isLabel && isLabelIncomplete(parsedN)) {
                         log.warn("label_incomplete_after_repair foodLogId={} preview={}",
                                 entity.getId(), safeOneLine200(rn.text));
+                        // 尝试修复截断的 JSON
+                        if (isJsonTruncated(rn.text)) {
+                            ObjectNode fromTruncated = tryFixTruncatedJson(rn.text);
+                            if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
+                                ObjectNode effective = normalizeToEffective(fromTruncated);
+                                applyWholePackageScalingIfNeeded(fromTruncated, effective);
+                                telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                                return new ProviderResult(effective, "GEMINI");
+                            }
+                        }
                         // 不 return，讓 loop 結束後走 PROVIDER_BAD_RESPONSE
                     } else {
                         ObjectNode effective = normalizeToEffective(parsedN);
@@ -292,6 +299,18 @@ public class GeminiProviderClient implements ProviderClient {
 
             // ===== 3) final fallback =====
             if (isLabel) {
+                // ✅ 新增：最后尝试从文字中提取（即使之前已经试过）
+                if (isJsonTruncated(lastText)) {
+                    log.info("label_final_attempt_truncated_fix foodLogId={}", entity.getId());
+                    ObjectNode fromTruncated = tryFixTruncatedJson(lastText);
+                    if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
+                        ObjectNode effective = normalizeToEffective(fromTruncated);
+                        applyWholePackageScalingIfNeeded(fromTruncated, effective);
+                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        return new ProviderResult(effective, "GEMINI");
+                    }
+                }
+
                 // ✅ LABEL：到這裡還是不行 → 交給 worker attempts=2；最後 worker fallback NO_LABEL_DETECTED
                 throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
             }
@@ -306,6 +325,491 @@ public class GeminiProviderClient implements ProviderClient {
             telemetry.fail("GEMINI", entity.getId(), msSince(t0), mapped.code(), mapped.retryAfterSec());
             throw e;
         }
+    }
+
+    /**
+     * ✅ 判断 JSON 是否被截断（缺少结束大括号）
+     */
+    private static boolean isJsonTruncated(String text) {
+        if (text == null || text.isBlank()) return false;
+
+        String trimmed = text.trim();
+        if (!trimmed.startsWith("{")) return false;
+
+        // 统计大括号是否平衡
+        int balance = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < trimmed.length(); i++) {
+            char ch = trimmed.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (inString) {
+                if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+            } else if (ch == '{') {
+                balance++;
+            } else if (ch == '}') {
+                balance--;
+            }
+        }
+
+        // 如果大括号不平衡（通常是 balance > 0），说明 JSON 被截断
+        // 或者最后不是以 } 结尾
+        return balance > 0 || !trimmed.endsWith("}");
+    }
+
+    /**
+     * ✅ 改進的JSON截斷修復方法
+     */
+    private ObjectNode tryFixTruncatedJson(String rawText) {
+        if (rawText == null || rawText.trim().isEmpty()) {
+            return null;
+        }
+
+        String text = rawText.trim();
+        log.debug("tryFixTruncatedJson input: {}", text.substring(0, Math.min(text.length(), 500)));
+
+        // 1. 先嘗試修復常見的截斷模式
+        String fixed = fixCommonTruncationPatterns(text);
+
+        // 2. 嘗試解析
+        try {
+            JsonNode parsed = om.readTree(fixed);
+            parsed = unwrapRootObjectOrNull(parsed);
+
+            if (parsed != null && parsed.isObject()) {
+                // 確保有nutrients對象
+                ObjectNode obj = (ObjectNode) parsed;
+                if (!obj.has("nutrients") || !obj.get("nutrients").isObject()) {
+                    // 創建nutrients對象
+                    ObjectNode nutrients = om.createObjectNode();
+                    nutrients.putNull("kcal");
+                    nutrients.putNull("protein");
+                    nutrients.putNull("fat");
+                    nutrients.putNull("carbs");
+                    nutrients.putNull("fiber");
+                    nutrients.putNull("sugar");
+                    nutrients.putNull("sodium");
+                    obj.set("nutrients", nutrients);
+                }
+
+                // 確保有confidence
+                if (!obj.has("confidence")) {
+                    obj.put("confidence", 0.25);
+                }
+
+                // 確保有quantity
+                if (!obj.has("quantity") || !obj.get("quantity").isObject()) {
+                    ObjectNode quantity = om.createObjectNode();
+                    quantity.put("value", 1.0);
+                    quantity.put("unit", "SERVING");
+                    obj.set("quantity", quantity);
+                }
+
+                return obj;
+            }
+        } catch (Exception e) {
+            log.debug("tryFixTruncatedJson parse failed: {}", e.getMessage());
+            // 繼續嘗試其他方法
+        }
+
+        // 3. 如果標準修復失敗，嘗試從文本中提取關鍵信息
+        return extractFromTruncatedText(text);
+    }
+
+    /**
+     * ✅ 修復常見的截斷模式
+     */
+    private String fixCommonTruncationPatterns(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+
+        StringBuilder fixed = new StringBuilder(text);
+
+        // 情況1: nutrients部分截斷，例如 "nutrients":{"kcal": 但沒有結束
+        int nutrientsStart = text.indexOf("\"nutrients\":{");
+        if (nutrientsStart >= 0) {
+            int nutrientsOpen = nutrientsStart + "\"nutrients\":{".length();
+            // 尋找nutrients的結束
+            int nutrientsClose = findMatchingBrace(text, nutrientsOpen - 1);
+
+            if (nutrientsClose < 0) {
+                // 嘗試找到kcal的值
+                Double kcal = extractNumberAfter(text, "\"kcal\":");
+                Double sodium = extractNumberAfter(text, "\"sodium\":");
+                Double sodiumAlt = extractNumberAfter(text, "\"sodium\" :");
+
+                if (sodium == null && sodiumAlt != null) {
+                    sodium = sodiumAlt;
+                }
+
+                // 重新構建nutrients部分
+                StringBuilder nutrients = new StringBuilder();
+                nutrients.append("\"nutrients\":{");
+
+                if (kcal != null) {
+                    nutrients.append("\"kcal\":").append(kcal);
+                } else {
+                    nutrients.append("\"kcal\":null");
+                }
+
+                nutrients.append(",\"protein\":null");
+                nutrients.append(",\"fat\":null");
+                nutrients.append(",\"carbs\":null");
+                nutrients.append(",\"fiber\":null");
+                nutrients.append(",\"sugar\":null");
+
+                if (sodium != null) {
+                    nutrients.append(",\"sodium\":").append(sodium);
+                } else {
+                    nutrients.append(",\"sodium\":null");
+                }
+
+                nutrients.append("}");
+
+                // 替換nutrients部分
+                int nutrientsEnd = text.indexOf("\"nutrients\":{") + "\"nutrients\":{".length();
+                String beforeNutrients = text.substring(0, text.indexOf("\"nutrients\":{"));
+                String afterNutrients = text.substring(nutrientsEnd);
+
+                // 如果nutrients後面還有其他內容，嘗試保留
+                if (afterNutrients.contains("\"confidence\":")) {
+                    return beforeNutrients + nutrients.toString() + afterNutrients.substring(afterNutrients.indexOf("\"confidence\":"));
+                } else if (afterNutrients.contains("}")) {
+                    // 找到第一個}作為結束
+                    int firstBrace = afterNutrients.indexOf('}');
+                    return beforeNutrients + nutrients.toString() + afterNutrients.substring(firstBrace);
+                } else {
+                    // 直接添加nutrients和結束
+                    return beforeNutrients + nutrients.toString() + ",\"confidence\":0.25,\"warnings\":[\"LOW_CONFIDENCE\"]}";
+                }
+            }
+        }
+
+        // 情況2: 整個JSON沒有結束大括號
+        if (!text.endsWith("}")) {
+            // 統計大括號
+            int openBraces = 0;
+            int closeBraces = 0;
+            boolean inString = false;
+            boolean escaped = false;
+
+            for (int i = 0; i < fixed.length(); i++) {
+                char ch = fixed.charAt(i);
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (inString) {
+                    if (ch == '\\') {
+                        escaped = true;
+                    } else if (ch == '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (ch == '"') {
+                    inString = true;
+                } else if (ch == '{') {
+                    openBraces++;
+                } else if (ch == '}') {
+                    closeBraces++;
+                }
+            }
+
+            // 添加缺少的大括號
+            if (openBraces > closeBraces) {
+                int missing = openBraces - closeBraces;
+                for (int i = 0; i < missing; i++) {
+                    fixed.append('}');
+                }
+            } else if (closeBraces > openBraces) {
+                // 這通常不會發生，但如果發生，我們刪除多餘的}
+                int extra = closeBraces - openBraces;
+                for (int i = 0; i < extra && fixed.length() > 0; i++) {
+                    if (fixed.charAt(fixed.length() - 1) == '}') {
+                        fixed.deleteCharAt(fixed.length() - 1);
+                    }
+                }
+            }
+        }
+
+        // 情況3: 移除尾隨逗號
+        String result = removeTrailingCommas(fixed.toString());
+
+        // 確保以}結束
+        if (!result.endsWith("}")) {
+            result = result + "}";
+        }
+
+        return result;
+    }
+
+    /**
+     * ✅ 從截斷文本中提取信息
+     */
+    private ObjectNode extractFromTruncatedText(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return null;
+        }
+
+        ObjectNode root = om.createObjectNode();
+
+        // 1. 提取食品名稱
+        String foodName = extractJsonStringValue(text, "foodName");
+        if (foodName != null && !foodName.isEmpty()) {
+            root.put("foodName", foodName);
+        } else {
+            root.putNull("foodName");
+        }
+
+        // 2. 創建quantity對象
+        ObjectNode quantity = om.createObjectNode();
+        Double qtyValue = extractJsonNumberValue(text, "value");
+        String qtyUnit = extractJsonStringValue(text, "unit");
+
+        if (qtyValue != null) {
+            quantity.put("value", qtyValue);
+        } else {
+            quantity.put("value", 1.0);
+        }
+
+        if (qtyUnit != null && !qtyUnit.isEmpty()) {
+            quantity.put("unit", qtyUnit);
+        } else {
+            quantity.put("unit", "SERVING");
+        }
+        root.set("quantity", quantity);
+
+        // 3. 提取營養值
+        ObjectNode nutrients = om.createObjectNode();
+
+        Double kcal = extractJsonNumberValue(text, "kcal");
+        Double sodium = extractJsonNumberValue(text, "sodium");
+
+        // 從文本中嘗試其他方式提取鈉含量
+        if (sodium == null) {
+            sodium = extractSodiumFromText(text);
+        }
+
+        if (kcal != null) {
+            nutrients.put("kcal", kcal);
+        } else {
+            nutrients.putNull("kcal");
+        }
+
+        nutrients.putNull("protein");
+        nutrients.putNull("fat");
+        nutrients.putNull("carbs");
+        nutrients.putNull("fiber");
+        nutrients.putNull("sugar");
+
+        if (sodium != null) {
+            nutrients.put("sodium", sodium);
+        } else {
+            nutrients.putNull("sodium");
+        }
+
+        root.set("nutrients", nutrients);
+
+        // 4. 信心度和警告
+        root.put("confidence", 0.25);
+        ArrayNode warnings = root.putArray("warnings");
+        warnings.add(FoodLogWarning.LOW_CONFIDENCE.name());
+
+        return root;
+    }
+
+    /**
+     * ✅ 從文本中提取JSON字符串值
+     */
+    private String extractJsonStringValue(String text, String key) {
+        if (text == null || key == null) {
+            return null;
+        }
+
+        // 嘗試多種模式
+        String[] patterns = {
+                "\"" + key + "\":\"([^\"]*)\"",
+                "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"",
+                "'" + key + "':\"([^\"]*)\"",
+                "'" + key + "'\\s*:\\s*\"([^\"]*)\""
+        };
+
+        for (String pattern : patterns) {
+            try {
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile(pattern);
+                java.util.regex.Matcher m = p.matcher(text);
+                if (m.find()) {
+                    return m.group(1);
+                }
+            } catch (Exception e) {
+                // 繼續嘗試下一個模式
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ 從文本中提取JSON數字值
+     */
+    private Double extractJsonNumberValue(String text, String key) {
+        if (text == null || key == null) {
+            return null;
+        }
+
+        // 嘗試多種模式
+        String[] patterns = {
+                "\"" + key + "\":\\s*(-?\\d+(?:\\.\\d+)?)",
+                "\"" + key + "\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)",
+                "'" + key + "':\\s*(-?\\d+(?:\\.\\d+)?)",
+                "'" + key + "'\\s*:\\s*(-?\\d+(?:\\.\\d+)?)"
+        };
+
+        for (String pattern : patterns) {
+            try {
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile(pattern);
+                java.util.regex.Matcher m = p.matcher(text);
+                if (m.find()) {
+                    String numStr = m.group(1);
+                    return Double.parseDouble(numStr);
+                }
+            } catch (Exception e) {
+                // 繼續嘗試下一個模式
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ 從文本中提取鈉含量（多語言支持）
+     */
+    private Double extractSodiumFromText(String text) {
+        if (text == null) {
+            return null;
+        }
+
+        String lowerText = text.toLowerCase(Locale.ROOT);
+
+        // 搜索鈉的各種表示方式
+        String[] sodiumMarkers = {
+                "\"sodium\":", "\"sodium\" :",
+                "\"鈉\":", "\"鈊\":", "\"钠\":",
+                "sodium", "鈉", "钠", "natrium"
+        };
+
+        for (String marker : sodiumMarkers) {
+            int idx = lowerText.indexOf(marker.toLowerCase(Locale.ROOT));
+            if (idx >= 0) {
+                // 在標記後查找數字
+                String afterMarker = text.substring(idx + marker.length());
+                Double sodium = extractFirstNumber(afterMarker);
+                if (sodium != null) {
+                    return sodium;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ 在文本中提取第一個數字
+     */
+    private Double extractFirstNumber(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("-?\\d+(?:\\.\\d+)?");
+        java.util.regex.Matcher matcher = pattern.matcher(text);
+
+        if (matcher.find()) {
+            try {
+                return Double.parseDouble(matcher.group());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ 在文本中查找標記後的數字
+     */
+    private Double extractNumberAfter(String text, String marker) {
+        if (text == null || marker == null) {
+            return null;
+        }
+
+        int idx = text.indexOf(marker);
+        if (idx >= 0) {
+            String afterMarker = text.substring(idx + marker.length());
+            return extractFirstNumber(afterMarker);
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ 查找匹配的大括號
+     */
+    private int findMatchingBrace(String text, int openBracePos) {
+        if (text == null || openBracePos < 0 || openBracePos >= text.length()) {
+            return -1;
+        }
+
+        int balance = 1;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = openBracePos + 1; i < text.length(); i++) {
+            char ch = text.charAt(i);
+
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (inString) {
+                if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+            } else if (ch == '{') {
+                balance++;
+            } else if (ch == '}') {
+                balance--;
+                if (balance == 0) {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
     }
 
     // ===== no-label 判斷（多語 + 有數字就不要誤判）=====
@@ -442,8 +946,8 @@ public class GeminiProviderClient implements ProviderClient {
     }
 
     // ===== call Gemini =====
-    private CallResult callAndExtract(byte[] imageBytes, String mimeType, String userPrompt, String foodLogIdForLog) {
-        JsonNode resp = callGenerateContent(imageBytes, mimeType, userPrompt);
+    private CallResult callAndExtract(byte[] imageBytes, String mimeType, String userPrompt, boolean isLabel, String foodLogIdForLog) {
+        JsonNode resp = callGenerateContent(imageBytes, mimeType, userPrompt, isLabel);
         Tok tok = extractUsage(resp);
 
         String text = extractJoinedTextOrNull(resp);
@@ -453,9 +957,8 @@ public class GeminiProviderClient implements ProviderClient {
         return new CallResult(tok, text);
     }
 
-    private JsonNode callGenerateContent(byte[] imageBytes, String mimeType, String userPrompt) {
-        ObjectNode req = buildRequest(imageBytes, mimeType, userPrompt);
-
+    private JsonNode callGenerateContent(byte[] imageBytes, String mimeType, String userPrompt, boolean isLabel) {
+        ObjectNode req = buildRequest(imageBytes, mimeType, userPrompt, isLabel);
         return http.post()
                 .uri("/v1beta/models/{model}:generateContent", props.getModel())
                 .header("x-goog-api-key", requireApiKey())
@@ -466,14 +969,13 @@ public class GeminiProviderClient implements ProviderClient {
                 .body(JsonNode.class);
     }
 
-    private ObjectNode buildRequest(byte[] imageBytes, String mimeType, String userPrompt) {
+
+    private ObjectNode buildRequest(byte[] imageBytes, String mimeType, String userPrompt, boolean isLabel) {
         String b64 = Base64.getEncoder().encodeToString(imageBytes);
         ObjectNode root = om.createObjectNode();
 
         ObjectNode sys = root.putObject("systemInstruction");
-        sys.putArray("parts").addObject().put("text",
-                "Return ONLY JSON that matches the schema. No markdown. No extra text."
-        );
+        sys.putArray("parts").addObject().put("text", "Return ONLY minified JSON. No markdown. No extra text.");
 
         ArrayNode contents = root.putArray("contents");
         ObjectNode c0 = contents.addObject();
@@ -488,11 +990,29 @@ public class GeminiProviderClient implements ProviderClient {
 
         ObjectNode gen = root.putObject("generationConfig");
         gen.put("responseMimeType", "application/json");
-        gen.set("_responseJsonSchema", nutritionJsonSchema()); // ✅
-        gen.put("maxOutputTokens", props.getMaxOutputTokens());
-        gen.put("temperature", props.getTemperature());
-
+        gen.set("_responseJsonSchema", isLabel ? nutritionJsonSchemaLabelStrict() : nutritionJsonSchema());
+        gen.put("maxOutputTokens", isLabel ? 768 : props.getMaxOutputTokens()); // ✅ LABEL 拉高，避免截斷
+        gen.put("temperature", 0.0); // ✅ LABEL 建議固定 0
         return root;
+    }
+
+    private ObjectNode nutritionJsonSchemaLabelStrict() {
+        ObjectNode schema = nutritionJsonSchema();
+
+        // root required：加 warnings + labelMeta
+        ArrayNode req = (ArrayNode) schema.get("required");
+        req.add("warnings");
+        req.add("labelMeta");
+
+        // labelMeta required：servingsPerContainer + basis 欄位必須存在（但允許 null）
+        ObjectNode propsNode = (ObjectNode) schema.get("properties");
+        ObjectNode labelMeta = (ObjectNode) propsNode.get("labelMeta");
+        // 確保 labelMeta 有 required array
+        ArrayNode lmReq = labelMeta.putArray("required");
+        lmReq.add("servingsPerContainer");
+        lmReq.add("basis");
+
+        return schema;
     }
 
     private ObjectNode nutritionJsonSchema() {
@@ -565,33 +1085,83 @@ public class GeminiProviderClient implements ProviderClient {
     private JsonNode tryParseJson(String rawText) {
         if (rawText == null) return null;
 
-        // 1) 去掉 ``` fence
         String s = stripFence(rawText.trim());
         if (s.isBlank()) return null;
 
-        // 2) 清 BOM/null + 修正字串內換行/控制字元
         s = stripBomAndNulls(s);
         s = escapeBadCharsInsideJsonStrings(s);
 
-        // 3) 抽出第一段完整 JSON（object or array）
         String payload = extractFirstJsonPayload(s);
         if (payload == null || payload.isBlank()) return null;
 
-        // 4) 若尾巴缺括號，做最小補齊（避免截斷）
+        // ✅ NEW：先修補尾巴（"value": 這種）
+        payload = patchDanglingTail(payload);
+
         payload = balanceJsonIfNeeded(payload);
-        payload = removeTrailingCommas(payload); // ✅ NEW：修掉 ,} 或 ,] 這種
+        payload = removeTrailingCommas(payload);
+
+        // ✅ NEW：補完括號後再修補一次（避免 balance 後尾巴仍是 ':'）
+        payload = patchDanglingTail(payload);
 
         try {
             return om.readTree(payload);
         } catch (Exception first) {
             String fixed = balanceJsonIfNeeded(payload);
-            fixed = removeTrailingCommas(fixed); // ✅ second attempt 也要做
+            fixed = removeTrailingCommas(fixed);
+            fixed = patchDanglingTail(fixed);
             try {
                 return om.readTree(fixed);
             } catch (Exception second) {
                 return null;
             }
         }
+    }
+
+    private static String patchDanglingTail(String s) {
+        if (s == null) return null;
+        String t = rtrim(s);
+
+        // 如果最後一個非空白字元是 ':'，代表像 `"value":` 沒有值 → 補 null/預設
+        if (t.endsWith(":")) {
+            String key = extractLastJsonKeyBeforeColon(t);
+            if (key != null) {
+                String lower = key.toLowerCase(Locale.ROOT);
+                if (lower.equals("unit")) {
+                    t = t + "\"SERVING\"";
+                } else if (lower.equals("basis")) {
+                    t = t + "\"PER_SERVING\"";
+                } else {
+                    // value/kcal/protein/.../servingsPerContainer/confidence 都用 null 最安全
+                    t = t + "null";
+                }
+            } else {
+                // 找不到 key 就補 null，至少讓 JSON 變合法
+                t = t + "null";
+            }
+        }
+        // 若結尾是 `,"key"` 之類也可能炸，但你已經有 removeTrailingCommas()
+        return t;
+    }
+
+    private static String rtrim(String s) {
+        int i = s.length();
+        while (i > 0 && Character.isWhitespace(s.charAt(i - 1))) i--;
+        return s.substring(0, i);
+    }
+
+    /**
+     * 從尾巴往前找最後一個 `"xxx":` 的 key 名
+     * 只處理「結尾剛好是冒號」這種截斷案例，避免過度修補。
+     */
+    private static String extractLastJsonKeyBeforeColon(String t) {
+        // t endsWith ':'
+        int colon = t.length() - 1;
+        // 找到 colon 前最近的雙引號對
+        int q2 = t.lastIndexOf('"', colon - 1);
+        if (q2 < 0) return null;
+        int q1 = t.lastIndexOf('"', q2 - 1);
+        if (q1 < 0) return null;
+        return t.substring(q1 + 1, q2);
     }
 
     private ObjectNode normalizeToEffective(JsonNode raw) {
@@ -642,16 +1212,17 @@ public class GeminiProviderClient implements ProviderClient {
         else out.put("confidence", conf);
 
         // warnings
+        ArrayNode outW = JsonNodeFactory.instance.arrayNode();
         JsonNode w = raw.get("warnings");
         if (w != null && w.isArray()) {
-            ArrayNode outW = JsonNodeFactory.instance.arrayNode();
             for (JsonNode it : w) {
                 if (it == null || it.isNull()) continue;
                 FoodLogWarning ww = FoodLogWarning.parseOrNull(it.asText());
                 if (ww != null) outW.add(ww.name());
             }
-            if (!outW.isEmpty()) out.set("warnings", outW);
         }
+        // ✅ 無論空不空，都輸出
+        out.set("warnings", outW);
 
         return out;
     }
@@ -661,7 +1232,6 @@ public class GeminiProviderClient implements ProviderClient {
      * - number
      * - "312 mg" / "5.5g" / "2118 kJ"
      * - {"value":13,"unit":"mg"}
-     *
      * 注意：為了避免 LABEL 被奇怪型別打爆，未知型別會視為 null（不 throw）。
      */
     private static void copyNonNegativeNumberOrNull(JsonNode from, ObjectNode to, String key) {
@@ -946,27 +1516,41 @@ public class GeminiProviderClient implements ProviderClient {
         if (s == null || s.isBlank()) return s;
 
         boolean inString = false, escaped = false;
-        int brace = 0, bracket = 0;
+        Deque<Character> stack = new ArrayDeque<>();
 
         for (int i = 0; i < s.length(); i++) {
             char ch = s.charAt(i);
+
             if (escaped) { escaped = false; continue; }
+
             if (inString) {
-                if (ch == '\\') { escaped = true; continue; }
-                if (ch == '"') { inString = false; }
+                if (ch == '\\') escaped = true;
+                else if (ch == '"') inString = false;
                 continue;
-            } else {
-                if (ch == '"') { inString = true; continue; }
-                if (ch == '{') brace++;
-                else if (ch == '}') brace--;
-                else if (ch == '[') bracket++;
-                else if (ch == ']') bracket--;
+            }
+
+            if (ch == '"') { inString = true; continue; }
+
+            if (ch == '{' || ch == '[') {
+                stack.push(ch);
+            } else if (ch == '}' || ch == ']') {
+                // 只在 stack top 匹配時才 pop（不匹配就忽略，避免越修越壞）
+                if (!stack.isEmpty()) {
+                    char top = stack.peek();
+                    if ((top == '{' && ch == '}') || (top == '[' && ch == ']')) {
+                        stack.pop();
+                    }
+                }
             }
         }
 
+        if (stack.isEmpty()) return s;
+
         StringBuilder out = new StringBuilder(s);
-        if (brace > 0) out.append("}".repeat(brace));
-        if (bracket > 0) out.append("]".repeat(bracket));
+        while (!stack.isEmpty()) {
+            char open = stack.pop();
+            out.append(open == '{' ? '}' : ']');
+        }
         return out.toString();
     }
 
@@ -1067,13 +1651,11 @@ public class GeminiProviderClient implements ProviderClient {
         Double servingMl = findNumberAfterAny(lower, new String[]{"serving size", "每一份量", "每份量", "每份"});
         Double servingsPerContainer = findNumberAfterAny(lower, new String[]{"servings per container", "本包裝含", "本包裝", "每包裝"});
 
-        // 至少抓到 sodium 或 kcal 才算有效
         if (sodium == null && kcal == null) return null;
 
         ObjectNode root = om.createObjectNode();
         root.putNull("foodName");
 
-        // quantity：優先用 serving size（ml）
         ObjectNode q = root.putObject("quantity");
         if (servingMl != null && servingMl > 0) {
             q.put("value", servingMl);
@@ -1085,26 +1667,28 @@ public class GeminiProviderClient implements ProviderClient {
 
         ObjectNode n = root.putObject("nutrients");
         putOrNull(n, "kcal", kcal);
-        putOrNull(n, "protein", 0d);
-        putOrNull(n, "fat", 0d);
-        putOrNull(n, "carbs", 0d);
-        putOrNull(n, "fiber", 0d);
-        putOrNull(n, "sugar", 0d);
-        putOrNull(n, "sodium", sodium); // mg
+        // ✅ 不要亂填 0，讀不到就 null（避免誤判成 0）
+        n.putNull("protein");
+        n.putNull("fat");
+        n.putNull("carbs");
+        n.putNull("fiber");
+        n.putNull("sugar");
+        putOrNull(n, "sodium", sodium);
 
         root.put("confidence", 0.35);
 
+        // warnings 一定給（空也行）
         ArrayNode w = root.putArray("warnings");
         w.add(FoodLogWarning.LOW_CONFIDENCE.name());
 
-        // ✅ 若抓到「本包裝 X 份」且也抓到每份數值 → 算整包（以鈉/熱量為例）
+        // ✅ labelMeta：若抓到份數，就給 PER_SERVING，讓 applyWholePackageScalingIfNeeded 去乘
+        ObjectNode lm = root.putObject("labelMeta");
         if (servingsPerContainer != null && servingsPerContainer > 1) {
-            if (sodium != null) n.put("sodium", sodium * servingsPerContainer);
-            if (kcal != null) n.put("kcal", kcal * servingsPerContainer);
-
-            // quantity：整包用 1 SERVING（whole package）
-            q.put("value", 1d);
-            q.put("unit", "SERVING");
+            lm.put("servingsPerContainer", servingsPerContainer);
+            lm.put("basis", "PER_SERVING");
+        } else {
+            lm.putNull("servingsPerContainer");
+            lm.putNull("basis");
         }
 
         return root;
@@ -1231,10 +1815,6 @@ public class GeminiProviderClient implements ProviderClient {
         String basis = (lm.get("basis") == null || lm.get("basis").isNull())
                 ? null : lm.get("basis").asText(null);
 
-        // ✅ basis 沒填：只要 servings>1，就推斷是 PER_SERVING（否則永遠不乘）
-        if (basis == null || basis.isBlank()) {
-            basis = "PER_SERVING";
-        }
         if (!"PER_SERVING".equalsIgnoreCase(basis)) return;
 
         JsonNode nNode = effective.get("nutrients");
