@@ -974,8 +974,9 @@ public class GeminiProviderClient implements ProviderClient {
         String b64 = Base64.getEncoder().encodeToString(imageBytes);
         ObjectNode root = om.createObjectNode();
 
+        // 建議將 System Instruction 放在 c0 之前
         ObjectNode sys = root.putObject("systemInstruction");
-        sys.putArray("parts").addObject().put("text", "Return ONLY minified JSON. No markdown. No extra text.");
+        sys.putArray("parts").addObject().put("text", "Return ONLY minified JSON. No markdown.");
 
         ArrayNode contents = root.putArray("contents");
         ObjectNode c0 = contents.addObject();
@@ -990,9 +991,14 @@ public class GeminiProviderClient implements ProviderClient {
 
         ObjectNode gen = root.putObject("generationConfig");
         gen.put("responseMimeType", "application/json");
-        gen.set("_responseJsonSchema", isLabel ? nutritionJsonSchemaLabelStrict() : nutritionJsonSchema());
-        gen.put("maxOutputTokens", isLabel ? 768 : props.getMaxOutputTokens()); // ✅ LABEL 拉高，避免截斷
-        gen.put("temperature", 0.0); // ✅ LABEL 建議固定 0
+
+        // ✅ 關鍵修正：欄位名稱必須為 response_schema
+        // 並且確保 nutritionJsonSchema() 回傳的是符合 OpenAPI 3.0 的格式
+        gen.set("response_schema", isLabel ? nutritionJsonSchemaLabelStrict() : nutritionJsonSchema());
+
+        gen.put("maxOutputTokens", isLabel ? 1024 : props.getMaxOutputTokens()); // 稍微加到 1024 買保險
+        gen.put("temperature", isLabel ? 0.0 : props.getTemperature());
+
         return root;
     }
 
