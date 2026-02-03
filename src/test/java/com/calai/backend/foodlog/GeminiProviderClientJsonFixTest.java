@@ -1,18 +1,21 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.provider.GeminiProviderClient;
+import com.calai.backend.foodlog.provider.GeminiProperties;
+import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Comparator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-@SpringBootTest
 class GeminiProviderClientJsonFixTest {
 
     private static final ObjectMapper OM = new ObjectMapper();
@@ -39,10 +42,56 @@ class GeminiProviderClientJsonFixTest {
         }
     }
 
+    /**
+     * ✅ 不依賴 GeminiProviderClient 的 constructor 參數數量。
+     * 會自動找「參數最多」的 constructor，並依參數型別填入：
+     * - ObjectMapper -> OM
+     * - GeminiProperties -> null（這支測試不需要）
+     * - ProviderTelemetry -> null（這支測試不需要）
+     * - 其他全部塞 null / primitive 預設值
+     */
     private static GeminiProviderClient newClientForParsing() {
-        // normalizeToEffective 不用到 props/http/telemetry
-        // tryParseJson 需要 ObjectMapper（你 class 內用 field om）
-        return new GeminiProviderClient(null, null, OM, null);
+        try {
+            Constructor<?> ctor = Arrays.stream(GeminiProviderClient.class.getDeclaredConstructors())
+                    .max(Comparator.comparingInt(Constructor::getParameterCount))
+                    .orElseThrow();
+
+            Object[] args = new Object[ctor.getParameterCount()];
+            Class<?>[] types = ctor.getParameterTypes();
+
+            for (int i = 0; i < types.length; i++) {
+                Class<?> t = types[i];
+
+                if (ObjectMapper.class.isAssignableFrom(t)) {
+                    args[i] = OM;
+                } else if (GeminiProperties.class.isAssignableFrom(t)) {
+                    args[i] = null;
+                } else if (ProviderTelemetry.class.isAssignableFrom(t)) {
+                    args[i] = null;
+                } else if (t.isPrimitive()) {
+                    args[i] = primitiveDefault(t);
+                } else {
+                    args[i] = null;
+                }
+            }
+
+            ctor.setAccessible(true);
+            return (GeminiProviderClient) ctor.newInstance(args);
+        } catch (Exception e) {
+            throw new RuntimeException("newClientForParsing failed", e);
+        }
+    }
+
+    private static Object primitiveDefault(Class<?> t) {
+        if (t == boolean.class) return false;
+        if (t == byte.class) return (byte) 0;
+        if (t == short.class) return (short) 0;
+        if (t == int.class) return 0;
+        if (t == long.class) return 0L;
+        if (t == float.class) return 0f;
+        if (t == double.class) return 0d;
+        if (t == char.class) return (char) 0;
+        return 0;
     }
 
     // ========= tests =========

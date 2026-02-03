@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.mapper;
 
-import com.calai.backend.foodlog.dto.ClientAction;
+import com.calai.backend.foodlog.model.ClientAction;
 import com.calai.backend.foodlog.task.FoodLogWarning;
 import org.springframework.stereotype.Service;
 

@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.dto.FoodLogStatus;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;

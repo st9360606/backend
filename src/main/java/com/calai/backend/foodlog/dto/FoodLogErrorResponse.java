@@ -8,5 +8,24 @@ public record FoodLogErrorResponse(
         String message,
         String requestId,
         String clientAction,
-        Integer retryAfterSec
-) {}
+        Integer retryAfterSec,
+        // v1.2 擴充（Step 8 前端倒數會用）
+        String nextAllowedAtUtc,
+        Integer cooldownSeconds,
+        Integer cooldownLevel,
+        String cooldownReason,
+        String suggestedTier
+) {
+    public FoodLogErrorResponse(
+            String code,
+            String message,
+            String requestId,
+            String clientAction,
+            Integer retryAfterSec
+    ) {
+        this(code, message, requestId, clientAction, retryAfterSec,
+                null, null, null, null, null);
+    }
+}
+
+

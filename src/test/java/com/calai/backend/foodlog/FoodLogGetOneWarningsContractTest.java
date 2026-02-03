@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.dto.FoodLogStatus;
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
 import com.calai.backend.users.user.entity.User;

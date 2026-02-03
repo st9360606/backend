@@ -3,7 +3,7 @@ package com.calai.backend.accountdelete.worker;
 import com.calai.backend.accountdelete.config.AccountDeletionWorkerProperties;
 import com.calai.backend.accountdelete.entity.AccountDeletionRequestEntity;
 import com.calai.backend.accountdelete.repo.AccountDeletionRequestRepository;
-import com.calai.backend.foodlog.dto.FoodLogStatus;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;

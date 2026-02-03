@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.task;
 
-import com.calai.backend.foodlog.dto.FoodLogStatus;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;

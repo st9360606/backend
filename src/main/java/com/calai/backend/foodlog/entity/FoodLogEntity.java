@@ -1,8 +1,8 @@
 package com.calai.backend.foodlog.entity;
 
 
-import com.calai.backend.foodlog.dto.FoodLogStatus;
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.Getter;

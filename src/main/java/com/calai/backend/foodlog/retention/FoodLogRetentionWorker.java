@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.retention;
 
-import com.calai.backend.foodlog.dto.FoodLogStatus;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;

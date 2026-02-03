@@ -1,17 +1,21 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.dto.FoodLogStatus;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
+import com.calai.backend.foodlog.model.ClientAction;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
-import com.calai.backend.foodlog.service.*;
+import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.IdempotencyService;
+import com.calai.backend.foodlog.service.ImageBlobService;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,16 +34,12 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock FoodLogRepository repo;
     @Mock FoodLogTaskRepository taskRepo;
     @Mock StorageService storage;
-
-    @Mock QuotaService quota;
+    @Mock AiQuotaEngine aiQuota;
     @Mock IdempotencyService idem;
     @Mock ImageBlobService imageBlobService;
     @Mock UserInFlightLimiter inFlight;
     @Mock UserRateLimiter rateLimiter;
-
     @Mock EffectivePostProcessor postProcessor;
-
-    // ✅ 新增：ClientActionMapper
     @Mock ClientActionMapper clientActionMapper;
 
     private FoodLogService service;
@@ -49,7 +49,7 @@ class FoodLogServiceTaskVisibilityTest {
         service = new FoodLogService(
                 repo, taskRepo, storage,
                 new ObjectMapper(),
-                quota, idem, imageBlobService,
+                aiQuota, idem, imageBlobService,
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper
@@ -82,7 +82,7 @@ class FoodLogServiceTaskVisibilityTest {
         assertEquals("task-1", env.task().taskId());
 
         verify(taskRepo, times(1)).findByFoodLogId("log-1");
-        verifyNoInteractions(quota);
+        verifyNoInteractions(aiQuota);
     }
 
     @Test
@@ -102,7 +102,7 @@ class FoodLogServiceTaskVisibilityTest {
 
         assertNull(env.task());
         verify(taskRepo, never()).findByFoodLogId(anyString());
-        verifyNoInteractions(quota);
+        verifyNoInteractions(aiQuota);
     }
 
     @Test
@@ -127,9 +127,8 @@ class FoodLogServiceTaskVisibilityTest {
         when(repo.findByIdAndUserId("log-3", 1L)).thenReturn(Optional.of(e));
         when(taskRepo.findByFoodLogId("log-3")).thenReturn(Optional.of(t));
 
-        // ✅ 新增：stub ClientActionMapper
         when(clientActionMapper.fromErrorCode("PROVIDER_FAILED"))
-                .thenReturn(com.calai.backend.foodlog.dto.ClientAction.RETRY_LATER);
+                .thenReturn(ClientAction.RETRY_LATER);
 
         FoodLogEnvelope env = service.getOne(1L, "log-3", "rid-3");
 
@@ -139,7 +138,6 @@ class FoodLogServiceTaskVisibilityTest {
         assertEquals("PROVIDER_FAILED", env.error().errorCode());
 
         verify(taskRepo, times(1)).findByFoodLogId("log-3");
-        verifyNoInteractions(quota);
+        verifyNoInteractions(aiQuota);
     }
-
 }

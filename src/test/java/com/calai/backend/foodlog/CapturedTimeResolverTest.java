@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import org.junit.jupiter.api.Test;
 

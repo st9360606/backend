@@ -4,8 +4,8 @@ import com.calai.backend.accountdelete.entity.AccountDeletionRequestEntity;
 import com.calai.backend.accountdelete.repo.AccountDeletionRequestRepository;
 import com.calai.backend.accountdelete.service.AccountDeletionService;
 import com.calai.backend.accountdelete.worker.AccountDeletionWorker;
-import com.calai.backend.foodlog.dto.FoodLogStatus;
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
@@ -18,7 +18,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;

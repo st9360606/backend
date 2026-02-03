@@ -1,9 +1,9 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.dto.FoodLogFieldKey;
+import com.calai.backend.foodlog.model.FoodLogFieldKey;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
-import com.calai.backend.foodlog.dto.FoodLogStatus;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogOverrideEntity;
 import com.calai.backend.foodlog.repo.FoodLogOverrideRepository;

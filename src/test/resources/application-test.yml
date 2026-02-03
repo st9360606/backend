@@ -45,6 +45,22 @@ server:
   port: 0
 
 app:
+  ai:
+    modelTiers:
+      MODEL_TIER_HIGH:
+        VISION:
+          provider: GEMINI
+          modelId: "gemini-3-flash-preview"
+        TEXT:
+          provider: GEMINI
+          modelId: "gemini-3-flash-preview"
+      MODEL_TIER_LOW:
+        VISION:
+          provider: GEMINI
+          modelId: "gemini-2.5-flash-lite"
+        TEXT:
+          provider: GEMINI
+          modelId: "gemini-2.5-flash-lite"
   google:
     web-client-id: "test-dummy"
     play:

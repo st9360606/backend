@@ -4,6 +4,7 @@ import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.controller.FoodLogController;
 import com.calai.backend.foodlog.controller.FoodLogImageController;
 import com.calai.backend.foodlog.dto.FoodLogErrorResponse;
+import com.calai.backend.foodlog.quota.web.CooldownActiveException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -49,6 +50,24 @@ public class FoodLogExceptionAdvice {
 
         return ResponseEntity.status(status)
                 .body(err(code, e, req)); // ✅ 補齊 5 欄位
+    }
+
+    @ExceptionHandler(CooldownActiveException.class)
+    public ResponseEntity<FoodLogErrorResponse> handleCooldown(CooldownActiveException e, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.cooldownSeconds()))
+                .body(new FoodLogErrorResponse(
+                        "COOLDOWN_ACTIVE",
+                        safeMsg(e),
+                        rid(req),
+                        "RETRY_LATER",
+                        e.cooldownSeconds(),
+                        e.nextAllowedAtUtc().toString(),
+                        e.cooldownSeconds(),
+                        e.cooldownLevel(),
+                        e.cooldownReason().name(),
+                        "MODEL_TIER_LOW"
+                ));
     }
 
     @ExceptionHandler(IllegalStateException.class)

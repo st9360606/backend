@@ -1,8 +1,8 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.dto.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.never;
 class FoodLogTaskWorkerTest {
 
     @Test
-    void deleted_log_should_cancel_without_calling_provider() throws Exception {
+    void deleted_log_should_cancel_without_calling_provider() {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
@@ -47,7 +47,6 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log1"))
                 .thenReturn(log);
 
-        // ✅ DELETED 會在 pick 前就 continue
         FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
         worker.runOnce();
 
@@ -55,7 +54,7 @@ class FoodLogTaskWorkerTest {
 
         Mockito.verify(router, never()).pick(any());
         Mockito.verify(router, never()).pickStrict(any());
-        Mockito.verify(postProcessor, never()).apply(any(ObjectNode.class), anyString());
+        Mockito.verifyNoInteractions(postProcessor);
     }
 
     @Test
@@ -75,6 +74,7 @@ class FoodLogTaskWorkerTest {
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
         log.setStatus(FoodLogStatus.PENDING);
+        log.setMethod("PHOTO"); // ✅ 讓 worker 的 method-aware 流程一致
         log.setImageObjectKey("user-1/food-log/log2/original.jpg");
 
         Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
@@ -82,14 +82,9 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log2"))
                 .thenReturn(log);
 
-        // ✅ worker 可能用 pick 或 pickStrict，兩個都 stub
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
 
-        // ✅ 避免 providerCode() 回 null 造成流程炸掉
-        Mockito.when(provider.providerCode()).thenReturn("GEMINI");
-
-        // ✅ provider.process 丟錯（會被你的 error mapping 處理）
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("boom"));
 
@@ -101,8 +96,7 @@ class FoodLogTaskWorkerTest {
         assertEquals(1, task.getAttempts());
         assertEquals(FoodLogStatus.FAILED, log.getStatus());
 
-        // 失敗時不該做後處理
-        Mockito.verify(postProcessor, never()).apply(any(ObjectNode.class), anyString());
+        Mockito.verifyNoInteractions(postProcessor);
     }
 
     @Test
@@ -123,6 +117,7 @@ class FoodLogTaskWorkerTest {
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log3");
         log.setStatus(FoodLogStatus.PENDING);
+        log.setMethod("PHOTO"); // ✅ 一致性
         log.setImageObjectKey("user-1/food-log/log3/original.jpg");
 
         Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
@@ -130,12 +125,8 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log3"))
                 .thenReturn(log);
 
-        // ✅ worker 可能用 pick 或 pickStrict，兩個都 stub
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
-
-        // ✅ 避免 providerCode() 回 null
-        Mockito.when(provider.providerCode()).thenReturn("GEMINI");
 
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("always fail"));
@@ -147,10 +138,9 @@ class FoodLogTaskWorkerTest {
         assertNull(task.getNextRetryAtUtc());
         assertEquals(TaskRetryPolicy.MAX_ATTEMPTS, task.getAttempts());
 
-        // ✅ 依你現在的 worker 實作：達上限後會把 log lastErrorCode 設成 PROVIDER_GIVE_UP
         assertEquals("PROVIDER_GIVE_UP", log.getLastErrorCode());
 
-        Mockito.verify(postProcessor, never()).apply(any(ObjectNode.class), anyString());
+        Mockito.verifyNoInteractions(postProcessor);
     }
 
     @Test
@@ -170,6 +160,7 @@ class FoodLogTaskWorkerTest {
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log4");
         log.setStatus(FoodLogStatus.PENDING);
+        log.setMethod("PHOTO"); // ✅ 很重要：worker 會把 method 傳進 postProcessor.apply(..., method)
         log.setImageObjectKey("user-1/food-log/log4/original.jpg");
 
         Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
@@ -177,12 +168,8 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log4"))
                 .thenReturn(log);
 
-        // ✅ worker 可能用 pick 或 pickStrict，兩個都 stub
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
-
-        // ✅ 很重要：避免 worker 取 providerCode() 取到 null
-        Mockito.when(provider.providerCode()).thenReturn("GEMINI");
 
         ObjectMapper om = new ObjectMapper();
         ObjectNode eff = (ObjectNode) om.readTree("""
@@ -197,8 +184,8 @@ class FoodLogTaskWorkerTest {
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenReturn(new ProviderClient.ProviderResult(eff, "GEMINI"));
 
-        // ✅ 後處理：這裡簡化直接回傳原 eff
-        Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI")))
+        // ✅ 關鍵修正：stub 三參數版本（worker 用的是 apply(eff, provider, method)）
+        Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO")))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
@@ -209,6 +196,7 @@ class FoodLogTaskWorkerTest {
         assertNotNull(log.getEffective());
         assertEquals("GEMINI", log.getProvider());
 
-        Mockito.verify(postProcessor, Mockito.times(1)).apply(any(ObjectNode.class), eq("GEMINI"));
+        Mockito.verify(postProcessor, Mockito.times(1))
+                .apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO"));
     }
 }

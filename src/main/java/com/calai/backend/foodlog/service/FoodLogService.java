@@ -1,12 +1,15 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.dto.FoodLogStatus;
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.image.ImageSniffer;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
+import com.calai.backend.foodlog.model.ClientAction;
+import com.calai.backend.foodlog.quota.model.ModelTier;
+import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
@@ -53,7 +56,7 @@ public class FoodLogService {
     private final FoodLogTaskRepository taskRepo;
     private final StorageService storage;
     private final ObjectMapper om; // 目前留著，之後 provider 會用到
-    private final QuotaService quota;
+    private final AiQuotaEngine aiQuota;
     private final IdempotencyService idem;
     private final ImageBlobService blobService;
     private final UserInFlightLimiter inFlight;
@@ -143,7 +146,9 @@ public class FoodLogService {
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    quota.consumeAiOrThrow(userId, tz, serverNow);
+                    AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, serverNow);
+                    // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
+                    e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(defaultProvider());
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
@@ -286,7 +291,9 @@ public class FoodLogService {
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    quota.consumeAiOrThrow(userId, tz, serverNow);
+                    AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, serverNow);
+                    // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
+                    e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(defaultProvider());
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
@@ -425,7 +432,9 @@ public class FoodLogService {
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
                     // ✅ 未命中：扣 AI quota，provider 固定 GEMINI
-                    quota.consumeAiOrThrow(userId, tz, serverNow);
+                    AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, serverNow);
+                    // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
+                    e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(LABEL_PROVIDER);
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
@@ -646,7 +655,7 @@ public class FoodLogService {
             }
 
             String action = java.util.Optional.ofNullable(clientActionMapper.fromErrorCode(e.getLastErrorCode()))
-                    .orElse(com.calai.backend.foodlog.dto.ClientAction.RETRY_LATER)
+                    .orElse(ClientAction.RETRY_LATER)
                     .name();
 
             err = new FoodLogEnvelope.ApiError(
@@ -673,7 +682,7 @@ public class FoodLogService {
                 // UI 看到這個就顯示「請把淨重/內容量一起拍進來」
                 err = new FoodLogEnvelope.ApiError(
                         "SERVING_SIZE_UNKNOWN",
-                        com.calai.backend.foodlog.dto.ClientAction.RETAKE_PHOTO.name(),
+                        ClientAction.RETAKE_PHOTO.name(),
                         null
                 );
             }
@@ -728,9 +737,16 @@ public class FoodLogService {
             throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
         }
 
-        ZoneId tz = ZoneId.of(log.getCapturedTz());
-        quota.consumeAiOrThrow(userId, tz, now);
+        // ✅ 用原本 capturedTz（或你也可以改用 clientTz，但 retry 通常沿用原 log）
+        ZoneId tz = parseTzOrUtc(log.getCapturedTz());
 
+        // ✅ Step 1：retry 也算一次 Operation（會再打模型）
+        AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, now);
+
+        // ✅ 先用 degradeLevel 反映 tier，方便你觀測（Step 2 才會真正選模型）
+        log.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
+
+        // ✅ 重排 task
         Optional<FoodLogTaskEntity> opt = taskRepo.findByFoodLogIdForUpdate(foodLogId);
         FoodLogTaskEntity task = opt.orElseGet(() -> {
             FoodLogTaskEntity t = new FoodLogTaskEntity();
@@ -749,6 +765,7 @@ public class FoodLogService {
         task.setLastErrorMessage(null);
         taskRepo.save(task);
 
+        // ✅ reset log
         log.setStatus(FoodLogStatus.PENDING);
         log.setLastErrorCode(null);
         log.setLastErrorMessage(null);

@@ -1,7 +1,10 @@
 package com.calai.backend.foodlog.provider;
 
+import com.calai.backend.foodlog.config.AiModelRouter;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
+import com.calai.backend.foodlog.model.ModelMode;
+import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.FoodLogWarning;
 import com.calai.backend.foodlog.task.ProviderClient;
@@ -76,12 +79,15 @@ public class GeminiProviderClient implements ProviderClient {
     private final GeminiProperties props;
     private final ObjectMapper om;
     private final ProviderTelemetry telemetry;
+    private final AiModelRouter modelRouter;
 
-    public GeminiProviderClient(RestClient http, GeminiProperties props, ObjectMapper om, ProviderTelemetry telemetry) {
+    public GeminiProviderClient(RestClient http, GeminiProperties props, ObjectMapper om,
+                                ProviderTelemetry telemetry, AiModelRouter modelRouter) {
         this.http = http;
         this.props = props;
         this.om = om;
         this.telemetry = telemetry;
+        this.modelRouter = modelRouter;
     }
 
     @Override
@@ -90,6 +96,7 @@ public class GeminiProviderClient implements ProviderClient {
     @Override
     public ProviderResult process(FoodLogEntity entity, StorageService storage) throws Exception {
         long t0 = System.nanoTime();
+        String modelId = null;
 
         try {
             byte[] bytes;
@@ -103,11 +110,12 @@ public class GeminiProviderClient implements ProviderClient {
                     : entity.getImageContentType();
 
             final boolean isLabel = "LABEL".equalsIgnoreCase(entity.getMethod());
+            modelId = resolveModelIdVision(entity);
             final String promptMain   = isLabel ? USER_PROMPT_LABEL_MAIN   : USER_PROMPT_MAIN;
             final String promptRepair = isLabel ? USER_PROMPT_LABEL_REPAIR : USER_PROMPT_REPAIR;
 
             // ===== 1) main call =====
-            CallResult r1 = callAndExtract(bytes, mime, promptMain, isLabel, entity.getId());
+            CallResult r1 = callAndExtract(bytes, mime, promptMain, modelId, isLabel, entity.getId());
             Tok tok = r1.tok;
 
             JsonNode parsed1 = tryParseJson(r1.text);
@@ -124,7 +132,7 @@ public class GeminiProviderClient implements ProviderClient {
                 if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
                     ObjectNode effective = normalizeToEffective(fromTruncated);
                     applyWholePackageScalingIfNeeded(fromTruncated, effective);
-                    telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                     return new ProviderResult(effective, "GEMINI");
                 }
             }
@@ -133,7 +141,7 @@ public class GeminiProviderClient implements ProviderClient {
             if (isLabel && parsed1 != null && hasWarning(parsed1, FoodLogWarning.NO_LABEL_DETECTED.name())) {
                 ObjectNode effective = normalizeToEffective(parsed1);
                 applyWholePackageScalingIfNeeded(parsed1, effective);
-                telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                 return new ProviderResult(effective, "GEMINI");
             }
 
@@ -141,7 +149,7 @@ public class GeminiProviderClient implements ProviderClient {
             if (!isLabel) {
                 if (hasAnyNutrientValue(parsed1)) {
                     ObjectNode effective = normalizeToEffective(parsed1);
-                    telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                     return new ProviderResult(effective, "GEMINI");
                 }
 
@@ -149,7 +157,7 @@ public class GeminiProviderClient implements ProviderClient {
                 if (isNoFoodLikely(r1.text)) {
                     ObjectNode fb = fallbackNoFoodDetected();
                     ObjectNode effective = normalizeToEffective(fb);
-                    telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                     return new ProviderResult(effective, "GEMINI");
                 }
 
@@ -167,7 +175,7 @@ public class GeminiProviderClient implements ProviderClient {
                             if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
                                 ObjectNode effective = normalizeToEffective(fromTruncated);
                                 applyWholePackageScalingIfNeeded(fromTruncated, effective);
-                                telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                                telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                                 return new ProviderResult(effective, "GEMINI");
                             }
                         }
@@ -175,7 +183,7 @@ public class GeminiProviderClient implements ProviderClient {
                     } else {
                         ObjectNode effective = normalizeToEffective(parsed1);
                         applyWholePackageScalingIfNeeded(parsed1, effective);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                 } else {
@@ -192,7 +200,7 @@ public class GeminiProviderClient implements ProviderClient {
                     if (fromBrokenJson != null) {
                         ObjectNode effective = normalizeToEffective(fromBrokenJson);
                         applyWholePackageScalingIfNeeded(fromBrokenJson, effective);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
 
@@ -201,7 +209,7 @@ public class GeminiProviderClient implements ProviderClient {
                     if (fromText != null) {
                         ObjectNode effective = normalizeToEffective(fromText);
                         applyWholePackageScalingIfNeeded(fromText, effective);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                 }
@@ -210,7 +218,7 @@ public class GeminiProviderClient implements ProviderClient {
                 if (isNoLabelLikely(r1.text)) {
                     ObjectNode fb = fallbackNoLabelDetected();
                     ObjectNode effective = normalizeToEffective(fb);
-                    telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                     return new ProviderResult(effective, "GEMINI");
                 }
             }
@@ -221,7 +229,7 @@ public class GeminiProviderClient implements ProviderClient {
 
             // ===== 2) repair loop（Photo/Album + LABEL(最多1次)）=====
             for (int i = 1; i <= maxRepair; i++) {
-                CallResult rn = callAndExtract(bytes, mime, promptRepair, isLabel, entity.getId());
+                CallResult rn = callAndExtract(bytes, mime, promptRepair, modelId, isLabel, entity.getId());
                 tok = Tok.mergePreferNew(tok, rn.tok);
                 lastText = rn.text;
 
@@ -235,7 +243,7 @@ public class GeminiProviderClient implements ProviderClient {
                     if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
                         ObjectNode effective = normalizeToEffective(fromTruncated);
                         applyWholePackageScalingIfNeeded(fromTruncated, effective);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                 }
@@ -243,7 +251,7 @@ public class GeminiProviderClient implements ProviderClient {
                 if (isLabel && parsedN != null && hasWarning(parsedN, FoodLogWarning.NO_LABEL_DETECTED.name())) {
                     ObjectNode effective = normalizeToEffective(parsedN);
                     applyWholePackageScalingIfNeeded(parsedN, effective);
-                    telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                     return new ProviderResult(effective, "GEMINI");
                 }
 
@@ -258,7 +266,7 @@ public class GeminiProviderClient implements ProviderClient {
                             if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
                                 ObjectNode effective = normalizeToEffective(fromTruncated);
                                 applyWholePackageScalingIfNeeded(fromTruncated, effective);
-                                telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                                telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                                 return new ProviderResult(effective, "GEMINI");
                             }
                         }
@@ -266,7 +274,7 @@ public class GeminiProviderClient implements ProviderClient {
                     } else {
                         ObjectNode effective = normalizeToEffective(parsedN);
                         if (isLabel) applyWholePackageScalingIfNeeded(parsedN, effective);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                 }
@@ -277,13 +285,13 @@ public class GeminiProviderClient implements ProviderClient {
                     if (fromText != null) {
                         ObjectNode effective = normalizeToEffective(fromText);
                         applyWholePackageScalingIfNeeded(fromText, effective);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                     if (isNoLabelLikely(rn.text)) {
                         ObjectNode fb = fallbackNoLabelDetected();
                         ObjectNode effective = normalizeToEffective(fb);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                 } else {
@@ -291,7 +299,7 @@ public class GeminiProviderClient implements ProviderClient {
                     if (isNoFoodLikely(rn.text)) {
                         ObjectNode fb = fallbackNoFoodDetected();
                         ObjectNode effective = normalizeToEffective(fb);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                 }
@@ -306,7 +314,7 @@ public class GeminiProviderClient implements ProviderClient {
                     if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
                         ObjectNode effective = normalizeToEffective(fromTruncated);
                         applyWholePackageScalingIfNeeded(fromTruncated, effective);
-                        telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                         return new ProviderResult(effective, "GEMINI");
                     }
                 }
@@ -317,12 +325,12 @@ public class GeminiProviderClient implements ProviderClient {
 
             ObjectNode fbUnknown = fallbackUnknownFoodFromBrokenText(lastText);
             ObjectNode effective = normalizeToEffective(fbUnknown);
-            telemetry.ok("GEMINI", entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+            telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
             return new ProviderResult(effective, "GEMINI");
 
         } catch (Exception e) {
             ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(e);
-            telemetry.fail("GEMINI", entity.getId(), msSince(t0), mapped.code(), mapped.retryAfterSec());
+            telemetry.fail("GEMINI", modelId, entity.getId(), msSince(t0), mapped.code(), mapped.retryAfterSec());
             throw e;
         }
     }
@@ -946,21 +954,20 @@ public class GeminiProviderClient implements ProviderClient {
     }
 
     // ===== call Gemini =====
-    private CallResult callAndExtract(byte[] imageBytes, String mimeType, String userPrompt, boolean isLabel, String foodLogIdForLog) {
-        JsonNode resp = callGenerateContent(imageBytes, mimeType, userPrompt, isLabel);
+    private CallResult callAndExtract(byte[] imageBytes, String mimeType, String userPrompt, String modelId, boolean isLabel, String foodLogIdForLog) {
+        JsonNode resp = callGenerateContent(imageBytes, mimeType, userPrompt, modelId, isLabel);
         Tok tok = extractUsage(resp);
-
         String text = extractJoinedTextOrNull(resp);
         if (text == null) text = "";
-
-        log.debug("geminiTextPreview foodLogId={} preview={}", foodLogIdForLog, safeOneLine200(text));
+        log.debug("geminiTextPreview foodLogId={} modelId={} preview={}",
+                foodLogIdForLog, modelId, safeOneLine200(text));
         return new CallResult(tok, text);
     }
 
-    private JsonNode callGenerateContent(byte[] imageBytes, String mimeType, String userPrompt, boolean isLabel) {
+    private JsonNode callGenerateContent(byte[] imageBytes, String mimeType, String userPrompt, String modelId, boolean isLabel) {
         ObjectNode req = buildRequest(imageBytes, mimeType, userPrompt, isLabel);
         return http.post()
-                .uri("/v1beta/models/{model}:generateContent", props.getModel())
+                .uri("/v1beta/models/{model}:generateContent", modelId)   // ✅ Step 2：用 router 解析後的 modelId
                 .header("x-goog-api-key", requireApiKey())
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
@@ -1301,6 +1308,22 @@ public class GeminiProviderClient implements ProviderClient {
         }
 
         to.put(key, d);
+    }
+
+    // ✅ Step 2：依 degradeLevel 決定 tier（DG-0=HIGH；其他=LOW）
+    private static ModelTier resolveTierFromDegradeLevel(String degradeLevel) {
+        if (degradeLevel == null) return ModelTier.MODEL_TIER_LOW;
+        String v = degradeLevel.trim().toUpperCase(Locale.ROOT);
+        return v.startsWith("DG-0")
+                ? ModelTier.MODEL_TIER_HIGH
+                : ModelTier.MODEL_TIER_LOW;
+    }
+
+    // ✅ Step 2：從 router 解析出 modelId（目前你送圖，所以 mode 固定 VISION）
+    private String resolveModelIdVision(FoodLogEntity entity) {
+        ModelTier tier = resolveTierFromDegradeLevel(entity.getDegradeLevel());
+        AiModelRouter.Resolved r = modelRouter.resolveOrThrow(tier, ModelMode.VISION);
+        return r.modelId();
     }
 
     // ===== misc helpers =====

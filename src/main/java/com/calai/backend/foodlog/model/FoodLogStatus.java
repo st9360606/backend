@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.dto;
+package com.calai.backend.foodlog.model;
 
 /**
  * PENDING：AI 還在跑（或排隊）

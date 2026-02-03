@@ -2,8 +2,8 @@ package com.calai.backend.Integration_testing;
 
 import com.calai.backend.Integration_testing.config.TestAuthConfig;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.dto.FoodLogStatus;
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
@@ -13,7 +13,6 @@ import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.FoodLogTaskWorker;
 import com.calai.backend.foodlog.task.ProviderClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

@@ -1,8 +1,8 @@
 package com.calai.backend.Integration_testing;
 
 import com.calai.backend.Integration_testing.config.TestAuthConfig;
+import com.calai.backend.foodlog.quota.repo.UserAiQuotaStateRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
-import com.calai.backend.foodlog.repo.UsageCounterRepository;
 import com.calai.backend.foodlog.task.FoodLogTaskWorker;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,7 +17,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.ZoneId;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,7 +32,8 @@ public class FoodLogDedupQuotaTest {
     @Autowired ObjectMapper om;
     @Autowired FoodLogTaskWorker worker;
 
-    @Autowired UsageCounterRepository usageRepo;
+    @Autowired
+    UserAiQuotaStateRepository quotaStateRepo;
     @Autowired FoodLogTaskRepository taskRepo;
 
     @Test
@@ -41,18 +41,17 @@ public class FoodLogDedupQuotaTest {
         Long userId = 1L;
         ZoneId tz = ZoneId.of("Asia/Taipei");
 
-        // ✅ Quota 用 serverNow + tz 算 local_date，所以這裡用「今天」就對
-        LocalDate dayKey = LocalDate.now(tz);
+        // ✅ 讓測試穩定：清掉 quota state（避免前一個測試留下計數）
+        quotaStateRepo.deleteById(userId);
 
         // ✅ 產生「本次測試唯一」的 bytes（避免撞到舊資料）
         // 但同一個測試內兩次上傳要用同一份 bytes（才能 dedup）
         byte[] jpg = randomJpegLikeBytes(128);
 
-        // 先記錄 before（避免 DB 已有值時斷言錯）
-        int beforeUsed = safeUsed(usageRepo.findUsedCount(userId, dayKey));
+        int beforeUsed = usedTotal(userId);
 
         // ========== 第一次：PHOTO（預期：PENDING + 扣 quota + 建 task）==========
-        String deviceUtcStr = Instant.now().minusSeconds(60).toString(); // ✅ 永遠在 30 天內，避免 suspect fallback
+        String deviceUtcStr = Instant.now().minusSeconds(60).toString(); // ✅ 30 天內，避免 suspect fallback
         MockMultipartFile file1 = new MockMultipartFile("file", "demo.jpg", "image/jpeg", jpg);
         MockMultipartFile devicePart = new MockMultipartFile(
                 "deviceCapturedAtUtc", "", "text/plain",
@@ -69,11 +68,11 @@ public class FoodLogDedupQuotaTest {
         JsonNode j1 = om.readTree(r1);
         String id1 = j1.path("foodLogId").asText();
         assertThat(id1).isNotBlank();
-        assertThat(j1.path("status").asText()).isEqualTo("PENDING"); // ✅ 現在應該穩定是 PENDING
+        assertThat(j1.path("status").asText()).isEqualTo("PENDING");
         assertThat(j1.path("task").isMissingNode()).isFalse();
 
-        int usedAfterFirst = safeUsed(usageRepo.findUsedCount(userId, dayKey));
-        assertThat(usedAfterFirst).isEqualTo(beforeUsed + 1); // ✅ 第一次應扣 1
+        int usedAfterFirst = usedTotal(userId);
+        assertThat(usedAfterFirst).isEqualTo(beforeUsed + 1); // ✅ 第一次應扣 1（現在看的是 user_ai_quota_state）
 
         // 讓 worker 把它跑完 → DRAFT
         worker.runOnce();
@@ -101,14 +100,25 @@ public class FoodLogDedupQuotaTest {
         assertThat(j2.path("nutritionResult").isNull()).isFalse();
         assertThat(j2.path("task").isMissingNode() || j2.path("task").isNull()).isTrue();
 
-        int usedAfterSecond = safeUsed(usageRepo.findUsedCount(userId, dayKey));
+        int usedAfterSecond = usedTotal(userId);
         assertThat(usedAfterSecond).isEqualTo(usedAfterFirst); // ✅ 第二次命中，不再扣
 
         // ✅ DB 層：第二筆不應該有 task row
+        // （若你的 dedup 設計是「回舊的 foodLogId」，那這條會失敗；但你目前規格/測試期待是「dedup 回新 log 但無 task」）
         assertThat(taskRepo.findByFoodLogId(id2)).isEmpty();
     }
 
-    private static int safeUsed(Integer v) {
+    /**
+     * ✅ 兼容 TRIAL / PAID：AiQuotaEngine 可能增加 daily 或 monthly
+     * 所以這裡用 dailyCount + monthlyCount 當總 used（適合這支測試的「增量」斷言）
+     */
+    private int usedTotal(Long userId) {
+        return quotaStateRepo.findById(userId)
+                .map(s -> safeInt(s.getDailyCount()) + safeInt(s.getMonthlyCount()))
+                .orElse(0);
+    }
+
+    private static int safeInt(Integer v) {
         return v == null ? 0 : v;
     }
 

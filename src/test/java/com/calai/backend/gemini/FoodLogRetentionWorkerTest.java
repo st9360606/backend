@@ -1,7 +1,7 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.dto.FoodLogStatus;
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.retention.FoodLogRetentionWorker;
@@ -18,7 +18,6 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

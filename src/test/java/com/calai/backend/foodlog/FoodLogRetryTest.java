@@ -1,16 +1,20 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.dto.FoodLogStatus;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
+import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
-import com.calai.backend.foodlog.service.*;
+import com.calai.backend.foodlog.service.IdempotencyService;
+import com.calai.backend.foodlog.service.ImageBlobService;
+import com.calai.backend.foodlog.service.FoodLogService;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -31,13 +35,15 @@ class FoodLogRetryTest {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         StorageService storage = Mockito.mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
-        QuotaService quota = Mockito.mock(QuotaService.class);
+
+        // ✅ 改成 AiQuotaEngine
+        AiQuotaEngine aiQuota = Mockito.mock(AiQuotaEngine.class);
+
         IdempotencyService idem = Mockito.mock(IdempotencyService.class);
         ImageBlobService imageBlobService = Mockito.mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
 
-        // ✅ 新增：PostProcessor / ClientActionMapper（建構子新增依賴）
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
 
@@ -61,10 +67,13 @@ class FoodLogRetryTest {
         Mockito.when(repo.findByIdAndUserId("log1", 1L)).thenReturn(Optional.of(log));
         Mockito.when(taskRepo.findByFoodLogId("log1")).thenReturn(Optional.of(task));
 
-        // ✅ 補上 clientActionMapper
+        // ✅ retry() 內會扣一次 Operation，所以要 stub Decision
+        Mockito.when(aiQuota.consumeOperationOrThrow(eq(1L), eq(ZoneId.of("Asia/Taipei")), any(Instant.class)))
+                .thenReturn(new AiQuotaEngine.Decision(ModelTier.MODEL_TIER_HIGH));
+
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
-                quota, idem, imageBlobService,
+                aiQuota, idem, imageBlobService,
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper
@@ -80,8 +89,9 @@ class FoodLogRetryTest {
         assertNull(task.getNextRetryAtUtc());
         assertEquals(0, task.getAttempts());
 
-        Mockito.verify(quota, Mockito.times(1))
-                .consumeAiOrThrow(eq(1L), eq(ZoneId.of("Asia/Taipei")), any(Instant.class));
+        // ✅ verify 改成 AiQuotaEngine
+        Mockito.verify(aiQuota, Mockito.times(1))
+                .consumeOperationOrThrow(eq(1L), eq(ZoneId.of("Asia/Taipei")), any(Instant.class));
     }
 
     @Test
@@ -90,7 +100,10 @@ class FoodLogRetryTest {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         StorageService storage = Mockito.mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
-        QuotaService quota = Mockito.mock(QuotaService.class);
+
+        // ✅ 改成 AiQuotaEngine
+        AiQuotaEngine aiQuota = Mockito.mock(AiQuotaEngine.class);
+
         IdempotencyService idem = Mockito.mock(IdempotencyService.class);
         ImageBlobService imageBlobService = Mockito.mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
@@ -108,7 +121,7 @@ class FoodLogRetryTest {
 
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
-                quota, idem, imageBlobService,
+                aiQuota, idem, imageBlobService,
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper
@@ -119,6 +132,7 @@ class FoodLogRetryTest {
 
         assertEquals("FOOD_LOG_NOT_RETRYABLE", ex.getMessage());
 
-        Mockito.verifyNoInteractions(quota);
+        // ✅ verifyNoInteractions 改成 aiQuota
+        Mockito.verifyNoInteractions(aiQuota);
     }
 }

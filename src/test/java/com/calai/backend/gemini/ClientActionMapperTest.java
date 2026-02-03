@@ -1,6 +1,6 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.dto.ClientAction;
+import com.calai.backend.foodlog.model.ClientAction;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import org.junit.jupiter.api.Test;
 

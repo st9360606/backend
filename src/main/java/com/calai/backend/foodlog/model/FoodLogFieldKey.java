@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.dto;
+package com.calai.backend.foodlog.model;
 
 import java.util.Locale;
 

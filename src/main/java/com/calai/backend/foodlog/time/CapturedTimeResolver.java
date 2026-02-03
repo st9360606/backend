@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.time;
 
-import com.calai.backend.foodlog.dto.TimeSource;
+import com.calai.backend.foodlog.model.TimeSource;
 
 import java.time.Duration;
 import java.time.Instant;

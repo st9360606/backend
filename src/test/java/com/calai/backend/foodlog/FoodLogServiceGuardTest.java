@@ -3,11 +3,14 @@ package com.calai.backend.foodlog;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
-import com.calai.backend.foodlog.service.*;
+import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.IdempotencyService;
+import com.calai.backend.foodlog.service.ImageBlobService;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +30,8 @@ class FoodLogServiceGuardTest {
         FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
         StorageService storage = mock(StorageService.class);
         ObjectMapper om = mock(ObjectMapper.class);
-        QuotaService quota = mock(QuotaService.class);
+
+        AiQuotaEngine aiQuota = mock(AiQuotaEngine.class);
         IdempotencyService idem = mock(IdempotencyService.class);
         ImageBlobService blobService = mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
@@ -38,7 +42,7 @@ class FoodLogServiceGuardTest {
 
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
-                quota, idem, blobService,
+                aiQuota, idem, blobService,
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper
