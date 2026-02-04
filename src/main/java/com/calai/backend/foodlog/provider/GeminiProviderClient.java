@@ -216,32 +216,31 @@ public class GeminiProviderClient implements ProviderClient {
                 }
             }
 
-            // ✅ LABEL 允許補 1 次 repair；Photo/Album 仍維持 max=1
-            final int maxRepair = isLabel ? MAX_LABEL_REPAIR_CALLS : MAX_UNKNOWN_FOOD_REPAIR_CALLS;
+            // ✅ Repair 改成 TEXT-ONLY：不再重送圖片（大幅省 tokens）
+            // LABEL：只有在「完全 parse 不出來」才做 text-only repair（避免 text-only 去猜營養）
+            final boolean allowTextRepair = (!isLabel) || (parsed1 == null && r1.text != null && !r1.text.isBlank());
+            final int maxRepair = allowTextRepair
+                    ? (isLabel ? MAX_LABEL_REPAIR_CALLS : MAX_UNKNOWN_FOOD_REPAIR_CALLS)
+                    : 0;
+
+            final String modelIdText = (maxRepair > 0) ? resolveModelIdText(entity) : null;
+
             String lastText = r1.text;
 
-            // ===== 2) repair loop =====
+            // ===== 2) repair loop (TEXT-ONLY) =====
             for (int i = 1; i <= maxRepair; i++) {
-                CallResult rn = callAndExtract(bytes, mime, promptRepair, modelId, isLabel, entity.getId());
+
+                String repairPromptText = buildTextOnlyRepairPrompt(isLabel, lastText);
+                CallResult rn = callAndExtractTextOnly(repairPromptText, modelIdText, entity.getId());
+
                 tok = Tok.mergePreferNew(tok, rn.tok);
                 lastText = rn.text;
 
-                JsonNode parsedN = (rn.functionArgs != null) ? rn.functionArgs : tryParseJson(rn.text);
+                JsonNode parsedN = tryParseJson(rn.text);
                 parsedN = unwrapRootObjectOrNull(parsedN);
 
-                // ✅ LABEL：每次都更新 best
+                // ✅ LABEL：每次都更新 best（僅修 JSON 的話通常不會補更多值，但能救回截斷/壞 JSON）
                 if (isLabel) best = best.consider(parsedN);
-
-                if (isLabel && parsedN == null && isJsonTruncated(rn.text)) {
-                    log.info("label_json_truncated_in_repair foodLogId={} attempt={}", entity.getId(), i);
-                    ObjectNode fromTruncated = tryFixTruncatedJson(rn.text);
-                    if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
-                        ObjectNode effective = normalizeToEffective(fromTruncated);
-                        applyWholePackageScalingIfNeeded(fromTruncated, effective);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
-                    }
-                }
 
                 if (isLabel && parsedN != null && hasWarning(parsedN, FoodLogWarning.NO_LABEL_DETECTED.name())) {
                     ObjectNode effective = normalizeToEffective(parsedN);
@@ -252,9 +251,9 @@ public class GeminiProviderClient implements ProviderClient {
 
                 if (hasAnyNutrientValue(parsedN)) {
                     if (isLabel && isLabelIncomplete(parsedN)) {
-                        log.warn("label_incomplete_after_repair foodLogId={} preview={}",
+                        log.warn("label_incomplete_after_text_repair foodLogId={} preview={}",
                                 entity.getId(), safeOneLine200(rn.text));
-                        // 不 return，讓 loop 結束後走 bad response
+                        // 不 return，讓 loop 結束後走 final fallback（best / partial）
                     } else {
                         ObjectNode effective = normalizeToEffective(parsedN);
                         if (isLabel) applyWholePackageScalingIfNeeded(parsedN, effective);
@@ -264,6 +263,7 @@ public class GeminiProviderClient implements ProviderClient {
                 }
 
                 if (isLabel) {
+                    // text-only repair 後仍可嘗試 plain-text salvage（保底）
                     ObjectNode fromText = tryExtractLabelFromPlainText(rn.text);
                     if (fromText != null) {
                         ObjectNode effective = normalizeToEffective(fromText);
@@ -278,6 +278,7 @@ public class GeminiProviderClient implements ProviderClient {
                         return new ProviderResult(effective, "GEMINI");
                     }
                 } else {
+                    // Photo/Album：no-food 永遠不重打 vision，text-only repair 也照樣接受 no-food
                     if (isNoFoodLikely(rn.text)) {
                         ObjectNode fb = fallbackNoFoodDetected();
                         ObjectNode effective = normalizeToEffective(fb);
@@ -407,8 +408,8 @@ public class GeminiProviderClient implements ProviderClient {
         // confidence: NUMBER|null
         props.set("confidence", sNumber(true));
 
-        // warnings: ARRAY of STRING enum (建議：永遠回 array，可空 [])
-        ObjectNode warnings = sArray(false, sEnumString(false, enumFoodLogWarnings()));
+        // warnings: ARRAY of STRING（✅ 移除 enum 清單，減少 prompt tokens）
+        ObjectNode warnings = sArray(false, sString(false));
         props.set("warnings", warnings);
 
         // labelMeta: LABEL 才要求（你現在 useFn 只在 LABEL）
@@ -535,6 +536,126 @@ public class GeminiProviderClient implements ProviderClient {
                 .body(req)
                 .retrieve()
                 .body(JsonNode.class);
+    }
+
+    // ==============================
+// ✅ TEXT-ONLY repair（不重送圖片）
+// ==============================
+
+    private String resolveModelIdText(FoodLogEntity entity) {
+        ModelTier tier = resolveTierFromDegradeLevel(entity.getDegradeLevel());
+        AiModelRouter.Resolved r = modelRouter.resolveOrThrow(tier, ModelMode.TEXT);
+        return r.modelId();
+    }
+
+    private CallResult callAndExtractTextOnly(String userPrompt, String modelId, String foodLogIdForLog) {
+        JsonNode resp;
+        try {
+            resp = callGenerateContentTextOnly(userPrompt, modelId);
+        } catch (RestClientResponseException re) {
+            ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(re);
+            ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(mapped.code());
+            if (reason != null) {
+                log.warn("gemini_refused_http(textOnly) foodLogId={} modelId={} reason={} code={}",
+                        foodLogIdForLog, modelId, reason, mapped.code());
+                throw new ModelRefusedException(reason, mapped.code());
+            }
+            throw re;
+        }
+
+        ProviderRefuseReason reason = GeminiRefusalDetector.detectOrNull(resp);
+        if (reason != null) {
+            String code = "PROVIDER_REFUSED_" + reason.name();
+            log.warn("gemini_refused(textOnly) foodLogId={} modelId={} reason={} code={}",
+                    foodLogIdForLog, modelId, reason, code);
+            throw new ModelRefusedException(reason, code);
+        }
+
+        Tok tok = extractUsage(resp);
+
+        String text = extractJoinedTextOrNull(resp);
+        if (text == null) text = "";
+
+        log.debug("geminiTextOnlyPreview foodLogId={} modelId={} preview={}",
+                foodLogIdForLog, modelId, safeOneLine200(text));
+
+        return new CallResult(tok, text, null);
+    }
+
+    private JsonNode callGenerateContentTextOnly(String userPrompt, String modelId) {
+        ObjectNode req = buildTextOnlyRequest(userPrompt);
+        return http.post()
+                .uri("/v1beta/models/{model}:generateContent", modelId)
+                .header("x-goog-api-key", requireApiKey())
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .body(req)
+                .retrieve()
+                .body(JsonNode.class);
+    }
+
+    private ObjectNode buildTextOnlyRequest(String userPrompt) {
+        ObjectNode root = om.createObjectNode();
+
+        ObjectNode sys = root.putObject("systemInstruction");
+        sys.putArray("parts").addObject().put("text",
+                "You are a JSON repair engine. Return ONLY ONE minified JSON object. No markdown. No extra text.");
+
+        ArrayNode contents = root.putArray("contents");
+        ObjectNode c0 = contents.addObject();
+        c0.put("role", "user");
+        c0.putArray("parts").addObject().put("text", userPrompt);
+
+        ObjectNode gen = root.putObject("generationConfig");
+        gen.put("responseMimeType", "application/json"); // ✅ 強制 JSON（很省）
+        gen.put("maxOutputTokens", 768);
+        gen.put("temperature", 0.0);
+
+        return root;
+    }
+
+    private static String buildTextOnlyRepairPrompt(boolean isLabel, String previousOutput) {
+        String prev = truncateForPrompt(previousOutput, 4000); // ✅ 防止 previousOutput 太肥吃爆 tokens
+
+        if (isLabel) {
+            // LABEL：text-only repair 只能「修 JSON」，不能猜 unseen nutrients
+            return """
+                Fix the PREVIOUS_OUTPUT into ONE valid minified JSON object that matches the schema.
+                Rules:
+                - Return ONLY JSON. No markdown. No extra keys.
+                - You MUST output ALL required keys:
+                  foodName, quantity{value,unit}, nutrients{kcal,protein,fat,carbs,fiber,sugar,sodium},
+                  confidence, warnings, labelMeta{servingsPerContainer,basis}
+                - If a nutrient is NOT present in PREVIOUS_OUTPUT, set it to null (do NOT guess).
+                - Keep 0 or 0.0 as 0.0 (do not convert to null).
+                - Do NOT re-analyze image; only repair/normalize JSON format.
+
+                PREVIOUS_OUTPUT:
+                %s
+                """.formatted(prev);
+        }
+
+        // Photo/Album：允許估算，但 repair 的目標仍是「把輸出修成合法 JSON」
+        return """
+            Fix the PREVIOUS_OUTPUT into ONE valid minified JSON object that matches the schema.
+            Rules:
+            - Return ONLY JSON. No markdown. No extra keys.
+            - You MUST output ALL required keys:
+              foodName, quantity{value,unit}, nutrients{kcal,protein,fat,carbs,fiber,sugar,sodium},
+              confidence, warnings
+            - If a key/value is missing or broken, set it to null (or reasonable defaults: quantity.value=1, unit="SERVING").
+            - Do NOT re-analyze image; only repair/normalize JSON format.
+
+            PREVIOUS_OUTPUT:
+            %s
+            """.formatted(prev);
+    }
+
+    private static String truncateForPrompt(String s, int maxChars) {
+        if (s == null) return "";
+        String t = s.trim();
+        if (t.length() <= maxChars) return t;
+        return t.substring(0, maxChars);
     }
 
     private ObjectNode buildRequest(byte[] imageBytes, String mimeType, String userPrompt, boolean isLabel) {
@@ -686,11 +807,7 @@ public class GeminiProviderClient implements ProviderClient {
         ObjectNode warnings = propsNode.putObject("warnings");
         warnings.put("type", "array");
         ObjectNode items = warnings.putObject("items");
-        items.put("type", "string");
-        ArrayNode wEnum = items.putArray("enum");
-        for (FoodLogWarning w : FoodLogWarning.values()) {
-            wEnum.add(w.name());
-        }
+        items.put("type", "string"); // ✅ 移除 enum 清單，減少 prompt tokens
 
         schema.putArray("required")
                 .add("foodName")
