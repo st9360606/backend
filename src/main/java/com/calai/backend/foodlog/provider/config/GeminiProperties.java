@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.provider;
+package com.calai.backend.foodlog.provider.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

@@ -140,7 +140,7 @@ public class FoodLogClientActionContractTest extends MySqlContainerBaseTest {
 
     @Test
     @WithMockUser(username = "test", roles = {"USER"})
-    void blocked_should_return_clientAction_retakePhoto() throws Exception {
+    void blocked_should_return_422_modelRefused() throws Exception {
         wm.resetAll();
         wm.stubFor(post(urlPathMatching("/v1beta/models/.*:generateContent"))
                 .willReturn(aResponse()
@@ -160,11 +160,18 @@ public class FoodLogClientActionContractTest extends MySqlContainerBaseTest {
 
         runWorkerUntilNotQueuedOrRunning(id, 10);
 
+        // ✅ worker 完成後：DB 會記錄拒答碼（你現在是 PROVIDER_REFUSED_SAFETY）
+        var log = logRepo.findById(id).orElseThrow();
+        assertThat(log.getStatus().name()).isEqualTo("FAILED");
+        assertThat(log.getLastErrorCode()).isEqualTo("PROVIDER_REFUSED_SAFETY");
+
+        // ✅ v1.2 新契約：Safety/Recitation -> HTTP 422 + MODEL_REFUSED
         mvc.perform(get("/api/v1/food-logs/{id}", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("FAILED"))
-                .andExpect(jsonPath("$.error.errorCode").value("PROVIDER_BLOCKED"))
-                .andExpect(jsonPath("$.error.clientAction").value("RETAKE_PHOTO"));
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errorCode").value("MODEL_REFUSED"))
+                .andExpect(jsonPath("$.refuseReason").value("SAFETY"))
+                .andExpect(jsonPath("$.userMessageKey").value("PLEASE_PHOTO_FOOD_ONLY"))
+                .andExpect(jsonPath("$.suggestedActions").isArray());
     }
 
     @Test

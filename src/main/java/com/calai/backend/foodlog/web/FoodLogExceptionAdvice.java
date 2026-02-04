@@ -4,6 +4,8 @@ import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.controller.FoodLogController;
 import com.calai.backend.foodlog.controller.FoodLogImageController;
 import com.calai.backend.foodlog.dto.FoodLogErrorResponse;
+import com.calai.backend.foodlog.dto.ModelRefusedResponse;
+import com.calai.backend.foodlog.model.ProviderRefuseReason;
 import com.calai.backend.foodlog.quota.web.CooldownActiveException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.io.FileNotFoundException;
+import java.util.List;
 
 @RestControllerAdvice(assignableTypes = {
         FoodLogController.class,
@@ -70,18 +73,50 @@ public class FoodLogExceptionAdvice {
                 ));
     }
 
+    /**
+     * ✅ 這裡改成 ResponseEntity<?>，因為「PROVIDER_REFUSED_*」要回 422 + ModelRefusedResponse
+     * 否則會遇到：Required ResponseEntity<FoodLogErrorResponse> but got ResponseEntity<ModelRefusedResponse>
+     */
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<FoodLogErrorResponse> handleIllegalState(IllegalStateException e, HttpServletRequest req) {
+    public ResponseEntity<?> handleIllegalState(IllegalStateException e, HttpServletRequest req) {
         String code = norm(e.getMessage(), "ILLEGAL_STATE");
+
+        // ✅ NEW：保險 - 若有人仍丟 IllegalStateException("PROVIDER_REFUSED_*")，也回 422
+        ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(code);
+        if (reason != null) {
+            return handleModelRefused(new ModelRefusedException(reason, code), req);
+        }
+
         HttpStatus status = switch (code) {
             case "IMAGE_OBJECT_KEY_MISSING" -> HttpStatus.CONFLICT;
             case "EMPTY_IMAGE" -> HttpStatus.BAD_REQUEST;
-            case "PROVIDER_NOT_AVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE; // 503 供應商不可用（嚴格模式用）
+            case "PROVIDER_NOT_AVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
 
         return ResponseEntity.status(status)
                 .body(err(code, e, req));
+    }
+
+    @ExceptionHandler(ModelRefusedException.class)
+    public ResponseEntity<ModelRefusedResponse> handleModelRefused(ModelRefusedException ex, HttpServletRequest req) {
+        String requestId = RequestIdFilter.getOrCreate(req);
+
+        String userMessageKey = switch (ex.reason()) {
+            case SAFETY, HARM_CATEGORY -> "PLEASE_PHOTO_FOOD_ONLY";
+            case RECITATION -> "CONTENT_NOT_SUPPORTED_TRY_FOOD_PHOTO";
+        };
+
+        //無法識別，請只拍攝食物（避免人臉/不雅內容/螢幕截圖）
+        ModelRefusedResponse body = new ModelRefusedResponse(
+                "MODEL_REFUSED",
+                ex.reason().name(),
+                userMessageKey,
+                "We couldn't process this image. Please take a photo of food only (avoid faces, explicit content, or screenshots).",
+                List.of("RETRY_WITH_FOOD_ONLY", "TRY_LABEL", "TRY_BARCODE"),
+                requestId
+        );
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
     }
 
     @ExceptionHandler(RequestInProgressException.class)

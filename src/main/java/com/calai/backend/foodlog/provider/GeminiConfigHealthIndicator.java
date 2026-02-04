@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.provider;
 
+import com.calai.backend.foodlog.provider.config.GeminiProperties;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

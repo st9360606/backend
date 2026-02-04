@@ -1,8 +1,9 @@
-package com.calai.backend.foodlog.provider;
+package com.calai.backend.foodlog.provider.config;
 
 import com.calai.backend.foodlog.config.AiModelRouter;
 import com.calai.backend.foodlog.config.AiModelTiersProperties;
 import com.calai.backend.foodlog.model.ModelMode;
+import com.calai.backend.foodlog.provider.GeminiProviderClient;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.task.ProviderClient;
 import com.calai.backend.foodlog.task.ProviderTelemetry;

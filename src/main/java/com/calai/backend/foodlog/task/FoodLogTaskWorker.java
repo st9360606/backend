@@ -254,6 +254,8 @@ public class FoodLogTaskWorker {
 
     private static boolean isNonRetryable(String code) {
         if (code == null || code.isBlank()) return false;
+        // SAFETY / RECITATION / HARM_CATEGORY 一律不重試
+        if (code.startsWith("PROVIDER_REFUSED_")) return true;
         return switch (code) {
             case "PROVIDER_NOT_CONFIGURED",
                  "PROVIDER_NOT_AVAILABLE",

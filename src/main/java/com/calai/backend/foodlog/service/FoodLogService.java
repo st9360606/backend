@@ -2,6 +2,7 @@ package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.ProviderRefuseReason;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
@@ -17,6 +18,7 @@ import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
+import com.calai.backend.foodlog.web.ModelRefusedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -545,8 +547,12 @@ public class FoodLogService {
         FoodLogEntity e = repo.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
 
-        FoodLogTaskEntity t = null;
+        // Safety/Recitation/Harm 一律回 422（不走 envelope 的 error 欄位）
+        ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(e.getLastErrorCode());
 
+        if (reason != null) {throw new ModelRefusedException(reason, e.getLastErrorMessage());}
+
+        FoodLogTaskEntity t = null;
         if (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED) {
             FoodLogTaskEntity tmp = taskRepo.findByFoodLogId(e.getId()).orElse(null);
 

@@ -156,8 +156,8 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
     @Test
     @Order(2)
     @WithMockUser(username = "test", roles = {"USER"})
-    void blocked_should_cancel_task_and_api_should_not_return_task() throws Exception {
-        // 1) Gemini mock：400 + body contains "safety" => PROVIDER_BLOCKED
+    void blocked_should_cancel_task_and_get_should_return_422_modelRefused() throws Exception {
+        // 1) Gemini mock：400 + body contains "safety" -> PROVIDER_REFUSED_SAFETY
         wm.resetAll();
         wm.stubFor(post(urlPathMatching("/v1beta/models/.*:generateContent"))
                 .willReturn(aResponse()
@@ -165,7 +165,7 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"error\":{\"message\":\"safety blocked\"}}")));
 
-        // 2) upload -> 必須是 PENDING + taskId exists（避免去重命中）
+        // 2) upload -> PENDING + taskId exists（避免 SHA256 去重命中）
         String resp1 = mvc.perform(multipart("/api/v1/food-logs/album")
                         .file(dummyJpg("blocked-" + System.nanoTime()))
                         .header("X-Client-Timezone", "Asia/Taipei"))
@@ -179,24 +179,24 @@ public class FoodLogRetryAfterContractTest extends MySqlContainerBaseTest {
         // 3) run worker until processed
         runWorkerUntilTaskLeavesQueued(id, 10);
 
-        // task：blocked 屬於 non-retryable => CANCELLED
+        // task：refused 屬於 non-retryable => CANCELLED（你原本就這樣做）
         var task = taskRepo.findByFoodLogId(id).orElseThrow();
         assertThat(task.getTaskStatus().name()).isEqualTo("CANCELLED");
-        assertThat(task.getLastErrorCode()).isEqualTo("PROVIDER_BLOCKED");
+        assertThat(task.getLastErrorCode()).isEqualTo("PROVIDER_REFUSED_SAFETY");
         assertThat(task.getNextRetryAtUtc()).isNull();
 
-        // log：FAILED + code
+        // log：FAILED + refused code
         var log = logRepo.findById(id).orElseThrow();
         assertThat(log.getStatus().name()).isEqualTo("FAILED");
-        assertThat(log.getLastErrorCode()).isEqualTo("PROVIDER_BLOCKED");
+        assertThat(log.getLastErrorCode()).isEqualTo("PROVIDER_REFUSED_SAFETY");
 
-        // 4) GET：FAILED + errorCode=PROVIDER_BLOCKED；task 不存在（因為 task=CANCELLED 不再 meaningful）
+        // 4) GET：v1.2 新契約 -> 422 MODEL_REFUSED（注意：回應 body 結構不是 $.status / $.error.*）
         mvc.perform(get("/api/v1/food-logs/{id}", id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("FAILED"))
-                .andExpect(jsonPath("$.error.errorCode").value("PROVIDER_BLOCKED"))
-                .andExpect(jsonPath("$.error.clientAction").value("RETAKE_PHOTO"))
-                .andExpect(jsonPath("$.error.retryAfterSec").doesNotExist())
-                .andExpect(jsonPath("$.task").doesNotExist());
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errorCode").value("MODEL_REFUSED"))
+                .andExpect(jsonPath("$.refuseReason").value("SAFETY"))
+                .andExpect(jsonPath("$.userMessageKey").value("PLEASE_PHOTO_FOOD_ONLY"))
+                .andExpect(jsonPath("$.suggestedActions").isArray())
+                .andExpect(jsonPath("$.requestId").exists());
     }
 }

@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.provider.GeminiProviderClient;
-import com.calai.backend.foodlog.provider.GeminiProperties;
+import com.calai.backend.foodlog.provider.config.GeminiProperties;
 import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
