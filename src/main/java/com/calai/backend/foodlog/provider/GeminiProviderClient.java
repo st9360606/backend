@@ -153,6 +153,15 @@ public class GeminiProviderClient implements ProviderClient {
                 return new ProviderResult(effective, "GEMINI");
             }
 
+            // ✅ LABEL：function args 存在但其實是空包彈 → 直接回 NO_LABEL_DETECTED
+            if (isLabel && parsed1 != null && isLabelEmptyArgs(parsed1)) {
+                ObjectNode fb = fallbackNoLabelDetected();
+                ObjectNode effective = normalizeToEffective(fb);
+                applyWholePackageScalingIfNeeded(fb, effective);
+                telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                return new ProviderResult(effective, "GEMINI");
+            }
+
             // ✅ Photo/Album：main call 只要有任何 nutrients 值就成功
             if (!isLabel) {
                 if (hasAnyNutrientValue(parsed1)) {
@@ -443,6 +452,21 @@ public class GeminiProviderClient implements ProviderClient {
         return java.util.Arrays.stream(FoodLogWarning.values())
                 .map(Enum::name)
                 .toList();
+    }
+
+    private static boolean isLabelEmptyArgs(JsonNode root) {
+        root = unwrapRootObjectOrNull(root);
+        if (root == null || !root.isObject()) return true;
+
+        // nutrients 全 null
+        if (!isAllNutrientsNull(root)) return false;
+
+        // confidence <= 0.1 或 null
+        Double conf = parseNumberNodeOrText(root.get("confidence"));
+        boolean veryLow = (conf == null || conf <= 0.1);
+
+        // 如果你希望更保守：veryLow 才視為 empty
+        return veryLow;
     }
 
     /** ===== helpers (Gemini Schema) ===== */
