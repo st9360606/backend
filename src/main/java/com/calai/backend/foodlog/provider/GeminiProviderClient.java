@@ -32,20 +32,25 @@ public class GeminiProviderClient implements ProviderClient {
     private static final int PREVIEW_LEN = 200;
     private static final String FN_EMIT_NUTRITION = "emitNutrition";
 
+    // ✅ Photo/Album 專用：包裝照也要能出結果
     private static final String USER_PROMPT_MAIN =
             "You are a food nutrition estimation engine. "
-            + "Analyze the image and return JSON strictly matching the schema. "
-            + "Always output ALL required keys. If unknown, set null. "
-            + "If the image contains a food item but you're uncertain, still ESTIMATE nutrition using typical values. "
-            + "If no food is detected, set warnings include NO_FOOD_DETECTED and set confidence <= 0.2. "
-            + "Output sodium in mg, macros in g.";
+            + "Analyze the image and return ONE minified JSON object only (no markdown, no extra text). "
+            + "The image may be product PACKAGING (front box) or the actual food. "
+            + "Important: A human hand, fingers, background shelves, glare are NON-FOOD context; do NOT treat them as no-food. "
+            + "Prefer reading printed text on the package (brand/product name, flavor, net weight). "
+            + "If you recognize the product name but cannot see a nutrition label, STILL estimate typical nutrition for ONE unit (use net weight if visible, e.g., 72g). "
+            + "If uncertain, output reasonable numbers but set confidence <= 0.35 and include LOW_CONFIDENCE warning. "
+            + "If truly no food/product is present, then use NO_FOOD_DETECTED with confidence <= 0.2. "
+            + "If foodName is not null/blank, you MUST provide numeric estimates for kcal, protein, fat, carbs (not null). "
+            + "Output sodium in mg, macros in g. Always output ALL required keys; unknown -> null.";
 
+    // ✅ repair：要求它「不要把 nutrients 留空」的態度更強硬（但仍不重送圖片）
     private static final String USER_PROMPT_REPAIR =
-            "Your previous response may have been truncated or invalid JSON. "
-            + "Re-run the analysis and output FULL valid JSON matching the schema. "
-            + "Return ONLY JSON. No markdown. No extra text. "
-            + "Always output ALL required keys. If unknown, set null. "
-            + "If the image contains food, ESTIMATE nutrition using typical values. "
+            "Your previous response may have been invalid JSON or missing fields. "
+            + "Return ONE full valid minified JSON object only (no markdown, no extra text). "
+            + "Always output ALL required keys. "
+            + "If foodName is present but nutrients are null, you MUST provide estimated typical nutrition for one unit and set confidence <= 0.35 with LOW_CONFIDENCE warning. "
             + "Do not stop early.";
 
     private static final String USER_PROMPT_LABEL_MAIN = """
@@ -83,7 +88,7 @@ public class GeminiProviderClient implements ProviderClient {
     private final ObjectMapper om;
     private final ProviderTelemetry telemetry;
     private final AiModelRouter modelRouter;
-
+    private static final int MAX_NAME_ONLY_ESTIMATE_CALLS = 1;
     public GeminiProviderClient(RestClient http, GeminiProperties props, ObjectMapper om,
                                 ProviderTelemetry telemetry, AiModelRouter modelRouter) {
         this.http = http;
@@ -166,12 +171,20 @@ public class GeminiProviderClient implements ProviderClient {
             if (!isLabel) {
                 if (hasAnyNutrientValue(parsed1)) {
                     ObjectNode effective = normalizeToEffective(parsed1);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
+
+                    // ✅ 關鍵：通過 Gate 才成功
+                    if (NutritionQualityGate.isAcceptablePhoto(effective)) {
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        return new ProviderResult(effective, "GEMINI");
+                    }
+
+                    log.warn("nutrition_implausible_will_repair foodLogId={} preview={}",
+                            entity.getId(), safeOneLine200(r1.text));
+                    // 不 return，繼續往下走 repair / name-only
                 }
 
                 // ✅ Photo/Album：no-food 永遠不重打
-                if (isNoFoodLikely(r1.text)) {
+                if (isNoFoodDetected(parsed1, r1.text)) {
                     ObjectNode fb = fallbackNoFoodDetected();
                     ObjectNode effective = normalizeToEffective(fb);
                     telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
@@ -288,7 +301,7 @@ public class GeminiProviderClient implements ProviderClient {
                     }
                 } else {
                     // Photo/Album：no-food 永遠不重打 vision，text-only repair 也照樣接受 no-food
-                    if (isNoFoodLikely(rn.text)) {
+                    if (isNoFoodDetected(parsedN, rn.text)) {
                         ObjectNode fb = fallbackNoFoodDetected();
                         ObjectNode effective = normalizeToEffective(fb);
                         telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
@@ -338,6 +351,32 @@ public class GeminiProviderClient implements ProviderClient {
                 ObjectNode effective = normalizeToEffective(fb);
                 telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
                 return new ProviderResult(effective, "GEMINI");
+            }
+
+            // ✅ Photo/Album：保底（不送圖片）
+            // 若 foodName 存在但 nutrients 一直全 null，就用 name-only estimate 補一次
+            if (!isLabel && MAX_NAME_ONLY_ESTIMATE_CALLS > 0) {
+                String name = null;
+
+                // 1) 優先用 parsed1 的 foodName（main call）
+                name = getFoodNameOrNull(parsed1);
+
+                // 2) 再不行就從 lastText（repair 內容）抽（你的 brokenText extractor）
+                if (name == null) name = extractFoodNameFromBrokenText(lastText);
+
+                if (name != null && !name.isBlank()) {
+                    // modelIdText 你上面已經 resolve 過（maxRepair > 0 才會有），沒有就自己 resolve 一次
+                    String midText = (modelIdText != null) ? modelIdText : resolveModelIdText(entity);
+
+                    // contextJson：用最後一次可用的 JSON 文字（有助模型知道 unit/警告等）
+                    String contextJson = (lastText != null && !lastText.isBlank()) ? lastText : null;
+
+                    ObjectNode estimated = tryNameOnlyEstimateOrNull(name, contextJson, midText, entity.getId());
+                    if (estimated != null) {
+                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
+                        return new ProviderResult(estimated, "GEMINI");
+                    }
+                }
             }
 
             ObjectNode fbUnknown = fallbackUnknownFoodFromBrokenText(lastText);
@@ -573,9 +612,14 @@ public class GeminiProviderClient implements ProviderClient {
     }
 
     private CallResult callAndExtractTextOnly(String userPrompt, String modelId, String foodLogIdForLog) {
+        String sys = "You are a JSON repair engine. Return ONLY ONE minified JSON object. No markdown. No extra text.";
+        return callAndExtractTextOnly(userPrompt, modelId, foodLogIdForLog, sys);
+    }
+
+    private CallResult callAndExtractTextOnly(String userPrompt, String modelId, String foodLogIdForLog, String systemInstruction) {
         JsonNode resp;
         try {
-            resp = callGenerateContentTextOnly(userPrompt, modelId);
+            resp = callGenerateContentTextOnly(systemInstruction, userPrompt, modelId);
         } catch (RestClientResponseException re) {
             ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(re);
             ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(mapped.code());
@@ -606,8 +650,8 @@ public class GeminiProviderClient implements ProviderClient {
         return new CallResult(tok, text, null);
     }
 
-    private JsonNode callGenerateContentTextOnly(String userPrompt, String modelId) {
-        ObjectNode req = buildTextOnlyRequest(userPrompt);
+    private JsonNode callGenerateContentTextOnly(String systemInstruction, String userPrompt, String modelId) {
+        ObjectNode req = buildTextOnlyRequest(systemInstruction, userPrompt);
         return http.post()
                 .uri("/v1beta/models/{model}:generateContent", modelId)
                 .header("x-goog-api-key", requireApiKey())
@@ -616,6 +660,93 @@ public class GeminiProviderClient implements ProviderClient {
                 .body(req)
                 .retrieve()
                 .body(JsonNode.class);
+    }
+
+    private ObjectNode buildTextOnlyRequest(String systemInstruction, String userPrompt) {
+        ObjectNode root = om.createObjectNode();
+
+        ObjectNode sys = root.putObject("systemInstruction");
+        sys.putArray("parts").addObject().put("text", systemInstruction);
+
+        ArrayNode contents = root.putArray("contents");
+        ObjectNode c0 = contents.addObject();
+        c0.put("role", "user");
+        c0.putArray("parts").addObject().put("text", userPrompt);
+
+        ObjectNode gen = root.putObject("generationConfig");
+        gen.put("responseMimeType", "application/json"); // ✅ 強制 JSON（很省）
+        gen.put("maxOutputTokens", 768);
+        gen.put("temperature", 0.0);
+
+        return root;
+    }
+
+    private static String getFoodNameOrNull(JsonNode root) {
+        root = unwrapRootObjectOrNull(root);
+        if (root == null || !root.isObject()) return null;
+        JsonNode n = root.get("foodName");
+        if (n == null || n.isNull()) return null;
+        String s = n.asText(null);
+        return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private static void ensureLowConfidence(ObjectNode raw) {
+        if (raw == null) return;
+
+        // confidence <= 0.35
+        Double conf = parseNumberNodeOrText(raw.get("confidence"));
+        if (conf == null || conf > 0.35) raw.put("confidence", 0.35);
+
+        // warnings add LOW_CONFIDENCE
+        ArrayNode w = raw.withArray("warnings");
+        boolean has = false;
+        for (JsonNode it : w) {
+            if (it != null && !it.isNull() && FoodLogWarning.LOW_CONFIDENCE.name().equalsIgnoreCase(it.asText())) {
+                has = true; break;
+            }
+        }
+        if (!has) w.add(FoodLogWarning.LOW_CONFIDENCE.name());
+    }
+
+    private ObjectNode tryNameOnlyEstimateOrNull(String foodName, String contextJson, String modelIdText, String foodLogIdForLog) {
+        if (foodName == null || foodName.isBlank()) return null;
+
+        String sys = "You are a nutrition estimation engine. Return ONLY ONE minified JSON object. No markdown. No extra text.";
+
+        String ctx = (contextJson == null) ? "" : truncateForPrompt(contextJson, 1200);
+
+        String prompt = """
+        Estimate typical nutrition for ONE unit of the packaged food described below.
+
+        PRODUCT_NAME: %s
+
+        CONTEXT_JSON (may be incomplete; use only as hints):
+        %s
+
+        Output requirements:
+        - Return ONE MINIFIED JSON object ONLY (no markdown, no extra text, no extra keys).
+        - You MUST output ALL required keys:
+          foodName, quantity{value,unit}, nutrients{kcal,protein,fat,carbs,fiber,sugar,sodium}, confidence, warnings
+        - You MUST provide numeric estimates at least for: kcal, protein, fat, carbs (NOT all null).
+        - If uncertain, set confidence <= 0.35 and include LOW_CONFIDENCE warning.
+        - quantity: default 1 SERVING (unless context clearly implies grams/ml, then use GRAM/ML).
+        - sodium in mg; macros in g.
+        """.formatted(foodName, ctx);
+
+        CallResult r = callAndExtractTextOnly(prompt, modelIdText, foodLogIdForLog, sys);
+        JsonNode parsed = tryParseJson(r.text);
+        parsed = unwrapRootObjectOrNull(parsed);
+        if (parsed == null || !parsed.isObject()) return null;
+
+        // 若它仍然全 null，就當失敗
+        if (isAllNutrientsNull(parsed)) return null;
+
+        ObjectNode effective = normalizeToEffective(parsed);
+
+        // 保底：強制低信心
+        ensureLowConfidence(effective);
+
+        return effective;
     }
 
     private ObjectNode buildTextOnlyRequest(String userPrompt) {
@@ -644,35 +775,41 @@ public class GeminiProviderClient implements ProviderClient {
         if (isLabel) {
             // LABEL：text-only repair 只能「修 JSON」，不能猜 unseen nutrients
             return """
-                Fix the PREVIOUS_OUTPUT into ONE valid minified JSON object that matches the schema.
-                Rules:
-                - Return ONLY JSON. No markdown. No extra keys.
-                - You MUST output ALL required keys:
-                  foodName, quantity{value,unit}, nutrients{kcal,protein,fat,carbs,fiber,sugar,sodium},
-                  confidence, warnings, labelMeta{servingsPerContainer,basis}
-                - If a nutrient is NOT present in PREVIOUS_OUTPUT, set it to null (do NOT guess).
-                - Keep 0 or 0.0 as 0.0 (do not convert to null).
-                - Do NOT re-analyze image; only repair/normalize JSON format.
-
-                PREVIOUS_OUTPUT:
-                %s
-                """.formatted(prev);
-        }
-
-        // Photo/Album：允許估算，但 repair 的目標仍是「把輸出修成合法 JSON」
-        return """
             Fix the PREVIOUS_OUTPUT into ONE valid minified JSON object that matches the schema.
             Rules:
             - Return ONLY JSON. No markdown. No extra keys.
             - You MUST output ALL required keys:
               foodName, quantity{value,unit}, nutrients{kcal,protein,fat,carbs,fiber,sugar,sodium},
-              confidence, warnings
-            - If a key/value is missing or broken, set it to null (or reasonable defaults: quantity.value=1, unit="SERVING").
+              confidence, warnings, labelMeta{servingsPerContainer,basis}
+            - If a nutrient is NOT present in PREVIOUS_OUTPUT, set it to null (do NOT guess).
+            - Keep 0 or 0.0 as 0.0 (do not convert to null).
             - Do NOT re-analyze image; only repair/normalize JSON format.
 
             PREVIOUS_OUTPUT:
             %s
             """.formatted(prev);
+        }
+
+        // ✅ Photo/Album：允許「估算」，而且有 foodName 時 nutrients 不能全 null
+        return """
+        You are a nutrition JSON fixer + estimator.
+
+        Return ONE valid MINIFIED JSON object ONLY (no markdown, no extra text, no extra keys).
+        You MUST output ALL required keys:
+          foodName, quantity{value,unit}, nutrients{kcal,protein,fat,carbs,fiber,sugar,sodium}, confidence, warnings
+
+        CRITICAL RULES:
+        1) If foodName is NOT null/blank, then nutrients MUST NOT be all null.
+           - You MUST provide numeric estimates at least for: kcal, protein, fat, carbs.
+           - fiber/sugar/sodium can be null if you truly cannot infer, but try your best.
+        2) If you are unsure, still estimate typical values based on foodName/category words.
+           - Set confidence <= 0.35 and include LOW_CONFIDENCE in warnings.
+        3) Use NO_FOOD_DETECTED + all-null nutrients ONLY when PREVIOUS_OUTPUT clearly indicates there is no food/product.
+        4) Do NOT re-analyze image; you may infer from foodName and context text only.
+
+        PREVIOUS_OUTPUT:
+        %s
+        """.formatted(prev);
     }
 
     private static String truncateForPrompt(String s, int maxChars) {
@@ -1072,7 +1209,16 @@ public class GeminiProviderClient implements ProviderClient {
         return true;
     }
 
-    private static boolean isNoFoodLikely(String rawText) {
+    private static boolean isNoFoodDetected(JsonNode parsed, String rawText) {
+        // 1) 最可信：模型明確回 warnings: [NO_FOOD_DETECTED]
+        if (parsed != null && hasWarning(parsed, FoodLogWarning.NO_FOOD_DETECTED.name())) {
+            return true;
+        }
+        // 2) 次可信：文字明確訊號（但不要用 foodName=null）
+        return isNoFoodTextSignal(rawText);
+    }
+
+    private static boolean isNoFoodTextSignal(String rawText) {
         if (rawText == null) return false;
         String lower = rawText.toLowerCase(Locale.ROOT);
         return lower.contains("no food")
@@ -1080,9 +1226,7 @@ public class GeminiProviderClient implements ProviderClient {
                || lower.contains("not food")
                || lower.contains("undetected")
                || lower.contains("cannot identify")
-               || lower.contains("unable to")
-               || lower.contains("\"foodname\":null")
-               || lower.contains("\"foodname\" : null");
+               || lower.contains("unable to identify");
     }
 
     private static String extractJoinedTextOrNull(JsonNode resp) {
@@ -1334,6 +1478,75 @@ public class GeminiProviderClient implements ProviderClient {
         lm.putNull("basis");
 
         return root;
+    }
+
+    public final class NutritionQualityGate {
+
+        private NutritionQualityGate() {}
+
+        public static boolean isAcceptablePhoto(JsonNode effectiveOrRaw) {
+            if (effectiveOrRaw == null || !effectiveOrRaw.isObject()) return false;
+
+            JsonNode n = effectiveOrRaw.path("nutrients");
+            if (!n.isObject()) return false;
+
+            Double kcal = numOrNull(n.get("kcal"));
+            Double p = numOrNull(n.get("protein"));
+            Double f = numOrNull(n.get("fat"));
+            Double c = numOrNull(n.get("carbs"));
+
+            // 1) kcal + 三大營養素全都沒有 => 不可
+            if (kcal == null && p == null && f == null && c == null) return false;
+
+            // 2) foodName 有值時，protein/fat/carbs 不可全 null
+            String name = effectiveOrRaw.path("foodName").isNull() ? "" : effectiveOrRaw.path("foodName").asText("");
+            String lname = name.toLowerCase(Locale.ROOT);
+            boolean hasName = !lname.isBlank();
+
+            boolean macrosAllNull = (p == null && f == null && c == null);
+            if (hasName && macrosAllNull) return false; // ✅ 這行會直接救你 paella 案例
+
+            // 3) kcal 太小（通用，稍微提高門檻；避免 54 kcal 這種「明顯不像一份主餐」）
+            JsonNode q = effectiveOrRaw.path("quantity");
+            String unit = q.path("unit").asText("SERVING").toUpperCase(Locale.ROOT);
+            Double qty = numOrNull(q.get("value"));
+            if (qty == null) qty = 1.0;
+
+            boolean looksLikeZero = lname.contains("0 kcal") || lname.contains("zero") || lname.contains("無糖") || lname.contains("零");
+            if (!looksLikeZero && kcal != null) {
+                if ("SERVING".equals(unit) && qty >= 1.0 && kcal < 80.0) return false; // ✅ 從 20 調到 80
+            }
+
+            // 4) 能量一致性（只有當 P/F/C 至少有 2 個才檢查）
+            int macroCount = 0;
+            if (p != null) macroCount++;
+            if (f != null) macroCount++;
+            if (c != null) macroCount++;
+            if (kcal != null && macroCount >= 2) {
+                double est = 0.0;
+                if (p != null) est += 4.0 * p;
+                if (c != null) est += 4.0 * c;
+                if (f != null) est += 9.0 * f;
+
+                double diff = Math.abs(est - kcal);
+                double tol = Math.max(120.0, kcal * 0.40);
+                if (diff > tol) return false;
+            }
+
+            return true;
+        }
+
+        private static Double numOrNull(JsonNode v) {
+            if (v == null || v.isNull() || v.isMissingNode()) return null;
+            if (v.isNumber()) return v.asDouble();
+            if (v.isTextual()) {
+                String s = v.asText("").trim().replace(',', '.');
+                if (s.isEmpty()) return null;
+                try { return Double.parseDouble(s.replaceAll("[^0-9.\\-]", "")); }
+                catch (Exception ignore) { return null; }
+            }
+            return null;
+        }
     }
 
     private String extractJsonStringValue(String text, String key) {
