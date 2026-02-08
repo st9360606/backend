@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
 import com.calai.backend.foodlog.model.ModelMode;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
 import com.calai.backend.foodlog.provider.config.GeminiProperties;
+import com.calai.backend.foodlog.provider.util.LabelJsonRepairUtil;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.FoodLogWarning;
@@ -19,9 +20,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
-
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.*;
 
 @Slf4j
@@ -122,20 +123,73 @@ public class GeminiProviderClient implements ProviderClient {
             final String promptMain   = isLabel ? USER_PROMPT_LABEL_MAIN   : USER_PROMPT_MAIN;
             final String promptRepair = isLabel ? USER_PROMPT_LABEL_REPAIR : USER_PROMPT_REPAIR;
 
+            int labelVisionRetryCount = 0;
+
             // ===== 1) main call =====
             CallResult r1 = callAndExtract(bytes, mime, promptMain, modelId, isLabel, entity.getId());
             Tok tok = r1.tok;
 
-            // ✅ 先吃 functionArgs（根治）
             JsonNode parsed1 = (r1.functionArgs != null) ? r1.functionArgs : tryParseJson(r1.text);
             parsed1 = unwrapRootObjectOrNull(parsed1);
 
-            // ✅ LABEL：保留「最佳候選」（即使不完整也先存起來，避免最後 throw）
             BestLabel best = BestLabel.empty();
             if (isLabel) best = best.consider(parsed1);
 
             if (isLabel && parsed1 == null) {
                 log.warn("label_parse_failed foodLogId={} preview={}", entity.getId(), safeOneLine200(r1.text));
+            }
+
+            // =========================================================
+            // ✅ LABEL parse 失敗時：先 repair 抽值（不增加 API 次數）
+            //         只有「早斷」才 VISION retry 一次
+            // =========================================================
+            if (isLabel && parsed1 == null) {
+
+                ObjectNode repaired1 = LabelJsonRepairUtil.repairOrExtract(om, r1.text, true);
+
+                if (repaired1 != null) {
+                    best = best.consider(repaired1);
+                    parsed1 = repaired1;
+
+                    if (hasAnyNutrientValue(parsed1) && !isLabelIncomplete(parsed1)) {
+                        ObjectNode effective = normalizeToEffective(parsed1);
+                        return okAndReturn(modelId, entity, t0, tok, true, parsed1, effective);
+                    }
+                }
+
+                boolean early = LabelJsonRepairUtil.looksLikeEarlyTruncation(r1.text);
+
+                boolean missingMost =
+                        (parsed1 == null)
+                        || parsed1.path("nutrients").path("carbs").isNull()
+                        || parsed1.path("nutrients").path("sugar").isNull()
+                        || parsed1.path("nutrients").path("fiber").isNull();
+
+                if (early && missingMost && labelVisionRetryCount < 1) {
+                    labelVisionRetryCount++;
+                    log.info("label_early_truncation_retry_vision foodLogId={}", entity.getId());
+
+                    CallResult r2 = callAndExtract(bytes, mime, promptMain, modelId, true, entity.getId());
+                    tok = Tok.mergePreferNew(tok, r2.tok);
+
+                    JsonNode parsed2 = (r2.functionArgs != null) ? r2.functionArgs : tryParseJson(r2.text);
+                    parsed2 = unwrapRootObjectOrNull(parsed2);
+
+                    if (parsed2 == null) {
+                        ObjectNode repaired2 = LabelJsonRepairUtil.repairOrExtract(om, r2.text, true);
+                        if (repaired2 != null) parsed2 = repaired2;
+                    }
+
+                    if (parsed2 != null) best = best.consider(parsed2);
+
+                    if (hasAnyNutrientValue(parsed2) && !isLabelIncomplete(parsed2)) {
+                        ObjectNode effective = normalizeToEffective(parsed2);
+                        return okAndReturn(modelId, entity, t0, tok, true, parsed2, effective);
+                    }
+
+                    if (parsed2 != null) parsed1 = parsed2;
+                    r1 = r2; // ✅ 後面 lastText / salvage 用最新文字
+                }
             }
 
             // ✅ LABEL：處理截斷 JSON（不增加 API 次數）
@@ -144,51 +198,41 @@ public class GeminiProviderClient implements ProviderClient {
                 ObjectNode fromTruncated = tryFixTruncatedJson(r1.text);
                 if (fromTruncated != null && hasAnyNutrientValue(fromTruncated)) {
                     ObjectNode effective = normalizeToEffective(fromTruncated);
-                    applyWholePackageScalingIfNeeded(fromTruncated, effective);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
+                    return okAndReturn(modelId, entity, t0, tok, true, fromTruncated, effective);
                 }
             }
 
             // ✅ LABEL：若已回 JSON 且含 NO_LABEL_DETECTED，直接接受
             if (isLabel && parsed1 != null && hasWarning(parsed1, FoodLogWarning.NO_LABEL_DETECTED.name())) {
                 ObjectNode effective = normalizeToEffective(parsed1);
-                applyWholePackageScalingIfNeeded(parsed1, effective);
-                telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                return new ProviderResult(effective, "GEMINI");
+                return okAndReturn(modelId, entity, t0, tok, true, parsed1, effective);
             }
 
-            // ✅ LABEL：function args 存在但其實是空包彈 → 直接回 NO_LABEL_DETECTED
+            // ✅ LABEL：空 args → PARTIAL
             if (isLabel && parsed1 != null && isLabelEmptyArgs(parsed1)) {
-                ObjectNode fb = fallbackNoLabelDetected();
-                ObjectNode effective = normalizeToEffective(fb);
-                applyWholePackageScalingIfNeeded(fb, effective);
-                telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                return new ProviderResult(effective, "GEMINI");
+                ObjectNode partial = fallbackLabelPartialDetected(r1.text);
+                ObjectNode effective = normalizeToEffective(partial);
+                return okAndReturn(modelId, entity, t0, tok, true, partial, effective);
             }
 
-            // ✅ Photo/Album：main call 只要有任何 nutrients 值就成功
+            // ✅ Photo/Album：main call 只要有任何 nutrients 值就進 gate
             if (!isLabel) {
                 if (hasAnyNutrientValue(parsed1)) {
                     ObjectNode effective = normalizeToEffective(parsed1);
 
-                    // ✅ 關鍵：通過 Gate 才成功
                     if (NutritionQualityGate.isAcceptablePhoto(effective)) {
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, false, parsed1, effective);
                     }
 
                     log.warn("nutrition_implausible_will_repair foodLogId={} preview={}",
                             entity.getId(), safeOneLine200(r1.text));
-                    // 不 return，繼續往下走 repair / name-only
                 }
 
                 // ✅ Photo/Album：no-food 永遠不重打
                 if (isNoFoodDetected(parsed1, r1.text)) {
                     ObjectNode fb = fallbackNoFoodDetected();
                     ObjectNode effective = normalizeToEffective(fb);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
+                    return okAndReturn(modelId, entity, t0, tok, false, fb, effective);
                 }
 
             } else {
@@ -197,12 +241,9 @@ public class GeminiProviderClient implements ProviderClient {
                     if (isLabelIncomplete(parsed1)) {
                         log.warn("label_incomplete_main_force_repair foodLogId={} preview={}",
                                 entity.getId(), safeOneLine200(r1.text));
-                        // 讓流程往下走 repair
                     } else {
                         ObjectNode effective = normalizeToEffective(parsed1);
-                        applyWholePackageScalingIfNeeded(parsed1, effective);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, true, parsed1, effective);
                     }
                 } else {
                     log.warn("label_unusable_main_will_repair foodLogId={} preview={}",
@@ -215,17 +256,13 @@ public class GeminiProviderClient implements ProviderClient {
                     ObjectNode fromBrokenJson = tryExtractFromBrokenJsonLikeText(r1.text);
                     if (fromBrokenJson != null) {
                         ObjectNode effective = normalizeToEffective(fromBrokenJson);
-                        applyWholePackageScalingIfNeeded(fromBrokenJson, effective);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, true, fromBrokenJson, effective);
                     }
 
                     ObjectNode fromText = tryExtractLabelFromPlainText(r1.text);
                     if (fromText != null) {
                         ObjectNode effective = normalizeToEffective(fromText);
-                        applyWholePackageScalingIfNeeded(fromText, effective);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, true, fromText, effective);
                     }
                 }
 
@@ -233,13 +270,11 @@ public class GeminiProviderClient implements ProviderClient {
                 if (isNoLabelLikely(r1.text)) {
                     ObjectNode fb = fallbackNoLabelDetected();
                     ObjectNode effective = normalizeToEffective(fb);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
+                    return okAndReturn(modelId, entity, t0, tok, true, fb, effective);
                 }
             }
 
-            // ✅ Repair 改成 TEXT-ONLY：不再重送圖片（大幅省 tokens）
-            // LABEL：只有在「完全 parse 不出來」才做 text-only repair（避免 text-only 去猜營養）
+            // ✅ Repair 改成 TEXT-ONLY：不再重送圖片
             final boolean allowTextRepair = (!isLabel) || (parsed1 == null && r1.text != null && !r1.text.isBlank());
             final int maxRepair = allowTextRepair
                     ? (isLabel ? MAX_LABEL_REPAIR_CALLS : MAX_UNKNOWN_FOOD_REPAIR_CALLS)
@@ -261,51 +296,39 @@ public class GeminiProviderClient implements ProviderClient {
                 JsonNode parsedN = tryParseJson(rn.text);
                 parsedN = unwrapRootObjectOrNull(parsedN);
 
-                // ✅ LABEL：每次都更新 best（僅修 JSON 的話通常不會補更多值，但能救回截斷/壞 JSON）
                 if (isLabel) best = best.consider(parsedN);
 
                 if (isLabel && parsedN != null && hasWarning(parsedN, FoodLogWarning.NO_LABEL_DETECTED.name())) {
                     ObjectNode effective = normalizeToEffective(parsedN);
-                    applyWholePackageScalingIfNeeded(parsedN, effective);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
+                    return okAndReturn(modelId, entity, t0, tok, true, parsedN, effective);
                 }
 
                 if (hasAnyNutrientValue(parsedN)) {
                     if (isLabel && isLabelIncomplete(parsedN)) {
                         log.warn("label_incomplete_after_text_repair foodLogId={} preview={}",
                                 entity.getId(), safeOneLine200(rn.text));
-                        // 不 return，讓 loop 結束後走 final fallback（best / partial）
                     } else {
                         ObjectNode effective = normalizeToEffective(parsedN);
-                        if (isLabel) applyWholePackageScalingIfNeeded(parsedN, effective);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, isLabel, parsedN, effective);
                     }
                 }
 
                 if (isLabel) {
-                    // text-only repair 後仍可嘗試 plain-text salvage（保底）
                     ObjectNode fromText = tryExtractLabelFromPlainText(rn.text);
                     if (fromText != null) {
                         ObjectNode effective = normalizeToEffective(fromText);
-                        applyWholePackageScalingIfNeeded(fromText, effective);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, true, fromText, effective);
                     }
                     if (isNoLabelLikely(rn.text)) {
                         ObjectNode fb = fallbackNoLabelDetected();
                         ObjectNode effective = normalizeToEffective(fb);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, true, fb, effective);
                     }
                 } else {
-                    // Photo/Album：no-food 永遠不重打 vision，text-only repair 也照樣接受 no-food
                     if (isNoFoodDetected(parsedN, rn.text)) {
                         ObjectNode fb = fallbackNoFoodDetected();
                         ObjectNode effective = normalizeToEffective(fb);
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(effective, "GEMINI");
+                        return okAndReturn(modelId, entity, t0, tok, false, fb, effective);
                     }
                 }
             }
@@ -313,76 +336,50 @@ public class GeminiProviderClient implements ProviderClient {
             // ===== 3) final fallback（✅ LABEL 不再 throw）=====
             if (isLabel) {
 
-                // 1) 如果有 best（即使不完整），就回 best + PARTIAL/LOW_CONFIDENCE
                 if (best.raw != null) {
-                    // 不完整就標記 partial
                     if (!best.complete) {
                         addWarningIfMissing(best.raw, FoodLogWarning.LABEL_PARTIAL);
                         addWarningIfMissing(best.raw, FoodLogWarning.LOW_CONFIDENCE);
-                        // 信心值保守
                         if (best.raw.path("confidence").isNull()) best.raw.put("confidence", 0.25);
                     }
 
                     ObjectNode effective = normalizeToEffective(best.raw);
-                    applyWholePackageScalingIfNeeded(best.raw, effective);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
+                    return okAndReturn(modelId, entity, t0, tok, true, best.raw, effective);
                 }
 
-                // 2) 明顯是 JSON 開頭但被截斷 → 回 PARTIAL（避免誤判 NO_LABEL）
                 if (looksLikeStartedJsonLabel(lastText) || (isJsonTruncated(lastText) && lastText.trim().startsWith("{"))) {
                     ObjectNode partial = fallbackLabelPartialDetected(lastText);
                     ObjectNode effective = normalizeToEffective(partial);
-                    applyWholePackageScalingIfNeeded(partial, effective);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
+                    return okAndReturn(modelId, entity, t0, tok, true, partial, effective);
                 }
 
-                // 3) 真的像 no-label 才回 NO_LABEL
-                if (isNoLabelLikely(lastText)) {
-                    ObjectNode fb = fallbackNoLabelDetected();
-                    ObjectNode effective = normalizeToEffective(fb);
-                    telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                    return new ProviderResult(effective, "GEMINI");
-                }
-
-                // 4) 不確定時，保守回 NO_LABEL（避免亂 PARTIAL）
                 ObjectNode fb = fallbackNoLabelDetected();
                 ObjectNode effective = normalizeToEffective(fb);
-                telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                return new ProviderResult(effective, "GEMINI");
+                return okAndReturn(modelId, entity, t0, tok, true, fb, effective);
             }
 
-            // ✅ Photo/Album：保底（不送圖片）
-            // 若 foodName 存在但 nutrients 一直全 null，就用 name-only estimate 補一次
+            // ✅ Photo/Album：保底（不送圖片）→ name-only estimate
             if (!isLabel && MAX_NAME_ONLY_ESTIMATE_CALLS > 0) {
                 String name = null;
 
-                // 1) 優先用 parsed1 的 foodName（main call）
                 name = getFoodNameOrNull(parsed1);
-
-                // 2) 再不行就從 lastText（repair 內容）抽（你的 brokenText extractor）
                 if (name == null) name = extractFoodNameFromBrokenText(lastText);
 
                 if (name != null && !name.isBlank()) {
-                    // modelIdText 你上面已經 resolve 過（maxRepair > 0 才會有），沒有就自己 resolve 一次
                     String midText = (modelIdText != null) ? modelIdText : resolveModelIdText(entity);
-
-                    // contextJson：用最後一次可用的 JSON 文字（有助模型知道 unit/警告等）
                     String contextJson = (lastText != null && !lastText.isBlank()) ? lastText : null;
 
                     ObjectNode estimated = tryNameOnlyEstimateOrNull(name, contextJson, midText, entity.getId());
                     if (estimated != null) {
-                        telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-                        return new ProviderResult(estimated, "GEMINI");
+                        // estimated 已是 effective 形狀，直接走單一出口（round 仍會保底做一次）
+                        return okAndReturn(modelId, entity, t0, tok, false, estimated, estimated);
                     }
                 }
             }
 
             ObjectNode fbUnknown = fallbackUnknownFoodFromBrokenText(lastText);
             ObjectNode effective = normalizeToEffective(fbUnknown);
-            telemetry.ok("GEMINI", modelId, entity.getId(), msSince(t0), tok.promptTok, tok.candTok, tok.totalTok);
-            return new ProviderResult(effective, "GEMINI");
+            return okAndReturn(modelId, entity, t0, tok, false, fbUnknown, effective);
 
         } catch (Exception e) {
             ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(e);
@@ -390,6 +387,7 @@ public class GeminiProviderClient implements ProviderClient {
             throw e;
         }
     }
+
 
     private static boolean looksLikeStartedJsonLabel(String text) {
         if (text == null) return false;
@@ -483,14 +481,6 @@ public class GeminiProviderClient implements ProviderClient {
         }
 
         return root;
-    }
-
-    private List<String> enumFoodLogWarnings() {
-        // 直接把 enum 展開成 List<String>
-        // （你也可以 cache 起來）
-        return java.util.Arrays.stream(FoodLogWarning.values())
-                .map(Enum::name)
-                .toList();
     }
 
     private static boolean isLabelEmptyArgs(JsonNode root) {
@@ -742,31 +732,12 @@ public class GeminiProviderClient implements ProviderClient {
         if (isAllNutrientsNull(parsed)) return null;
 
         ObjectNode effective = normalizeToEffective(parsed);
+        roundNutrients1dp(effective); // ✅ name-only estimate 也 round
 
         // 保底：強制低信心
         ensureLowConfidence(effective);
 
         return effective;
-    }
-
-    private ObjectNode buildTextOnlyRequest(String userPrompt) {
-        ObjectNode root = om.createObjectNode();
-
-        ObjectNode sys = root.putObject("systemInstruction");
-        sys.putArray("parts").addObject().put("text",
-                "You are a JSON repair engine. Return ONLY ONE minified JSON object. No markdown. No extra text.");
-
-        ArrayNode contents = root.putArray("contents");
-        ObjectNode c0 = contents.addObject();
-        c0.put("role", "user");
-        c0.putArray("parts").addObject().put("text", userPrompt);
-
-        ObjectNode gen = root.putObject("generationConfig");
-        gen.put("responseMimeType", "application/json"); // ✅ 強制 JSON（很省）
-        gen.put("maxOutputTokens", 768);
-        gen.put("temperature", 0.0);
-
-        return root;
     }
 
     private static String buildTextOnlyRepairPrompt(boolean isLabel, String previousOutput) {
@@ -822,13 +793,20 @@ public class GeminiProviderClient implements ProviderClient {
     private ObjectNode buildRequest(byte[] imageBytes, String mimeType, String userPrompt, boolean isLabel) {
         String b64 = Base64.getEncoder().encodeToString(imageBytes);
         ObjectNode root = om.createObjectNode();
-        // systemInstruction：useFn 時不要要求 "application/json" 的文字輸出，改成要求「只呼叫函式」
+
         ObjectNode sys = root.putObject("systemInstruction");
-        String sysText = isLabel
-                ? ("You MUST call function " + FN_EMIT_NUTRITION + " with arguments only. "
-                   + "Do NOT output any text.")
-                : "Return ONLY minified JSON. No markdown. No extra text.";
-        sys.putArray("parts").addObject().put("text", sysText);
+
+        // ✅ LABEL：不要再用「禁止輸出文字」那套，改回 JSON 輸出（最穩）
+        if (isLabel && !props.isLabelUseFunctionCalling()) {
+            sys.putArray("parts").addObject().put("text",
+                    "Return ONLY ONE minified JSON object. No markdown. No extra text.");
+        } else {
+            // Photo/Album 原本邏輯不變
+            String sysText = isLabel
+                    ? ("You MUST call function " + FN_EMIT_NUTRITION + " with arguments only. Do NOT output any text.")
+                    : "Return ONLY minified JSON. No markdown. No extra text.";
+            sys.putArray("parts").addObject().put("text", sysText);
+        }
 
         ArrayNode contents = root.putArray("contents");
         ObjectNode c0 = contents.addObject();
@@ -841,6 +819,18 @@ public class GeminiProviderClient implements ProviderClient {
         inline.put("mimeType", mimeType);
         inline.put("data", b64);
 
+        ObjectNode gen = root.putObject("generationConfig");
+
+        // ✅ LABEL（建議）：跟 Photo/Album 一樣強制 JSON + schema（但用 label strict schema）
+        if (isLabel && !props.isLabelUseFunctionCalling()) {
+            gen.put("responseMimeType", "application/json");
+            gen.set("_responseJsonSchema", nutritionJsonSchemaLabelStrict());
+            gen.put("maxOutputTokens", 2048);
+            gen.put("temperature", 0.0);
+            return root;
+        }
+
+        // ====== 你原本的 function calling（保留做 feature flag）======
         if (isLabel) {
             ArrayNode tools = root.putArray("tools");
             ObjectNode tool0 = tools.addObject();
@@ -853,22 +843,19 @@ public class GeminiProviderClient implements ProviderClient {
 
             ObjectNode toolConfig = root.putObject("toolConfig");
             ObjectNode fcc = toolConfig.putObject("functionCallingConfig");
-            fcc.put("mode", "ANY"); // ✅ 強制走 functionCall
+            fcc.put("mode", "ANY");
             fcc.putArray("allowedFunctionNames").add(FN_EMIT_NUTRITION);
+
+            gen.put("maxOutputTokens", 2048);
+            gen.put("temperature", 0.0);
+            return root;
         }
 
-        ObjectNode gen = root.putObject("generationConfig");
-
-        // ✅ 重要：useFn=true 時，不能再送 responseMimeType=application/json（否則你現在的 400）
-        // 也不能送 responseSchema / _responseJsonSchema（文件寫明需要 responseMimeType）:contentReference[oaicite:5]{index=5}
-        if (!isLabel) {
-            gen.put("responseMimeType", "application/json");
-            gen.set("_responseJsonSchema", nutritionJsonSchema());
-        }
-
-        gen.put("maxOutputTokens", isLabel ? 1024 : props.getMaxOutputTokens());
-        gen.put("temperature", isLabel ? 0.0 : props.getTemperature());
-
+        // Photo/Album：維持原本（不動）
+        gen.put("responseMimeType", "application/json");
+        gen.set("_responseJsonSchema", nutritionJsonSchema());
+        gen.put("maxOutputTokens", props.getMaxOutputTokens());
+        gen.put("temperature", props.getTemperature());
         return root;
     }
 
@@ -1263,6 +1250,50 @@ public class GeminiProviderClient implements ProviderClient {
 
     private static long msSince(long t0) {
         return (System.nanoTime() - t0) / 1_000_000;
+    }
+
+    // ==============================
+// ✅ Single-exit finalizer + return helper
+// ==============================
+    private ProviderResult okAndReturn(
+            String modelIdForTelemetry,
+            FoodLogEntity entity,
+            long t0,
+            Tok tok,
+            boolean isLabel,
+            JsonNode rawForFinalize,
+            ObjectNode effective
+    ) {
+        finalizeEffective(isLabel, rawForFinalize, effective);
+
+        telemetry.ok(
+                "GEMINI",
+                modelIdForTelemetry,
+                entity.getId(),
+                msSince(t0),
+                tok.promptTok,
+                tok.candTok,
+                tok.totalTok
+        );
+        return new ProviderResult(effective, "GEMINI");
+    }
+
+    /**
+     * ✅ 最終統一出口：只在這裡做 scale / round（避免分散在各處）
+     * - LABEL：先 scale，再 round
+     * - Photo/Album/Name-only：只 round
+     */
+    private static void finalizeEffective(boolean isLabel, JsonNode rawForFinalize, ObjectNode effective) {
+        if (effective == null) return;
+
+        JsonNode raw = (rawForFinalize != null) ? rawForFinalize : effective;
+
+        if (isLabel) {
+            applyWholePackageScalingIfNeeded(raw, effective); // ✅ 只做 scale
+        }
+
+        // ✅ round 一律只在這裡做一次
+        roundNutrients1dp(effective);
     }
 
     private String requireApiKey() {
@@ -1964,30 +1995,35 @@ public class GeminiProviderClient implements ProviderClient {
     private static void applyWholePackageScalingIfNeeded(JsonNode raw, ObjectNode effective) {
         if (raw == null || effective == null) return;
 
+        boolean doScale = false;
+        Double servings = null;
+
         JsonNode lm = raw.get("labelMeta");
-        if (lm == null || !lm.isObject()) return;
+        if (lm != null && lm.isObject()) {
+            servings = parseNumberNodeOrText(lm.get("servingsPerContainer"));
+            String basis = (lm.get("basis") == null || lm.get("basis").isNull())
+                    ? null : lm.get("basis").asText(null);
 
-        Double servings = parseNumberNodeOrText(lm.get("servingsPerContainer"));
-        if (servings == null || servings <= 1.0) return;
-
-        String basis = (lm.get("basis") == null || lm.get("basis").isNull())
-                ? null : lm.get("basis").asText(null);
-
-        if (!"PER_SERVING".equalsIgnoreCase(basis)) return;
-
-        JsonNode nNode = effective.get("nutrients");
-        if (nNode == null || !nNode.isObject()) return;
-        ObjectNode n = (ObjectNode) nNode;
-
-        for (String k : new String[]{"kcal","protein","fat","carbs","fiber","sugar","sodium"}) {
-            JsonNode v = n.get(k);
-            if (v != null && v.isNumber()) n.put(k, v.asDouble() * servings);
+            doScale = (servings != null && servings > 1.0) && "PER_SERVING".equalsIgnoreCase(basis);
         }
 
-        JsonNode q = effective.get("quantity");
-        if (q != null && q.isObject()) {
-            ((ObjectNode) q).put("value", 1d);
-            ((ObjectNode) q).put("unit", "SERVING");
+        if (doScale) {
+            JsonNode nNode = effective.get("nutrients");
+            if (nNode != null && nNode.isObject()) {
+                ObjectNode n = (ObjectNode) nNode;
+                for (String k : new String[]{"kcal","protein","fat","carbs","fiber","sugar","sodium"}) {
+                    JsonNode v = n.get(k);
+                    if (v != null && v.isNumber()) {
+                        n.put(k, v.asDouble() * servings);
+                    }
+                }
+            }
+
+            JsonNode q = effective.get("quantity");
+            if (q != null && q.isObject()) {
+                ((ObjectNode) q).put("value", 1d);
+                ((ObjectNode) q).put("unit", "SERVING");
+            }
         }
     }
 
@@ -2048,7 +2084,7 @@ public class GeminiProviderClient implements ProviderClient {
         if (raw == null || raw.isNull()) return null;
 
         if (raw.isArray()) {
-            if (raw.size() == 0) return null;
+            if (raw.isEmpty()) return null;
             JsonNode first = raw.get(0);
             return (first != null && first.isObject()) ? first : null;
         }
@@ -2188,10 +2224,6 @@ public class GeminiProviderClient implements ProviderClient {
         return out.toString();
     }
 
-    private static String extractFoodNameFromBrokenTextFallback(String raw) {
-        return extractFoodNameFromBrokenText(raw);
-    }
-
     private record BestLabel(ObjectNode raw, int score, boolean complete) {
         static BestLabel empty() { return new BestLabel(null, -1, false); }
 
@@ -2292,4 +2324,39 @@ public class GeminiProviderClient implements ProviderClient {
             );
         }
     }
+
+    // ✅ nutrients 統一四捨五入到小數點後 1 位（HALF_UP）
+    static double round1(double v) { // package-private: 方便測試
+        if (Double.isNaN(v) || Double.isInfinite(v)) return v;
+        return BigDecimal.valueOf(v).setScale(1, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private static void roundNutrients1dp(ObjectNode effective) {
+        if (effective == null) return;
+
+        JsonNode nNode = effective.get("nutrients");
+        if (nNode == null || !nNode.isObject()) return;
+
+        ObjectNode n = (ObjectNode) nNode;
+        for (String k : new String[]{"kcal","protein","fat","carbs","fiber","sugar","sodium"}) {
+            JsonNode v = n.get(k);
+            if (v == null || v.isNull()) continue;
+
+            if (v.isNumber()) {
+                n.put(k, round1(v.asDouble()));
+            } else if (v.isTextual()) {
+                // 保底：如果哪天 nutrients 進來是字串，仍可嘗試轉數字
+                String s = v.asText("").trim();
+                if (!s.isEmpty()) {
+                    try {
+                        double d = Double.parseDouble(s.replace(',', '.').replaceAll("[^0-9.\\-]", ""));
+                        n.put(k, round1(d));
+                    } catch (Exception ignore) {
+                        // 轉不出就保留原樣
+                    }
+                }
+            }
+        }
+    }
+
 }

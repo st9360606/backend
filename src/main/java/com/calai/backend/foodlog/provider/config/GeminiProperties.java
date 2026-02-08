@@ -27,6 +27,8 @@ public class GeminiProperties {
 
     /** 低溫度降低亂講 */
     private double temperature = 0.2;
+    private boolean labelUseFunctionCalling = false;
+    public boolean isLabelUseFunctionCalling() { return labelUseFunctionCalling; }
 
     // ===== getters/setters =====
     public boolean isEnabled() { return enabled; }
