@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog;
 
+import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
@@ -20,6 +21,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceGuardTest {
@@ -36,7 +38,7 @@ class FoodLogServiceGuardTest {
         ImageBlobService blobService = mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
-
+        OpenFoodFactsClient offClient = mock(OpenFoodFactsClient.class);
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
 
@@ -45,7 +47,8 @@ class FoodLogServiceGuardTest {
                 aiQuota, idem, blobService,
                 inFlight, rateLimiter,
                 postProcessor,
-                clientActionMapper
+                clientActionMapper,
+                offClient
         );
 
         when(idem.reserveOrGetExisting(anyLong(), anyString(), any())).thenReturn(null);

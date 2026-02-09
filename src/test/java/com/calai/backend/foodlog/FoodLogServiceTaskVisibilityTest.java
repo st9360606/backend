@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog;
 
+import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
@@ -41,7 +42,7 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock UserRateLimiter rateLimiter;
     @Mock EffectivePostProcessor postProcessor;
     @Mock ClientActionMapper clientActionMapper;
-
+    @Mock OpenFoodFactsClient offClient;
     private FoodLogService service;
 
     @BeforeEach
@@ -52,7 +53,8 @@ class FoodLogServiceTaskVisibilityTest {
                 aiQuota, idem, imageBlobService,
                 inFlight, rateLimiter,
                 postProcessor,
-                clientActionMapper
+                clientActionMapper,
+                offClient
         );
     }
 

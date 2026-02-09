@@ -18,6 +18,7 @@ public class ClientActionMapper {
         return switch (errorCode) {
             // ✅ 條碼查不到：引導 TRY_LABEL（符合你 MVP 規格）
             case "BARCODE_NOT_FOUND" -> ClientAction.TRY_LABEL;
+            case "BARCODE_LOOKUP_FAILED" -> ClientAction.CHECK_NETWORK;
             case "PROVIDER_TIMEOUT", "PROVIDER_NETWORK_ERROR" -> ClientAction.CHECK_NETWORK;
             case "PROVIDER_BLOCKED", "PROVIDER_BAD_REQUEST", "PROVIDER_BAD_RESPONSE" -> ClientAction.RETAKE_PHOTO;
             case "PROVIDER_AUTH_FAILED", "GEMINI_API_KEY_MISSING", "PROVIDER_NOT_AVAILABLE" -> ClientAction.CONTACT_SUPPORT;

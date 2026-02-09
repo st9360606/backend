@@ -18,7 +18,7 @@ import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-
+import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Optional;
@@ -46,7 +46,7 @@ class FoodLogRetryTest {
 
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
-
+        OpenFoodFactsClient offClient = Mockito.mock(OpenFoodFactsClient.class);
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log1");
         log.setUserId(1L);
@@ -76,7 +76,8 @@ class FoodLogRetryTest {
                 aiQuota, idem, imageBlobService,
                 inFlight, rateLimiter,
                 postProcessor,
-                clientActionMapper
+                clientActionMapper,
+                offClient
         );
 
         svc.retry(1L, "log1", "rid-1");
@@ -100,7 +101,7 @@ class FoodLogRetryTest {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         StorageService storage = Mockito.mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
-
+        OpenFoodFactsClient offClient = Mockito.mock(OpenFoodFactsClient.class);
         // ✅ 改成 AiQuotaEngine
         AiQuotaEngine aiQuota = Mockito.mock(AiQuotaEngine.class);
 
@@ -124,7 +125,8 @@ class FoodLogRetryTest {
                 aiQuota, idem, imageBlobService,
                 inFlight, rateLimiter,
                 postProcessor,
-                clientActionMapper
+                clientActionMapper,
+                offClient
         );
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,

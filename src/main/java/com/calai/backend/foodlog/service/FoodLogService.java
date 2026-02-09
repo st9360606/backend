@@ -35,6 +35,10 @@ import org.springframework.beans.factory.annotation.Value;
 import java.util.Locale;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
+import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper;
+import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 @RequiredArgsConstructor
 @Service
@@ -69,6 +73,7 @@ public class FoodLogService {
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
 
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
+    private final OpenFoodFactsClient offClient;
 
     // =========================
     // S4-05：ALBUM
@@ -499,8 +504,7 @@ public class FoodLogService {
         }
         String bc = barcode.trim();
 
-        // ✅ 基本 sanity（避免亂打）
-        // EAN/UPC 常見 8~14 位數（先寬鬆）
+        // ✅ 基本 sanity（EAN/UPC 常見 8~14；你目前寬鬆 6~32 OK）
         if (bc.length() < 6 || bc.length() > 32) {
             throw new IllegalArgumentException("BARCODE_INVALID");
         }
@@ -511,12 +515,32 @@ public class FoodLogService {
         // ✅ 仍要限流
         rateLimiter.checkOrThrow(userId, now);
 
+        // ✅ 建議：barcode 也用 UTC 先做 MVP（要更精準可改成接 clientTz header）
         ZoneId tz = ZoneOffset.UTC;
         LocalDate localDate = ZonedDateTime.ofInstant(now, tz).toLocalDate();
 
+        // ===== 1) 查 OpenFoodFacts =====
+        OffResult off;
+        try {
+            var root = offClient.getProduct(bc);
+            off = OpenFoodFactsMapper.map(root);
+        } catch (Exception ex) {
+            // ✅ OFF 掛掉/timeout/JSON 壞：不要讓 API 500
+            return buildBarcodeFailedEnvelope(userId, bc, requestId, now, tz, localDate,
+                    "BARCODE_LOOKUP_FAILED", "openfoodfacts lookup failed: " + safeMsg(ex));
+        }
+
+        // ===== 2) 查不到：維持你原本行為（引導 TRY_LABEL）=====
+        if (off == null) {
+            return buildBarcodeFailedEnvelope(userId, bc, requestId, now, tz, localDate,
+                    "BARCODE_NOT_FOUND", "barcode not found: " + bc);
+        }
+
+        // ===== 3) 查到：建立 DRAFT + effective（符合你既有 schema）=====
         FoodLogEntity e = new FoodLogEntity();
         e.setUserId(userId);
         e.setMethod("BARCODE");
+        e.setProvider("OPENFOODFACTS");
         e.setDegradeLevel("DG-0");
 
         e.setCapturedAtUtc(now);
@@ -527,17 +551,94 @@ public class FoodLogService {
         e.setTimeSource(TimeSource.SERVER_RECEIVED);
         e.setTimeSuspect(false);
 
-        // ✅ MVP：直接失敗，引導 TRY_LABEL（不扣 quota、也不建 task）
-        e.setStatus(FoodLogStatus.FAILED);
-        e.setProvider("BARCODE"); // 隨便寫，主要是 trace；你也可寫 null
-        e.setEffective(null);
-        e.setLastErrorCode("BARCODE_NOT_FOUND");
-        e.setLastErrorMessage("barcode not found: " + bc);
+        // ✅ 建議存一份 barcode，之後歷史查詢/顯示會用到
+        e.setBarcode(bc);
+
+        // --- effective schema（最少必要欄位）---
+        ObjectNode eff = JsonNodeFactory.instance.objectNode();
+
+        // foodName：OFF 可能為 null，保底給個字串避免 UI 空白
+        String name = (off.productName() == null || off.productName().isBlank())
+                ? "Unknown product"
+                : off.productName();
+        eff.put("foodName", name);
+
+        // quantity：OFF nutriments 大多是 per 100g
+        ObjectNode qty = eff.putObject("quantity");
+        qty.put("value", 100.0);
+        qty.put("unit", "GRAM");
+
+        // nutrients：你 schema 需要的欄位都塞（缺的就 putNull）
+        ObjectNode n = eff.putObject("nutrients");
+        putNumOrNull(n, "kcal", off.kcalPer100g());
+        putNumOrNull(n, "protein", off.proteinPer100g());
+        putNumOrNull(n, "fat", off.fatPer100g());
+        putNumOrNull(n, "carbs", off.carbsPer100g());
+
+        // 你 schema 還有 fiber/sugar/sodium，OFF 先不硬猜：留 null
+        n.putNull("fiber");
+        n.putNull("sugar");
+        n.putNull("sodium");
+
+        // confidence：條碼+資料庫，信心通常高（但仍可能資料缺）
+        eff.put("confidence", 0.95);
+
+        // （可選）aiMeta：保留來源資訊，對 debug 很有用
+        ObjectNode aiMeta = eff.putObject("aiMeta");
+        aiMeta.put("source", "OPENFOODFACTS");
+        aiMeta.put("basis", "PER_100G");
+        aiMeta.put("barcode", bc);
+
+        // ✅ 套用你既有後處理（healthScore/sanityChecker/warnings whitelist）
+        ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
+        e.setEffective(processed);
+
+        e.setStatus(FoodLogStatus.DRAFT);
+        e.setLastErrorCode(null);
+        e.setLastErrorMessage(null);
 
         repo.save(e);
         idem.attach(userId, requestId, e.getId(), now);
 
+        // ✅ BARCODE 不需要 task
         return toEnvelope(e, null, requestId);
+    }
+
+    private FoodLogEnvelope buildBarcodeFailedEnvelope(
+            Long userId,
+            String bc,
+            String requestId,
+            Instant now,
+            ZoneId tz,
+            LocalDate localDate,
+            String errorCode,
+            String errorMsg
+    ) {
+        FoodLogEntity e = new FoodLogEntity();
+        e.setUserId(userId);
+        e.setMethod("BARCODE");
+        e.setProvider("BARCODE");
+        e.setDegradeLevel("DG-0");
+        e.setCapturedAtUtc(now);
+        e.setCapturedTz(tz.getId());
+        e.setCapturedLocalDate(localDate);
+        e.setServerReceivedAtUtc(now);
+        e.setTimeSource(TimeSource.SERVER_RECEIVED);
+        e.setTimeSuspect(false);
+        e.setBarcode(bc);
+        e.setStatus(FoodLogStatus.FAILED);
+        e.setEffective(null);
+        e.setLastErrorCode(errorCode);
+        e.setLastErrorMessage(errorMsg);
+
+        repo.save(e);
+        idem.attach(userId, requestId, e.getId(), now);
+        return toEnvelope(e, null, requestId);
+    }
+
+    private static void putNumOrNull(ObjectNode obj, String field, Double v) {
+        if (v == null) obj.putNull(field);
+        else obj.put(field, v);
     }
 
 
@@ -740,6 +841,9 @@ public class FoodLogService {
             throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
         }
         if (log.getStatus() != FoodLogStatus.FAILED) {
+            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
+        }
+        if ("BARCODE".equalsIgnoreCase(log.getMethod())) {
             throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
         }
 
