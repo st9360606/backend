@@ -1,10 +1,12 @@
 package com.calai.backend.foodlog.config;
 
+import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.HashMap;
 import java.util.Map;
 
+@Data
 @ConfigurationProperties(prefix = "app.ai")
 public class AiModelTiersProperties {
 
@@ -14,9 +16,6 @@ public class AiModelTiersProperties {
      * app.ai.modelTiers.MODEL_TIER_LOW.VISION.provider/modelId
      */
     private Map<String, Map<String, TierSpec>> modelTiers = new HashMap<>();
-
-    public Map<String, Map<String, TierSpec>> getModelTiers() { return modelTiers; }
-    public void setModelTiers(Map<String, Map<String, TierSpec>> modelTiers) { this.modelTiers = modelTiers; }
 
     public static class TierSpec {
         /** 例如 GEMINI / OPENAI（先只用 GEMINI） */

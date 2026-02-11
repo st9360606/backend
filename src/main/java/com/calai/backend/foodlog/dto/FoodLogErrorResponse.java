@@ -9,7 +9,6 @@ public record FoodLogErrorResponse(
         String requestId,
         String clientAction,
         Integer retryAfterSec,
-        // v1.2 擴充（Step 8 前端倒數會用）
         String nextAllowedAtUtc,
         Integer cooldownSeconds,
         Integer cooldownLevel,

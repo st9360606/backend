@@ -31,12 +31,13 @@ public class FoodLogController {
     @PostMapping(value = "/album", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope album(
             @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW
             @RequestPart("file") MultipartFile file,
             HttpServletRequest req
     ) throws Exception {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
-        return service.createAlbum(uid, clientTz, file, requestId);
+        return service.createAlbum(uid, clientTz, deviceId, file, requestId);
     }
 
     /**
@@ -46,13 +47,14 @@ public class FoodLogController {
     @PostMapping(value = "/photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope photo(
             @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW
             @RequestPart("file") MultipartFile file,
             @RequestPart(value = "deviceCapturedAtUtc", required = false) String deviceCapturedAtUtc,
             HttpServletRequest req
     ) throws Exception {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
-        return service.createPhoto(uid, clientTz, deviceCapturedAtUtc, file, requestId);
+        return service.createPhoto(uid, clientTz, deviceId, deviceCapturedAtUtc, file, requestId);
     }
 
     /**
@@ -63,13 +65,14 @@ public class FoodLogController {
     @PostMapping(value = "/label", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope label(
             @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW
             @RequestPart("file") MultipartFile file,
             @RequestPart(value = "deviceCapturedAtUtc", required = false) String deviceCapturedAtUtc,
             HttpServletRequest req
     ) throws Exception {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
-        return service.createLabel(uid, clientTz, deviceCapturedAtUtc, file, requestId);
+        return service.createLabel(uid, clientTz, deviceId, deviceCapturedAtUtc, file, requestId);
     }
 
     public record BarcodeRequest(String barcode) {}
@@ -80,7 +83,11 @@ public class FoodLogController {
      * - 仍會做 rateLimiter（避免被打爆）
      */
     @PostMapping(value = "/barcode", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public FoodLogEnvelope barcode(@RequestBody BarcodeRequest body, HttpServletRequest req) {
+    public FoodLogEnvelope barcode(
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW（可先收著，未必用）
+            @RequestBody BarcodeRequest body,
+            HttpServletRequest req
+    ) {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
         return service.createBarcodeMvp(uid, body == null ? null : body.barcode(), requestId);
@@ -95,10 +102,14 @@ public class FoodLogController {
     }
 
     @PostMapping("/{id}/retry")
-    public FoodLogEnvelope retry(@PathVariable String id, HttpServletRequest req) {
+    public FoodLogEnvelope retry(
+            @PathVariable String id,
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW
+            HttpServletRequest req
+    ) {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
-        return service.retry(uid, id, requestId);
+        return service.retry(uid, id, deviceId, requestId);
     }
 
     @DeleteMapping("/{id}")

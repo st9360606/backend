@@ -51,37 +51,48 @@ public class FoodLogExceptionAdvice {
             default -> HttpStatus.BAD_REQUEST;
         };
 
-        return ResponseEntity.status(status)
-                .body(err(code, e, req)); // ✅ 補齊 5 欄位
+        return ResponseEntity.status(status).body(err(code, e, req));
     }
 
+    /**
+     * ✅ v1.2：Cooldown 固定回 429
+     * - header: Retry-After = cooldownSeconds
+     * - body: errorCode, nextAllowedAtUtc, cooldownSeconds, cooldownLevel, cooldownReason, suggestedTier
+     */
     @ExceptionHandler(CooldownActiveException.class)
     public ResponseEntity<FoodLogErrorResponse> handleCooldown(CooldownActiveException e, HttpServletRequest req) {
+
+        int seconds = Math.max(0, e.cooldownSeconds());
+        String nextUtc = (e.nextAllowedAtUtc() == null) ? null : e.nextAllowedAtUtc().toString();
+        String reason = (e.cooldownReason() == null) ? null : e.cooldownReason().name();
+
+        // MVP：風控/超額/限流都建議 LOW（符合 v1.2）
+        String suggestedTier = "MODEL_TIER_LOW";
+
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.cooldownSeconds()))
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(seconds))
                 .body(new FoodLogErrorResponse(
                         "COOLDOWN_ACTIVE",
-                        safeMsg(e),
+                        safeMsgOrCode(e, "COOLDOWN_ACTIVE"),
                         rid(req),
                         "RETRY_LATER",
-                        e.cooldownSeconds(),
-                        e.nextAllowedAtUtc().toString(),
-                        e.cooldownSeconds(),
+                        seconds,         // retryAfterSec（舊欄位相容）
+                        nextUtc,         // nextAllowedAtUtc
+                        seconds,         // cooldownSeconds
                         e.cooldownLevel(),
-                        e.cooldownReason().name(),
-                        "MODEL_TIER_LOW"
+                        reason,          // cooldownReason: OVER_QUOTA / ABUSE / RATE_LIMIT
+                        suggestedTier
                 ));
     }
 
     /**
-     * ✅ 這裡改成 ResponseEntity<?>，因為「PROVIDER_REFUSED_*」要回 422 + ModelRefusedResponse
-     * 否則會遇到：Required ResponseEntity<FoodLogErrorResponse> but got ResponseEntity<ModelRefusedResponse>
+     * ✅ 這裡改成 ResponseEntity<?>，避免 422 型別衝突
      */
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<?> handleIllegalState(IllegalStateException e, HttpServletRequest req) {
         String code = norm(e.getMessage(), "ILLEGAL_STATE");
 
-        // ✅ NEW：保險 - 若有人仍丟 IllegalStateException("PROVIDER_REFUSED_*")，也回 422
+        // 保險：若有人仍丟 PROVIDER_REFUSED_* 也回 422
         ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(code);
         if (reason != null) {
             return handleModelRefused(new ModelRefusedException(reason, code), req);
@@ -94,10 +105,12 @@ public class FoodLogExceptionAdvice {
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
 
-        return ResponseEntity.status(status)
-                .body(err(code, e, req));
+        return ResponseEntity.status(status).body(err(code, e, req));
     }
 
+    /**
+     * ✅ v1.2：Safety/Recitation/Harm -> HTTP 422 + MODEL_REFUSED
+     */
     @ExceptionHandler(ModelRefusedException.class)
     public ResponseEntity<ModelRefusedResponse> handleModelRefused(ModelRefusedException ex, HttpServletRequest req) {
         String requestId = RequestIdFilter.getOrCreate(req);
@@ -107,10 +120,9 @@ public class FoodLogExceptionAdvice {
             case RECITATION -> "CONTENT_NOT_SUPPORTED_TRY_FOOD_PHOTO";
         };
 
-        //無法識別，請只拍攝食物（避免人臉/不雅內容/螢幕截圖）
         ModelRefusedResponse body = new ModelRefusedResponse(
-                "MODEL_REFUSED",
-                ex.reason().name(),
+                "MODEL_REFUSED",                       // ✅ errorCode（v1.2）
+                ex.reason().name(),                    // refuseReason: SAFETY|RECITATION|HARM_CATEGORY
                 userMessageKey,
                 "We couldn't process this image. Please take a photo of food only (avoid faces, explicit content, or screenshots).",
                 List.of("RETRY_WITH_FOOD_ONLY", "TRY_LABEL", "TRY_BARCODE"),
@@ -125,7 +137,7 @@ public class FoodLogExceptionAdvice {
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
                 .body(new FoodLogErrorResponse(
                         "REQUEST_IN_PROGRESS",
-                        safeMsg(e),
+                        safeMsgOrCode(e, "REQUEST_IN_PROGRESS"),
                         rid(req),
                         "RETRY_LATER",
                         e.retryAfterSec()
@@ -137,7 +149,7 @@ public class FoodLogExceptionAdvice {
         return ResponseEntity.status(402)
                 .body(new FoodLogErrorResponse(
                         "SUBSCRIPTION_REQUIRED",
-                        safeMsg(e),
+                        safeMsgOrCode(e, "SUBSCRIPTION_REQUIRED"),
                         rid(req),
                         e.clientAction(),
                         null
@@ -150,7 +162,7 @@ public class FoodLogExceptionAdvice {
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
                 .body(new FoodLogErrorResponse(
                         "QUOTA_EXCEEDED",
-                        safeMsg(e),
+                        safeMsgOrCode(e, "QUOTA_EXCEEDED"),
                         rid(req),
                         e.clientAction(),
                         e.retryAfterSec()
@@ -159,20 +171,12 @@ public class FoodLogExceptionAdvice {
 
     @ExceptionHandler(FileNotFoundException.class)
     public ResponseEntity<FoodLogErrorResponse> handleNotFound(FileNotFoundException e, HttpServletRequest req) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(err("OBJECT_NOT_FOUND", e, req)); // ✅ 補齊 5 欄位
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(err("OBJECT_NOT_FOUND", e, req));
     }
 
     @ExceptionHandler(SecurityException.class)
     public ResponseEntity<FoodLogErrorResponse> handleSecurity(SecurityException e, HttpServletRequest req) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(err("INVALID_OBJECT_KEY", e, req)); // ✅ 補齊 5 欄位
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<FoodLogErrorResponse> handleUnknown(Exception e, HttpServletRequest req) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(err("INTERNAL_ERROR", e, req)); // ✅ 補齊 5 欄位
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(err("INVALID_OBJECT_KEY", e, req));
     }
 
     @ExceptionHandler(TooManyInFlightException.class)
@@ -181,7 +185,7 @@ public class FoodLogExceptionAdvice {
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
                 .body(new FoodLogErrorResponse(
                         "TOO_MANY_IN_FLIGHT",
-                        safeMsg(e),
+                        safeMsgOrCode(e, "TOO_MANY_IN_FLIGHT"),
                         rid(req),
                         e.clientAction(),
                         e.retryAfterSec()
@@ -194,11 +198,16 @@ public class FoodLogExceptionAdvice {
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSec()))
                 .body(new FoodLogErrorResponse(
                         "RATE_LIMITED",
-                        safeMsg(e),
+                        safeMsgOrCode(e, "RATE_LIMITED"),
                         rid(req),
                         e.clientAction(),
                         e.retryAfterSec()
                 ));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<FoodLogErrorResponse> handleUnknown(Exception e, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(err("INTERNAL_ERROR", e, req));
     }
 
     // ===== helpers =====
@@ -206,10 +215,10 @@ public class FoodLogExceptionAdvice {
     private static FoodLogErrorResponse err(String code, Throwable e, HttpServletRequest req) {
         return new FoodLogErrorResponse(
                 code,
-                safeMsg(e),
+                safeMsgOrCode(e, code),
                 rid(req),
-                null,  // clientAction
-                null   // retryAfterSec
+                null,
+                null
         );
     }
 
@@ -223,8 +232,9 @@ public class FoodLogExceptionAdvice {
         return c.isEmpty() ? fallback : c;
     }
 
-    private static String safeMsg(Throwable t) {
+    private static String safeMsgOrCode(Throwable t, String code) {
         String m = t.getMessage();
-        return (m == null || m.isBlank()) ? null : m;
+        if (m == null || m.isBlank()) return code;
+        return m;
     }
 }

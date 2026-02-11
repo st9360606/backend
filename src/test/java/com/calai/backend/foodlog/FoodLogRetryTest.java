@@ -1,52 +1,58 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
+import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.service.FoodLogService;
 import com.calai.backend.foodlog.service.IdempotencyService;
 import com.calai.backend.foodlog.service.ImageBlobService;
-import com.calai.backend.foodlog.service.FoodLogService;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
+
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.*;
 
 class FoodLogRetryTest {
 
     @Test
     void retry_should_reset_failed_to_pending_and_queue_task() {
-        FoodLogRepository repo = Mockito.mock(FoodLogRepository.class);
-        FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
-        StorageService storage = Mockito.mock(StorageService.class);
+        FoodLogRepository repo = mock(FoodLogRepository.class);
+        FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
+        StorageService storage = mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
 
-        // ✅ 改成 AiQuotaEngine
-        AiQuotaEngine aiQuota = Mockito.mock(AiQuotaEngine.class);
-
-        IdempotencyService idem = Mockito.mock(IdempotencyService.class);
-        ImageBlobService imageBlobService = Mockito.mock(ImageBlobService.class);
+        AiQuotaEngine aiQuota = mock(AiQuotaEngine.class);
+        IdempotencyService idem = mock(IdempotencyService.class);
+        ImageBlobService blobService = mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
 
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
-        OpenFoodFactsClient offClient = Mockito.mock(OpenFoodFactsClient.class);
+        OpenFoodFactsClient offClient = mock(OpenFoodFactsClient.class);
+
+        // ✅ NEW：FoodLogService 現在需要 abuseGuard
+        AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
+        // retry() 會呼叫它，先放行
+        doNothing().when(abuseGuard).onOperationAttempt(anyLong(), anyString(), anyBoolean(), any(Instant.class), any(ZoneId.class));
+
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log1");
         log.setUserId(1L);
@@ -54,6 +60,7 @@ class FoodLogRetryTest {
         log.setLastErrorCode("PROVIDER_FAILED");
         log.setLastErrorMessage("boom");
         log.setCapturedTz("Asia/Taipei");
+        log.setMethod("PHOTO"); // ✅ 避免被 BARCODE 擋掉（保險）
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t1");
@@ -62,25 +69,28 @@ class FoodLogRetryTest {
         task.setNextRetryAtUtc(Instant.now().plusSeconds(999));
         task.setAttempts(3);
 
-        Mockito.when(repo.findByIdForUpdate("log1")).thenReturn(log);
-        Mockito.when(taskRepo.findByFoodLogIdForUpdate("log1")).thenReturn(Optional.of(task));
-        Mockito.when(repo.findByIdAndUserId("log1", 1L)).thenReturn(Optional.of(log));
-        Mockito.when(taskRepo.findByFoodLogId("log1")).thenReturn(Optional.of(task));
+        when(repo.findByIdForUpdate("log1")).thenReturn(log);
+        when(taskRepo.findByFoodLogIdForUpdate("log1")).thenReturn(Optional.of(task));
 
-        // ✅ retry() 內會扣一次 Operation，所以要 stub Decision
-        Mockito.when(aiQuota.consumeOperationOrThrow(eq(1L), eq(ZoneId.of("Asia/Taipei")), any(Instant.class)))
+        // retry() 最後會呼叫 getOne()，所以也要 stub
+        when(repo.findByIdAndUserId("log1", 1L)).thenReturn(Optional.of(log));
+        when(taskRepo.findByFoodLogId("log1")).thenReturn(Optional.of(task));
+
+        when(aiQuota.consumeOperationOrThrow(eq(1L), eq(ZoneId.of("Asia/Taipei")), any(Instant.class)))
                 .thenReturn(new AiQuotaEngine.Decision(ModelTier.MODEL_TIER_HIGH));
 
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
-                aiQuota, idem, imageBlobService,
+                aiQuota, idem, blobService,
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper,
-                offClient
+                offClient,
+                abuseGuard
         );
 
-        svc.retry(1L, "log1", "rid-1");
+        // ✅ 修正：retry() 現在要 (userId, foodLogId, deviceId, requestId)
+        svc.retry(1L, "log1", "device-1", "rid-1");
 
         assertEquals(FoodLogStatus.PENDING, log.getStatus());
         assertNull(log.getLastErrorCode());
@@ -90,51 +100,54 @@ class FoodLogRetryTest {
         assertNull(task.getNextRetryAtUtc());
         assertEquals(0, task.getAttempts());
 
-        // ✅ verify 改成 AiQuotaEngine
-        Mockito.verify(aiQuota, Mockito.times(1))
+        verify(aiQuota, times(1))
                 .consumeOperationOrThrow(eq(1L), eq(ZoneId.of("Asia/Taipei")), any(Instant.class));
+
+        verify(abuseGuard, times(1))
+                .onOperationAttempt(eq(1L), eq("device-1"), eq(false), any(Instant.class), eq(ZoneId.of("Asia/Taipei")));
     }
 
     @Test
     void retry_should_reject_draft() {
-        FoodLogRepository repo = Mockito.mock(FoodLogRepository.class);
-        FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
-        StorageService storage = Mockito.mock(StorageService.class);
+        FoodLogRepository repo = mock(FoodLogRepository.class);
+        FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
+        StorageService storage = mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
-        OpenFoodFactsClient offClient = Mockito.mock(OpenFoodFactsClient.class);
-        // ✅ 改成 AiQuotaEngine
-        AiQuotaEngine aiQuota = Mockito.mock(AiQuotaEngine.class);
 
-        IdempotencyService idem = Mockito.mock(IdempotencyService.class);
-        ImageBlobService imageBlobService = Mockito.mock(ImageBlobService.class);
+        AiQuotaEngine aiQuota = mock(AiQuotaEngine.class);
+        IdempotencyService idem = mock(IdempotencyService.class);
+        ImageBlobService blobService = mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
         UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
 
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
+        OpenFoodFactsClient offClient = mock(OpenFoodFactsClient.class);
+
+        AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
         log.setUserId(1L);
         log.setStatus(FoodLogStatus.DRAFT);
 
-        Mockito.when(repo.findByIdForUpdate("log2")).thenReturn(log);
+        when(repo.findByIdForUpdate("log2")).thenReturn(log);
 
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
-                aiQuota, idem, imageBlobService,
+                aiQuota, idem, blobService,
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper,
-                offClient
+                offClient,
+                abuseGuard
         );
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> svc.retry(1L, "log2", "rid-2"));
+                () -> svc.retry(1L, "log2", "device-1", "rid-2"));
 
         assertEquals("FOOD_LOG_NOT_RETRYABLE", ex.getMessage());
-
-        // ✅ verifyNoInteractions 改成 aiQuota
-        Mockito.verifyNoInteractions(aiQuota);
+        verifyNoInteractions(aiQuota);
+        verifyNoInteractions(abuseGuard);
     }
 }

@@ -21,13 +21,17 @@ import org.springframework.web.client.RestClient;
 public class ProviderConfig {
 
     @Bean
-    public ProviderClient stubProviderClient(ObjectMapper om) {
-        return new StubProviderClient(om);
-    }
-
-    @Bean
     public AiModelRouter aiModelRouter(AiModelTiersProperties props) {
         return new AiModelRouter(props);
+    }
+
+    /**
+     * ✅ 只有 gemini enabled=false 才提供 stub，避免 ProviderClient 變成兩個 Bean 造成注入衝突
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "app.provider.gemini", name = "enabled", havingValue = "false", matchIfMissing = true)
+    public ProviderClient stubProviderClient(ObjectMapper om) {
+        return new StubProviderClient(om);
     }
 
     @Bean
@@ -52,21 +56,16 @@ public class ProviderConfig {
             ProviderTelemetry telemetry,
             AiModelRouter modelRouter
     ) {
-        // ✅ Fail-fast：啟動時就抓到 key 缺失
+        // ✅ Fail-fast：啟動就抓到 key 缺失
         String k = props.getApiKey();
-        if (k == null || k.isBlank()) {
-            throw new IllegalStateException("GEMINI_API_KEY_MISSING");
-        }
+        if (k == null || k.isBlank()) throw new IllegalStateException("GEMINI_API_KEY_MISSING");
+        if (props.getBaseUrl() == null || props.getBaseUrl().isBlank()) throw new IllegalStateException("GEMINI_BASE_URL_MISSING");
 
-        // ✅ baseUrl 也必須存在
-        if (props.getBaseUrl() == null || props.getBaseUrl().isBlank()) {
-            throw new IllegalStateException("GEMINI_BASE_URL_MISSING");
-        }
-
-        // ✅ Step 2：不再檢查 props.model（避免寫死模型）
-        // 改成檢查 HIGH/LOW + VISION 是否都已配置，且 provider 必須是 GEMINI
+        // ✅ 四種組合都要有：HIGH/LOW × VISION/TEXT
         assertGeminiTierConfigured(modelRouter, ModelTier.MODEL_TIER_HIGH, ModelMode.VISION);
         assertGeminiTierConfigured(modelRouter, ModelTier.MODEL_TIER_LOW,  ModelMode.VISION);
+        assertGeminiTierConfigured(modelRouter, ModelTier.MODEL_TIER_HIGH, ModelMode.TEXT);
+        assertGeminiTierConfigured(modelRouter, ModelTier.MODEL_TIER_LOW,  ModelMode.TEXT);
 
         return new GeminiProviderClient(geminiRestClient, props, om, telemetry, modelRouter);
     }

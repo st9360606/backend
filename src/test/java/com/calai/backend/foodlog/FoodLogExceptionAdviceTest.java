@@ -23,6 +23,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
 
@@ -59,8 +60,13 @@ class FoodLogExceptionAdviceTest {
     @Test
     void upload_unsupported_format_should_400_with_requestId() throws Exception {
         Mockito.when(auth.requireUserId()).thenReturn(1L);
-        Mockito.when(service.createAlbum(eq(1L), anyString(), any(), anyString()))
-                .thenThrow(new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT"));
+        Mockito.when(service.createAlbum(
+                eq(1L),
+                anyString(),                 // clientTz
+                anyString(),                 // deviceId
+                any(MultipartFile.class),    // file  ✅
+                anyString()                  // requestId
+        )).thenThrow(new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT"));
 
         MockMultipartFile f = new MockMultipartFile(
                 "file", "x.bin", MediaType.APPLICATION_OCTET_STREAM_VALUE, new byte[]{1,2,3}
@@ -69,6 +75,7 @@ class FoodLogExceptionAdviceTest {
         mvc.perform(multipart("/api/v1/food-logs/album")
                         .file(f)
                         .header("X-Client-Timezone", "Asia/Taipei")
+                        .header("X-Device-Id", "bc-test-1")
                         .header("X-Request-Id", "RID-123"))
                 .andExpect(status().isBadRequest())
                 .andExpect(header().string("X-Request-Id", "RID-123"))

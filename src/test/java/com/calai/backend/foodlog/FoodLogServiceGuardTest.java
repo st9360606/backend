@@ -11,6 +11,7 @@ import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,6 @@ import org.springframework.mock.web.MockMultipartFile;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceGuardTest {
@@ -42,13 +42,17 @@ class FoodLogServiceGuardTest {
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
 
+        // ✅ NEW：你現在 FoodLogService 需要這個
+        AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
+
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
                 aiQuota, idem, blobService,
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper,
-                offClient
+                offClient,
+                abuseGuard // ✅ 補上
         );
 
         when(idem.reserveOrGetExisting(anyLong(), anyString(), any())).thenReturn(null);
@@ -62,12 +66,16 @@ class FoodLogServiceGuardTest {
                 new byte[]{1, 2, 3, 4, 5}
         );
 
+        // ✅ NEW：createPhoto 需要 6 個參數（多了 deviceCapturedAtUtc）
         assertThrows(IllegalArgumentException.class, () ->
-                svc.createPhoto(1L, "Asia/Taipei", null, file, "rid-1")
+                svc.createPhoto(1L, "Asia/Taipei", "dev-1", null, file, "rid-1")
         );
 
         verify(rateLimiter).checkOrThrow(eq(1L), any());
         verify(inFlight).acquireOrThrow(1L);
         verify(inFlight).release(1L);
+
+        // （可選）這條路徑在 detect 就炸，理論上不會扣 quota
+        verifyNoInteractions(aiQuota);
     }
 }

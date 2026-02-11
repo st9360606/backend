@@ -71,28 +71,57 @@ public class AiQuotaEngine {
             return n;
         });
 
-        // 換日/換月 reset（依使用者時區）
+        // ✅ 0) 清理過期的 cooldown/forceLow（過期就清掉）
+        if (s.getNextAllowedAtUtc() != null && !nowUtc.isBefore(s.getNextAllowedAtUtc())) {
+            s.setNextAllowedAtUtc(null);
+            // cooldownReason 只在沒有 forceLow 時清掉
+            if (s.getForceLowUntilUtc() == null || !nowUtc.isBefore(s.getForceLowUntilUtc())) {
+                s.setCooldownReason(null);
+                s.setCooldownStrikes(0);
+            }
+        }
+        if (s.getForceLowUntilUtc() != null && !nowUtc.isBefore(s.getForceLowUntilUtc())) {
+            s.setForceLowUntilUtc(null);
+            // 若也沒有 cooldown 了，reason 一起清
+            if (s.getNextAllowedAtUtc() == null) {
+                s.setCooldownReason(null);
+                s.setCooldownStrikes(0);
+            }
+        }
+
+        // ✅ 1) 換日/換月 reset 只重置 count；但「不要」把 ABUSE 的 cooldown 清掉
         String dk = dayKey(nowUtc, userTz);
         if (!dk.equals(s.getDailyKey())) {
             s.setDailyKey(dk);
             s.setDailyCount(0);
-            s.setCooldownStrikes(0);
-            s.setNextAllowedAtUtc(null);
-            s.setCooldownReason(null);
+
+            // 只有 OVER_QUOTA 才因換日解除 cooldown（符合 daily quota 行為）
+            if (parseReason(s.getCooldownReason()) == CooldownReason.OVER_QUOTA) {
+                s.setCooldownStrikes(0);
+                s.setNextAllowedAtUtc(null);
+                s.setCooldownReason(null);
+            }
         }
+
         String mk = monthKey(nowUtc, userTz);
         if (!mk.equals(s.getMonthlyKey())) {
             s.setMonthlyKey(mk);
             s.setMonthlyCount(0);
-            s.setCooldownStrikes(0);
-            s.setNextAllowedAtUtc(null);
-            s.setCooldownReason(null);
+
+            // 只有 OVER_QUOTA 才因換月解除 cooldown（符合 monthly quota 行為）
+            if (parseReason(s.getCooldownReason()) == CooldownReason.OVER_QUOTA) {
+                s.setCooldownStrikes(0);
+                s.setNextAllowedAtUtc(null);
+                s.setCooldownReason(null);
+            }
         }
 
-        // cooldown 期間直接擋（不增加 strikes）
+        // ✅ 2) cooldown 期間直接擋
         if (s.getNextAllowedAtUtc() != null && nowUtc.isBefore(s.getNextAllowedAtUtc())) {
             int sec = (int) Duration.between(nowUtc, s.getNextAllowedAtUtc()).getSeconds();
             if (sec < 0) sec = 0;
+            repo.save(s);
+
             throw new CooldownActiveException(
                     "COOLDOWN_ACTIVE",
                     s.getNextAllowedAtUtc(),
@@ -102,10 +131,10 @@ public class AiQuotaEngine {
             );
         }
 
-        // Trial 用 dailyCount；Paid 用 monthlyCount
+        // ✅ 3) Trial 用 dailyCount；Paid 用 monthlyCount
         int used = isTrial ? (s.getDailyCount() + 1) : (s.getMonthlyCount() + 1);
 
-        // 超過 total → strikes + cooldown 10/20/30
+        // ✅ 4) 超過 total → strikes + cooldown 10/20/30（只給 OVER_QUOTA）
         if (used > totalLimit) {
             int strikes = s.getCooldownStrikes() + 1;
             s.setCooldownStrikes(strikes);
@@ -126,14 +155,19 @@ public class AiQuotaEngine {
             );
         }
 
-        // commit count
+        // ✅ 5) commit count
         if (isTrial) s.setDailyCount(used);
         else if (isPaid) s.setMonthlyCount(used);
 
-        repo.save(s);
-
-        // 分段決定 tier（Step 2 才真的對應到模型）
+        // ✅ 6) 分段決定 tier
         ModelTier tierUsed = (used <= premiumLimit) ? ModelTier.MODEL_TIER_HIGH : ModelTier.MODEL_TIER_LOW;
+
+        // ✅ 7) forceLowUntilUtc 覆蓋 tier（ABUSE 強制 LOW）
+        if (s.getForceLowUntilUtc() != null && nowUtc.isBefore(s.getForceLowUntilUtc())) {
+            tierUsed = ModelTier.MODEL_TIER_LOW;
+        }
+
+        repo.save(s);
         return new Decision(tierUsed);
     }
 

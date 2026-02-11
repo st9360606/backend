@@ -63,6 +63,15 @@ management:
 
 app:
   ai:
+    abuse-guard:
+      enabled: true
+      window: 60m
+      hourOpsThreshold: 50
+      minCacheHitRate: 0.10
+      deviceSwitchThreshold: 3
+      cooldown: 30m
+      forceLow: 2h
+      keyTtl: 2h
     modelTiers:
       MODEL_TIER_HIGH:
         VISION:

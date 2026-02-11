@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
+import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
 import com.calai.backend.foodlog.model.TimeSource;
@@ -74,12 +75,13 @@ public class FoodLogService {
 
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
     private final OpenFoodFactsClient offClient;
+    private final AbuseGuardService abuseGuard;
 
     // =========================
     // S4-05：ALBUM
     // =========================
     @Transactional
-    public FoodLogEnvelope createAlbum(Long userId, String clientTz, MultipartFile file, String requestId) throws Exception {
+    public FoodLogEnvelope createAlbum(Long userId, String clientTz, String deviceId, MultipartFile file, String requestId) throws Exception{
         ZoneId tz = parseTzOrUtc(clientTz);
         Instant serverNow = Instant.now();
         validateUploadBasics(file);
@@ -127,6 +129,14 @@ public class FoodLogService {
                         saved.sha256(),
                         List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
                 );
+
+                // ✅ NEW：判斷 cacheHit（必須 effective 是 object 才算真正命中）
+                boolean cacheHit = hit.isPresent()
+                                   && hit.get().getEffective() != null
+                                   && hit.get().getEffective().isObject();
+
+                // ✅ NEW：Anti-abuse（會在觸發時直接丟 429 CooldownActiveException）
+                abuseGuard.onOperationAttempt(userId, deviceId, cacheHit, serverNow, tz);
 
                 // 5) 建 log
                 LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
@@ -210,11 +220,7 @@ public class FoodLogService {
     // S4-08：PHOTO
     // =========================
     @Transactional
-    public FoodLogEnvelope createPhoto(Long userId,
-                                       String clientTz,
-                                       String deviceCapturedAtUtc,
-                                       MultipartFile file,
-                                       String requestId) throws Exception {
+    public FoodLogEnvelope createPhoto(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId tz = parseTzOrUtc(clientTz);
         Instant serverNow = Instant.now();
@@ -270,6 +276,14 @@ public class FoodLogService {
                         saved.sha256(),
                         List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
                 );
+
+                // ✅ NEW：判斷 cacheHit（必須 effective 是 object 才算真正命中）
+                boolean cacheHit = hit.isPresent()
+                                   && hit.get().getEffective() != null
+                                   && hit.get().getEffective().isObject();
+
+                // ✅ NEW：Anti-abuse（會在觸發時直接丟 429 CooldownActiveException）
+                abuseGuard.onOperationAttempt(userId, deviceId, cacheHit, serverNow, tz);
 
                 // 6) 建 log（capturedLocalDate 用 resolved capturedAtUtc + client tz）
                 LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), tz).toLocalDate();
@@ -356,11 +370,7 @@ public class FoodLogService {
     // LABEL：營養標示（Gemini 3 Flash）
     // =========================
     @Transactional
-    public FoodLogEnvelope createLabel(Long userId,
-                                       String clientTz,
-                                       String deviceCapturedAtUtc,
-                                       MultipartFile file,
-                                       String requestId) throws Exception {
+    public FoodLogEnvelope createLabel(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId tz = parseTzOrUtc(clientTz);
         Instant serverNow = Instant.now();
@@ -412,6 +422,14 @@ public class FoodLogService {
                         saved.sha256(),
                         List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
                 );
+
+                // ✅ NEW：判斷 cacheHit（必須 effective 是 object 才算真正命中）
+                boolean cacheHit = hit.isPresent()
+                                   && hit.get().getEffective() != null
+                                   && hit.get().getEffective().isObject();
+
+                // ✅ NEW：Anti-abuse（會在觸發時直接丟 429 CooldownActiveException）
+                abuseGuard.onOperationAttempt(userId, deviceId, cacheHit, serverNow, tz);
 
                 LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), tz).toLocalDate();
 
@@ -827,7 +845,7 @@ public class FoodLogService {
     }
 
     @Transactional
-    public FoodLogEnvelope retry(Long userId, String foodLogId, String requestId) {
+    public FoodLogEnvelope retry(Long userId, String foodLogId, String deviceId, String requestId) {
         Instant now = Instant.now();
 
         // ✅ retry 也要擋一下，不然狂點 retry 一樣會打爆
@@ -849,6 +867,9 @@ public class FoodLogService {
 
         // ✅ 用原本 capturedTz（或你也可以改用 clientTz，但 retry 通常沿用原 log）
         ZoneId tz = parseTzOrUtc(log.getCapturedTz());
+
+        // ✅ NEW：retry 也算操作，給 abuseGuard（cacheHit=false）
+        abuseGuard.onOperationAttempt(userId, deviceId, false, now, tz);
 
         // ✅ Step 1：retry 也算一次 Operation（會再打模型）
         AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, now);

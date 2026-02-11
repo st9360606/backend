@@ -2,11 +2,13 @@ package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.model.ClientAction;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
+import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
@@ -16,7 +18,6 @@ import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,10 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock EffectivePostProcessor postProcessor;
     @Mock ClientActionMapper clientActionMapper;
     @Mock OpenFoodFactsClient offClient;
+
+    // ✅ NEW：你 service 新增的 final 依賴
+    @Mock AbuseGuardService abuseGuard;
+
     private FoodLogService service;
 
     @BeforeEach
@@ -54,7 +59,8 @@ class FoodLogServiceTaskVisibilityTest {
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper,
-                offClient
+                offClient,
+                abuseGuard // ✅ 補上
         );
     }
 
@@ -85,6 +91,7 @@ class FoodLogServiceTaskVisibilityTest {
 
         verify(taskRepo, times(1)).findByFoodLogId("log-1");
         verifyNoInteractions(aiQuota);
+        verifyNoInteractions(abuseGuard); // getOne 不會用到
     }
 
     @Test
@@ -105,6 +112,7 @@ class FoodLogServiceTaskVisibilityTest {
         assertNull(env.task());
         verify(taskRepo, never()).findByFoodLogId(anyString());
         verifyNoInteractions(aiQuota);
+        verifyNoInteractions(abuseGuard);
     }
 
     @Test
@@ -128,7 +136,6 @@ class FoodLogServiceTaskVisibilityTest {
 
         when(repo.findByIdAndUserId("log-3", 1L)).thenReturn(Optional.of(e));
         when(taskRepo.findByFoodLogId("log-3")).thenReturn(Optional.of(t));
-
         when(clientActionMapper.fromErrorCode("PROVIDER_FAILED"))
                 .thenReturn(ClientAction.RETRY_LATER);
 
@@ -141,5 +148,6 @@ class FoodLogServiceTaskVisibilityTest {
 
         verify(taskRepo, times(1)).findByFoodLogId("log-3");
         verifyNoInteractions(aiQuota);
+        verifyNoInteractions(abuseGuard);
     }
 }

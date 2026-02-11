@@ -22,26 +22,26 @@ class GeminiIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        // ✅ provider mock
         r.add("app.provider.gemini.enabled", () -> "true");
         r.add("app.provider.gemini.base-url", () -> wm.getRuntimeInfo().getHttpBaseUrl());
         r.add("app.provider.gemini.api-key", () -> "dummy");
         r.add("app.foodlog.provider", () -> "GEMINI");
 
-        // ✅ Step 2 必備：model tiers（不載入 dev profile 時也能起來）
-        // HIGH / VISION
-        r.add("app.ai.modelTiers.MODEL_TIER_HIGH.VISION.provider", () -> "GEMINI");
-        r.add("app.ai.modelTiers.MODEL_TIER_HIGH.VISION.modelId", () -> "gemini-3-flash-preview");
+        // ✅ 關掉 abuse guard（或你也可以改成塞完整數值）
+        r.add("app.ai.abuse-guard.enabled", () -> "false");
 
-        // LOW / VISION
-        r.add("app.ai.modelTiers.MODEL_TIER_LOW.VISION.provider", () -> "GEMINI");
-        r.add("app.ai.modelTiers.MODEL_TIER_LOW.VISION.modelId", () -> "gemini-2.5-flash-lite");
+        // ✅ model tiers（Map bracket 版）
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][VISION].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][VISION].model-id", () -> "gemini-3-flash-preview");
 
-        // （保險）HIGH/LOW TEXT：如果你 fail-fast 也檢查 TEXT，就一定要補
-        r.add("app.ai.modelTiers.MODEL_TIER_HIGH.TEXT.provider", () -> "GEMINI");
-        r.add("app.ai.modelTiers.MODEL_TIER_HIGH.TEXT.modelId", () -> "gemini-3-flash-preview");
-        r.add("app.ai.modelTiers.MODEL_TIER_LOW.TEXT.provider", () -> "GEMINI");
-        r.add("app.ai.modelTiers.MODEL_TIER_LOW.TEXT.modelId", () -> "gemini-2.5-flash-lite");
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][VISION].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][VISION].model-id", () -> "gemini-2.5-flash-lite");
+
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][TEXT].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][TEXT].model-id", () -> "gemini-3-flash-preview");
+
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][TEXT].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][TEXT].model-id", () -> "gemini-2.5-flash-lite");
     }
 
     @Test
