@@ -87,6 +87,10 @@ app:
         TEXT:
           provider: GEMINI
           modelId: "gemini-2.5-flash-lite"
+  guard:
+    rate:
+      free-per-minute: 6
+      paid-per-minute: 20
   actuator:
     user: "${APP_ACTUATOR_USER:actuator}"
     pass: "${APP_ACTUATOR_PASS:change-me}"

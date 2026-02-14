@@ -1,5 +1,7 @@
 package com.calai.backend.foodlog.service;
 
+import com.calai.backend.entitlement.service.EntitlementService;
+import com.calai.backend.foodlog.config.FoodLogTierResolver;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.model.FoodLogStatus;
@@ -62,7 +64,7 @@ public class FoodLogService {
     private final FoodLogRepository repo;
     private final FoodLogTaskRepository taskRepo;
     private final StorageService storage;
-    private final ObjectMapper om; // 目前留著，之後 provider 會用到
+    private final ObjectMapper om;
     private final AiQuotaEngine aiQuota;
     private final IdempotencyService idem;
     private final ImageBlobService blobService;
@@ -70,12 +72,11 @@ public class FoodLogService {
     private final UserRateLimiter rateLimiter;
     private final EffectivePostProcessor postProcessor;
     private final ClientActionMapper clientActionMapper;
-    // MVP：先 new（後續要 DI 也可以）
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
-
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
     private final OpenFoodFactsClient offClient;
     private final AbuseGuardService abuseGuard;
+    private final EntitlementService entitlementService;
 
     // =========================
     // S4-05：ALBUM
@@ -89,7 +90,8 @@ public class FoodLogService {
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
-        rateLimiter.checkOrThrow(userId, serverNow);
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, serverNow);
+        rateLimiter.checkOrThrow(userId, tier, serverNow);
 
         boolean acquired = false;
         String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
@@ -159,7 +161,7 @@ public class FoodLogService {
 
                     // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
                     ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-
+                    markFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
@@ -229,7 +231,8 @@ public class FoodLogService {
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
-        rateLimiter.checkOrThrow(userId, serverNow);
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, serverNow);
+        rateLimiter.checkOrThrow(userId, tier, serverNow);
 
         boolean acquired = false;
         String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
@@ -308,7 +311,7 @@ public class FoodLogService {
 
                     // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
                     ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-
+                    markFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
@@ -380,7 +383,8 @@ public class FoodLogService {
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
         // ✅ 仍要限流，避免被打爆（雖然是 AI 才更需要，但 label 也會走 AI）
-        rateLimiter.checkOrThrow(userId, serverNow);
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, serverNow);
+        rateLimiter.checkOrThrow(userId, tier, serverNow);
 
         boolean acquired = false;
         String tempKey = null;
@@ -452,7 +456,7 @@ public class FoodLogService {
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
                     ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-
+                    markFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
@@ -531,7 +535,8 @@ public class FoodLogService {
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
         // ✅ 仍要限流
-        rateLimiter.checkOrThrow(userId, now);
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
+        rateLimiter.checkOrThrow(userId, tier, now);
 
         // ✅ 建議：barcode 也用 UTC 先做 MVP（要更精準可改成接 clientTz header）
         ZoneId tz = ZoneOffset.UTC;
@@ -694,6 +699,9 @@ public class FoodLogService {
         Instant now = Instant.now();
 
         JsonNode eff = e.getEffective();
+        // ✅ v1.2：回應帶 tierUsed / fromCache
+        ModelTier tierUsed = FoodLogTierResolver.resolve(e.getDegradeLevel());
+        boolean fromCache = false;
         FoodLogEnvelope.NutritionResult nr = null;
 
         java.util.List<String> warnings = null;
@@ -718,6 +726,8 @@ public class FoodLogService {
             if (aiMeta != null && aiMeta.isObject()) {
                 JsonNode dr = aiMeta.get("degradedReason");
                 if (dr != null && !dr.isNull()) degradedReason = dr.asText(null);
+                JsonNode fc = aiMeta.get("fromCache");
+                if (fc != null && fc.isBoolean()) fromCache = fc.asBoolean();
             }
             if (degradedReason == null && warnings != null) {
                 if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) degradedReason = "NO_FOOD";
@@ -817,11 +827,22 @@ public class FoodLogService {
                 e.getId(),
                 e.getStatus().name(),
                 e.getDegradeLevel(),
+                (tierUsed == null ? null : tierUsed.name()),
+                fromCache,
                 nr,
                 task,
                 err,
                 new FoodLogEnvelope.Trace(requestId)
         );
+    }
+
+    private static void markFromCache(ObjectNode effective) {
+        if (effective == null) return;
+        JsonNode aiMetaNode = effective.get("aiMeta");
+        ObjectNode aiMeta;
+        if (aiMetaNode instanceof ObjectNode o) aiMeta = o;
+        else aiMeta = effective.putObject("aiMeta");
+        aiMeta.put("fromCache", true);
     }
 
     @Transactional(readOnly = true)
@@ -849,7 +870,8 @@ public class FoodLogService {
         Instant now = Instant.now();
 
         // ✅ retry 也要擋一下，不然狂點 retry 一樣會打爆
-        rateLimiter.checkOrThrow(userId, now);
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
+        rateLimiter.checkOrThrow(userId, tier, now);
 
         FoodLogEntity log = repo.findByIdForUpdate(foodLogId);
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");

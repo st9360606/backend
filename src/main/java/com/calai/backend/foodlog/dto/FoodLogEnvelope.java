@@ -9,6 +9,8 @@ public record FoodLogEnvelope(
         String foodLogId,
         String status,
         String degradeLevel,
+        String tierUsed,
+        boolean fromCache,
         NutritionResult nutritionResult,
         Task task,
         ApiError error,

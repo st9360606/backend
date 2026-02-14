@@ -17,7 +17,7 @@ class IdempotencyServiceTest {
     void reserve_first_time_should_return_null() {
         FoodLogRequestRepository repo = Mockito.mock(FoodLogRequestRepository.class);
         Mockito.when(repo.findFoodLogId(eq(1L), eq("rid"))).thenReturn(null);
-        Mockito.when(repo.reserve(eq(1L), eq("rid"), any())).thenReturn(1);
+        Mockito.when(repo.reserve(eq(1L), eq("rid"), any(Instant.class))).thenReturn(1);
 
         IdempotencyService s = new IdempotencyService(repo);
         String existing = s.reserveOrGetExisting(1L, "rid", Instant.now());
@@ -40,7 +40,7 @@ class IdempotencyServiceTest {
     void reserve_in_progress_should_throw_409() {
         FoodLogRequestRepository repo = Mockito.mock(FoodLogRequestRepository.class);
         Mockito.when(repo.findFoodLogId(eq(1L), eq("rid"))).thenReturn(null);
-        Mockito.when(repo.reserve(eq(1L), eq("rid"), any())).thenReturn(0);
+        Mockito.when(repo.reserve(eq(1L), eq("rid"), any(Instant.class))).thenReturn(0);
         Mockito.when(repo.findStatus(eq(1L), eq("rid"))).thenReturn("RESERVED");
 
         IdempotencyService s = new IdempotencyService(repo);
@@ -59,7 +59,13 @@ class IdempotencyServiceTest {
         Instant now = Instant.now();
 
         Mockito.when(repo.findFoodLogId(userId, requestId)).thenReturn(null);
-        Mockito.when(repo.findStatus(userId, requestId)).thenReturn("FAILED", null); // 第一次看到 FAILED，第二次可忽略
+
+        // ✅ 原本 thenReturn("FAILED", null) 會遇到 varargs + null 型別不精確
+        // ✅ 改成鏈式 thenReturn，並明確轉型 null
+        Mockito.when(repo.findStatus(userId, requestId))
+                .thenReturn("FAILED")
+                .thenReturn((String) null); // 第二次呼叫回 null（或你也可以回 "RESERVED"/"OK" 視你的實作）
+
         Mockito.when(repo.reserve(userId, requestId, now)).thenReturn(1); // 釋放後成功插入
 
         String existing = s.reserveOrGetExisting(userId, requestId, now);

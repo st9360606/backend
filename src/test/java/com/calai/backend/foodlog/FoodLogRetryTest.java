@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog;
 
+import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
@@ -19,7 +20,6 @@ import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -48,9 +48,13 @@ class FoodLogRetryTest {
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
         OpenFoodFactsClient offClient = mock(OpenFoodFactsClient.class);
 
+        // ✅ NEW：若 FoodLogService 新增了 entitlementService（常見）
+        EntitlementService entitlementService = mock(EntitlementService.class);
+        when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
+                .thenReturn(EntitlementService.Tier.TRIAL);
+
         // ✅ NEW：FoodLogService 現在需要 abuseGuard
         AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
-        // retry() 會呼叫它，先放行
         doNothing().when(abuseGuard).onOperationAttempt(anyLong(), anyString(), anyBoolean(), any(Instant.class), any(ZoneId.class));
 
         FoodLogEntity log = new FoodLogEntity();
@@ -86,10 +90,11 @@ class FoodLogRetryTest {
                 postProcessor,
                 clientActionMapper,
                 offClient,
-                abuseGuard
+                abuseGuard,
+                entitlementService // ✅ 補上第 14 個參數（若你 IDE 顯示位置不同，移到正確的位置）
         );
 
-        // ✅ 修正：retry() 現在要 (userId, foodLogId, deviceId, requestId)
+        // ✅ retry() 現在要 (userId, foodLogId, deviceId, requestId)
         svc.retry(1L, "log1", "device-1", "rid-1");
 
         assertEquals(FoodLogStatus.PENDING, log.getStatus());
@@ -126,6 +131,11 @@ class FoodLogRetryTest {
 
         AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
 
+        // ✅ NEW：若 FoodLogService 新增了 entitlementService（常見）
+        EntitlementService entitlementService = mock(EntitlementService.class);
+        when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
+                .thenReturn(EntitlementService.Tier.TRIAL);
+
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
         log.setUserId(1L);
@@ -140,7 +150,8 @@ class FoodLogRetryTest {
                 postProcessor,
                 clientActionMapper,
                 offClient,
-                abuseGuard
+                abuseGuard,
+                entitlementService // ✅ 補上第 14 個參數
         );
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,

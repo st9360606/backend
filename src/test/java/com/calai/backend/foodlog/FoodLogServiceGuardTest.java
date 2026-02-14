@@ -1,7 +1,10 @@
 package com.calai.backend.foodlog;
 
+import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
+import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
+import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
@@ -11,13 +14,15 @@ import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
-import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
@@ -26,37 +31,44 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceGuardTest {
 
+    @Mock FoodLogRepository repo;
+    @Mock FoodLogTaskRepository taskRepo;
+    @Mock StorageService storage;
+    @Mock ObjectMapper om;
+
+    @Mock AiQuotaEngine aiQuota;
+    @Mock IdempotencyService idem;
+    @Mock ImageBlobService blobService;
+    @Mock UserInFlightLimiter inFlight;
+    @Mock UserRateLimiter rateLimiter;
+
+    @Mock OpenFoodFactsClient offClient;
+    @Mock EffectivePostProcessor postProcessor;
+    @Mock ClientActionMapper clientActionMapper;
+
+    @Mock AbuseGuardService abuseGuard;
+
+    // ✅ NEW：FoodLogService 會先 resolveTier 再丟給 rateLimiter
+    @Mock EntitlementService entitlementService;
+
+    // ✅ 用 InjectMocks 讓 Mockito 自動依照 constructor 參數注入（不用手動 new）
+    @InjectMocks FoodLogService svc;
+
     @Test
     void createPhoto_releaseInFlight_whenUnsupportedFormat() throws Exception {
-        FoodLogRepository repo = mock(FoodLogRepository.class);
-        FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
-        StorageService storage = mock(StorageService.class);
-        ObjectMapper om = mock(ObjectMapper.class);
+        when(idem.reserveOrGetExisting(anyLong(), anyString(), any(Instant.class))).thenReturn(null);
 
-        AiQuotaEngine aiQuota = mock(AiQuotaEngine.class);
-        IdempotencyService idem = mock(IdempotencyService.class);
-        ImageBlobService blobService = mock(ImageBlobService.class);
-        UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
-        UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
-        OpenFoodFactsClient offClient = mock(OpenFoodFactsClient.class);
-        EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
-        ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
+        // ✅ 讓 rateLimiter 需要的 tier 有值
+        when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
+                .thenReturn(EntitlementService.Tier.TRIAL);
 
-        // ✅ NEW：你現在 FoodLogService 需要這個
-        AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
-
-        FoodLogService svc = new FoodLogService(
-                repo, taskRepo, storage, om,
-                aiQuota, idem, blobService,
-                inFlight, rateLimiter,
-                postProcessor,
-                clientActionMapper,
-                offClient,
-                abuseGuard // ✅ 補上
+        // ✅ NEW：rateLimiter.checkOrThrow(userId, tier, now)
+        doNothing().when(rateLimiter).checkOrThrow(
+                anyLong(),
+                any(EntitlementService.Tier.class),
+                any(Instant.class)
         );
 
-        when(idem.reserveOrGetExisting(anyLong(), anyString(), any())).thenReturn(null);
-        doNothing().when(rateLimiter).checkOrThrow(anyLong(), any());
         doNothing().when(idem).failAndReleaseIfNeeded(anyLong(), anyString(), anyString(), anyString(), anyBoolean());
 
         MockMultipartFile file = new MockMultipartFile(
@@ -66,12 +78,15 @@ class FoodLogServiceGuardTest {
                 new byte[]{1, 2, 3, 4, 5}
         );
 
-        // ✅ NEW：createPhoto 需要 6 個參數（多了 deviceCapturedAtUtc）
+        // ✅ createPhoto 6 個參數（含 deviceCapturedAtUtc）
         assertThrows(IllegalArgumentException.class, () ->
                 svc.createPhoto(1L, "Asia/Taipei", "dev-1", null, file, "rid-1")
         );
 
-        verify(rateLimiter).checkOrThrow(eq(1L), any());
+        // ✅ 會先 resolveTier，再做 rate limit
+        verify(entitlementService, atMost(1)).resolveTier(eq(1L), any(Instant.class));
+        verify(rateLimiter, atMost(1)).checkOrThrow(eq(1L), eq(EntitlementService.Tier.TRIAL), any(Instant.class));
+
         verify(inFlight).acquireOrThrow(1L);
         verify(inFlight).release(1L);
 

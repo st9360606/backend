@@ -18,6 +18,8 @@ class FoodLogEnvelopeJsonTest {
                 "id-1",
                 "DRAFT",
                 "DG-0",
+                "MODEL_TIER_HIGH", // ✅ tierUsed（新欄位）
+                false,             // ✅ fromCache（新欄位）
                 new FoodLogEnvelope.NutritionResult(
                         "Unknown food",
                         new FoodLogEnvelope.Quantity(1.0, "SERVING"),
@@ -40,7 +42,11 @@ class FoodLogEnvelopeJsonTest {
         assertThat(json).contains("\"nutritionResult\"");
         assertThat(json).contains("\"trace\"");
 
-        // ✅ 新欄位也順便硬驗收（避免未來有人改壞）
+        // ✅ v1.2：新欄位硬驗收（避免未來有人改壞）
+        assertThat(json).contains("\"tierUsed\"");
+        assertThat(json).contains("\"fromCache\"");
+
+        // ✅ 既有欄位也硬驗收
         assertThat(json).contains("\"warnings\"");
         assertThat(json).contains("\"degradedReason\"");
     }

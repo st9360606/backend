@@ -123,8 +123,6 @@ public class GeminiProviderClient implements ProviderClient {
             final String promptMain   = isLabel ? USER_PROMPT_LABEL_MAIN   : USER_PROMPT_MAIN;
             final String promptRepair = isLabel ? USER_PROMPT_LABEL_REPAIR : USER_PROMPT_REPAIR;
 
-            int labelVisionRetryCount = 0;
-
             // ===== 1) main call =====
             CallResult r1 = callAndExtract(bytes, mime, promptMain, modelId, isLabel, entity.getId());
             Tok tok = r1.tok;
@@ -141,7 +139,7 @@ public class GeminiProviderClient implements ProviderClient {
 
             // =========================================================
             // ✅ LABEL parse 失敗時：先 repair 抽值（不增加 API 次數）
-            //         只有「早斷」才 VISION retry 一次
+            //         不額外做 VISION retry（只做文字 repair / 截斷修補）
             // =========================================================
             if (isLabel && parsed1 == null) {
 
@@ -155,40 +153,6 @@ public class GeminiProviderClient implements ProviderClient {
                         ObjectNode effective = normalizeToEffective(parsed1);
                         return okAndReturn(modelId, entity, t0, tok, true, parsed1, effective);
                     }
-                }
-
-                boolean early = LabelJsonRepairUtil.looksLikeEarlyTruncation(r1.text);
-
-                boolean missingMost =
-                        (parsed1 == null)
-                        || parsed1.path("nutrients").path("carbs").isNull()
-                        || parsed1.path("nutrients").path("sugar").isNull()
-                        || parsed1.path("nutrients").path("fiber").isNull();
-
-                if (early && missingMost && labelVisionRetryCount < 1) {
-                    labelVisionRetryCount++;
-                    log.info("label_early_truncation_retry_vision foodLogId={}", entity.getId());
-
-                    CallResult r2 = callAndExtract(bytes, mime, promptMain, modelId, true, entity.getId());
-                    tok = Tok.mergePreferNew(tok, r2.tok);
-
-                    JsonNode parsed2 = (r2.functionArgs != null) ? r2.functionArgs : tryParseJson(r2.text);
-                    parsed2 = unwrapRootObjectOrNull(parsed2);
-
-                    if (parsed2 == null) {
-                        ObjectNode repaired2 = LabelJsonRepairUtil.repairOrExtract(om, r2.text, true);
-                        if (repaired2 != null) parsed2 = repaired2;
-                    }
-
-                    if (parsed2 != null) best = best.consider(parsed2);
-
-                    if (hasAnyNutrientValue(parsed2) && !isLabelIncomplete(parsed2)) {
-                        ObjectNode effective = normalizeToEffective(parsed2);
-                        return okAndReturn(modelId, entity, t0, tok, true, parsed2, effective);
-                    }
-
-                    if (parsed2 != null) parsed1 = parsed2;
-                    r1 = r2; // ✅ 後面 lastText / salvage 用最新文字
                 }
             }
 
