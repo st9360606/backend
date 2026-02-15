@@ -18,6 +18,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -41,17 +42,17 @@ public class FoodLogFlowTest {
         // 但同一個測試內兩次上傳要用同一份 bytes（才能 dedup）
         byte[] jpg = randomJpegLikeBytes(128);
 
-        String deviceUtcStr = "2026-01-15T12:00:00Z";
+        String deviceUtcStr = Instant.now()
+                .minusSeconds(60)                 // ✅ 1 分鐘前，必定在 30 天內
+                .truncatedTo(ChronoUnit.SECONDS)  // ✅ 去掉 nanos，避免一些 formatter/parse 差異
+                .toString();
         MockMultipartFile file = new MockMultipartFile(
                 "file", "demo.jpg", "image/jpeg", jpg
-        );
-        MockMultipartFile devicePart = new MockMultipartFile(
-                "deviceCapturedAtUtc", "", "text/plain", deviceUtcStr.getBytes(StandardCharsets.UTF_8)
         );
 
         String uploadResp = mvc.perform(multipart("/api/v1/food-logs/photo")
                         .file(file)
-                        .file(devicePart)
+                        .param("deviceCapturedAtUtc", deviceUtcStr)
                         .header("X-Client-Timezone", "Asia/Taipei")
                 )
                 .andExpect(status().isOk())
@@ -104,6 +105,7 @@ public class FoodLogFlowTest {
         LocalDate day = Instant.parse(deviceUtcStr).atZone(ZoneId.of("Asia/Taipei")).toLocalDate();
 
         String listResp = mvc.perform(get("/api/v1/food-logs")
+                        .header("X-Client-Timezone", "Asia/Taipei")
                         .param("fromLocalDate", day.toString())
                         .param("toLocalDate", day.toString())
                         .param("page", "0")

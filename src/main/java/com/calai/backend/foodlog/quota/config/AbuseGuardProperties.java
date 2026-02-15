@@ -30,7 +30,7 @@ public class AbuseGuardProperties {
     private Duration cooldown = Duration.ofMinutes(30);
 
     /** 強制降級（forceLowUntilUtc）時間 */
-    private Duration forceLow = Duration.ofHours(2);
+    private Duration forceLow = Duration.ofMinutes(30);
 
     /** in-memory key TTL（避免永遠累積） */
     private Duration keyTtl = Duration.ofHours(2);

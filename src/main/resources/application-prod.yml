@@ -75,7 +75,7 @@ app:
       minCacheHitRate: 0.10
       deviceSwitchThreshold: 3
       cooldown: 30m
-      forceLow: 2h
+      forceLow: 30m
       keyTtl: 2h
     modelTiers:
       MODEL_TIER_HIGH:

@@ -238,18 +238,43 @@ public class GeminiProviderClient implements ProviderClient {
                 }
             }
 
-            // ✅ Repair 改成 TEXT-ONLY：不再重送圖片
-            final boolean allowTextRepair = (!isLabel) || (parsed1 == null && r1.text != null && !r1.text.isBlank());
-            final int maxRepair = allowTextRepair
-                    ? (isLabel ? MAX_LABEL_REPAIR_CALLS : MAX_UNKNOWN_FOOD_REPAIR_CALLS)
-                    : 0;
+            final String baseRepairInput =
+                    (parsed1 != null) ? parsed1.toString()
+                            : (r1.text != null ? r1.text : "");
 
-            final String modelIdText = (maxRepair > 0) ? resolveModelIdText(entity) : null;
+            final boolean allowTextRepair =
+                    (!isLabel) ||
+                    (!baseRepairInput.isBlank() && (parsed1 == null || isLabelIncomplete(parsed1) || !hasAnyNutrientValue(parsed1)));
 
-            String lastText = r1.text;
+            final List<String> repairModelIds = new ArrayList<>();
+
+            if (allowTextRepair) {
+                if (isLabel) {
+                    // v1.2：LABEL repair 先 LOW(TEXT)
+                    repairModelIds.add(resolveModelIdTextByTier(ModelTier.MODEL_TIER_LOW));
+
+                    // 只有 base tier = HIGH 才允許再跑一次 HIGH(TEXT)
+                    ModelTier baseTier = resolveTierFromDegradeLevel(entity.getDegradeLevel());
+                    if (baseTier == ModelTier.MODEL_TIER_HIGH) {
+                        repairModelIds.add(resolveModelIdTextByTier(ModelTier.MODEL_TIER_HIGH));
+                    }
+
+                    // 仍受上限保護（避免你未來把 list 塞更多）
+                    if (repairModelIds.size() > MAX_LABEL_REPAIR_CALLS) {
+                        repairModelIds.subList(MAX_LABEL_REPAIR_CALLS, repairModelIds.size()).clear();
+                    }
+                } else {
+                    // Photo/Album：維持你原本策略（跟 degrade tier 走）
+                    repairModelIds.add(resolveModelIdText(entity));
+                }
+            }
+
+            String lastText = baseRepairInput;
+            String lastModelIdText = null; // ✅ NEW：記住最後一次使用的 TEXT modelId
 
             // ===== 2) repair loop (TEXT-ONLY) =====
-            for (int i = 1; i <= maxRepair; i++) {
+            for (String modelIdText : repairModelIds) {
+                lastModelIdText = modelIdText; // ✅ NEW：每次迴圈更新
 
                 String repairPromptText = buildTextOnlyRepairPrompt(isLabel, lastText);
                 CallResult rn = callAndExtractTextOnly(repairPromptText, modelIdText, entity.getId());
@@ -269,8 +294,9 @@ public class GeminiProviderClient implements ProviderClient {
 
                 if (hasAnyNutrientValue(parsedN)) {
                     if (isLabel && isLabelIncomplete(parsedN)) {
-                        log.warn("label_incomplete_after_text_repair foodLogId={} preview={}",
-                                entity.getId(), safeOneLine200(rn.text));
+                        log.warn("label_incomplete_after_text_repair foodLogId={} modelIdText={} preview={}",
+                                entity.getId(), modelIdText, safeOneLine200(rn.text));
+                        // 不 return，讓下一輪（可能是 HIGH(TEXT)）有機會補完整
                     } else {
                         ObjectNode effective = normalizeToEffective(parsedN);
                         return okAndReturn(modelId, entity, t0, tok, isLabel, parsedN, effective);
@@ -330,12 +356,10 @@ public class GeminiProviderClient implements ProviderClient {
                 if (name == null) name = extractFoodNameFromBrokenText(lastText);
 
                 if (name != null && !name.isBlank()) {
-                    String midText = (modelIdText != null) ? modelIdText : resolveModelIdText(entity);
+                    String midText = (lastModelIdText != null) ? lastModelIdText : resolveModelIdText(entity);
                     String contextJson = (lastText != null && !lastText.isBlank()) ? lastText : null;
-
                     ObjectNode estimated = tryNameOnlyEstimateOrNull(name, contextJson, midText, entity.getId());
                     if (estimated != null) {
-                        // estimated 已是 effective 形狀，直接走單一出口（round 仍會保底做一次）
                         return okAndReturn(modelId, entity, t0, tok, false, estimated, estimated);
                     }
                 }
@@ -561,6 +585,11 @@ public class GeminiProviderClient implements ProviderClient {
 
     private String resolveModelIdText(FoodLogEntity entity) {
         ModelTier tier = resolveTierFromDegradeLevel(entity.getDegradeLevel());
+        AiModelRouter.Resolved r = modelRouter.resolveOrThrow(tier, ModelMode.TEXT);
+        return r.modelId();
+    }
+
+    private String resolveModelIdTextByTier(ModelTier tier) {
         AiModelRouter.Resolved r = modelRouter.resolveOrThrow(tier, ModelMode.TEXT);
         return r.modelId();
     }
