@@ -63,6 +63,16 @@ management:
 
 app:
   ai:
+    quota:
+      cooldown:
+        step-minutes: 10   # cooldownStepMinutes
+        max-minutes: 30    # maxCooldownMinutes
+      trial:
+        premium-limit: 15  # trialPremiumLimit
+        total-limit: 30    # trialTotalLimit
+      paid:
+        premium-limit: 600 # paidPremiumLimit
+        total-limit: 1000  # paidTotalLimit
     abuse-guard:
       enabled: true
       window: 60m

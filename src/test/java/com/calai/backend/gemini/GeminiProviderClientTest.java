@@ -1,143 +1,262 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.provider.config.GeminiProperties;
+import com.calai.backend.foodlog.config.AiModelRouter;
+import com.calai.backend.foodlog.entity.FoodLogEntity;
+import com.calai.backend.foodlog.model.ModelMode;
 import com.calai.backend.foodlog.provider.GeminiProviderClient;
+import com.calai.backend.foodlog.provider.config.GeminiProperties;
+import com.calai.backend.foodlog.quota.model.ModelTier;
+import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.task.FoodLogWarning;
 import com.calai.backend.foodlog.task.ProviderTelemetry;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
+import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.web.client.RestClient;
 
-import java.lang.reflect.Constructor;
-import java.util.Arrays;
-import java.util.Comparator;
+import java.io.ByteArrayInputStream;
+import java.net.http.HttpClient;
 
-import static org.assertj.core.api.Assertions.*;
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-public class GeminiProviderClientTest {
+class GeminiProviderClientTest {
 
-    private final ObjectMapper om = new ObjectMapper();
+    @RegisterExtension
+    static WireMockExtension wm = WireMockExtension.newInstance()
+            .options(wireMockConfig().dynamicPort())
+            .build();
+
+    private static RestClient restClientHttp11(String baseUrl) {
+        // ✅ 避免 RestClient / JDK HttpClient 用到 HTTP/2(h2c) 導致 WireMock EOF
+        HttpClient jdk = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+
+        return RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(new JdkClientHttpRequestFactory(jdk))
+                .build();
+    }
 
     /**
-     * ✅ 不依賴 GeminiProviderClient 的 constructor 參數數量。
-     * 自動找「參數最多」constructor，並依型別配對：
-     * - ObjectMapper -> om
-     * - GeminiProperties -> props
-     * - ProviderTelemetry -> telemetry
-     * - 其他塞 null / primitive 預設值
+     * ✅ 用 ObjectMapper 組「合法 Gemini 回應 JSON」
+     * - 你不用再手寫 candidates 的括號
+     * - "text" 裡面有換行也會自動 escape 成 \\n，不會再炸 CTRL-CHAR
      */
-    private GeminiProviderClient newClient(GeminiProperties props, ProviderTelemetry telemetry) {
-        try {
-            Constructor<?> ctor = Arrays.stream(GeminiProviderClient.class.getDeclaredConstructors())
-                    .max(Comparator.comparingInt(Constructor::getParameterCount))
-                    .orElseThrow();
+    private static String geminiRespWithText(ObjectMapper om, String text, int p, int c, int t) throws Exception {
+        ObjectNode root = om.createObjectNode();
+        var candidates = root.putArray("candidates");
+        var cand0 = candidates.addObject();
+        var content = cand0.putObject("content");
+        var parts = content.putArray("parts");
+        parts.addObject().put("text", text);
 
-            Object[] args = new Object[ctor.getParameterCount()];
-            Class<?>[] types = ctor.getParameterTypes();
+        var usage = root.putObject("usageMetadata");
+        usage.put("promptTokenCount", p);
+        usage.put("candidatesTokenCount", c);
+        usage.put("totalTokenCount", t);
 
-            for (int i = 0; i < types.length; i++) {
-                Class<?> t = types[i];
+        return om.writeValueAsString(root);
+    }
 
-                if (ObjectMapper.class.isAssignableFrom(t)) {
-                    args[i] = om;
-                } else if (GeminiProperties.class.isAssignableFrom(t)) {
-                    args[i] = props;
-                } else if (ProviderTelemetry.class.isAssignableFrom(t)) {
-                    args[i] = telemetry;
-                } else if (t.isPrimitive()) {
-                    args[i] = primitiveDefault(t);
-                } else {
-                    args[i] = null;
-                }
-            }
+    @Test
+    void photo_should_call_main_and_at_most_one_text_repair_then_fallback_unknown() throws Exception {
+        String pathRegex = "/v1beta/models/.*:generateContent";
+        ObjectMapper om = new ObjectMapper();
 
-            ctor.setAccessible(true);
-            return (GeminiProviderClient) ctor.newInstance(args);
-        } catch (Exception e) {
-            throw new RuntimeException("newClient failed", e);
+        // 1) main (VISION): foodName 有，但 macros 全 null => gate fail => trigger repair
+        String mainText = """
+        {"foodName":"Paella","quantity":{"value":1,"unit":"SERVING"},
+         "nutrients":{"kcal":420,"protein":null,"fat":null,"carbs":null,"fiber":null,"sugar":null,"sodium":null},
+         "confidence":0.6,"warnings":[]}
+        """.replace("\n", "").replace("\r", "").replace(" ", "");
+
+        // 2) TEXT-ONLY repair：仍失敗（全部 null） -> 最後會走 fallbackUnknownFoodFromBrokenText()
+        String repairText = """
+        {"foodName":"Paella","quantity":{"value":1,"unit":"SERVING"},
+         "nutrients":{"kcal":null,"protein":null,"fat":null,"carbs":null,"fiber":null,"sugar":null,"sodium":null},
+         "confidence":0.2,"warnings":["LOW_CONFIDENCE"]}
+        """.replace("\n", "").replace("\r", "").replace(" ", "");
+
+        String mainResp   = geminiRespWithText(om, mainText,   100, 50, 150);
+        String repairResp = geminiRespWithText(om, repairText,  80, 40, 120);
+
+        wm.stubFor(post(urlPathMatching(pathRegex))
+                .inScenario("seq-photo")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody(mainResp))
+                .willSetStateTo("REPAIR"));
+
+        wm.stubFor(post(urlPathMatching(pathRegex))
+                .inScenario("seq-photo")
+                .whenScenarioStateIs("REPAIR")
+                .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody(repairResp)));
+
+        RestClient http = restClientHttp11(wm.getRuntimeInfo().getHttpBaseUrl());
+
+        GeminiProperties props = mock(GeminiProperties.class);
+        when(props.getApiKey()).thenReturn("TEST_API_KEY");
+        when(props.getMaxOutputTokens()).thenReturn(1024);
+        when(props.getTemperature()).thenReturn(0.0);
+        when(props.isLabelUseFunctionCalling()).thenReturn(false);
+
+        ProviderTelemetry telemetry = mock(ProviderTelemetry.class);
+
+        AiModelRouter router = mock(AiModelRouter.class);
+        when(router.resolveOrThrow(eq(ModelTier.MODEL_TIER_HIGH), eq(ModelMode.VISION)))
+                .thenReturn(new AiModelRouter.Resolved("GEMINI", "gemini-vision"));
+        when(router.resolveOrThrow(eq(ModelTier.MODEL_TIER_HIGH), eq(ModelMode.TEXT)))
+                .thenReturn(new AiModelRouter.Resolved("GEMINI", "gemini-text"));
+
+        GeminiProviderClient client = new GeminiProviderClient(http, props, om, telemetry, router);
+
+        StorageService storage = mock(StorageService.class);
+        when(storage.open(anyString())).thenReturn(
+                new StorageService.OpenResult(
+                        new ByteArrayInputStream(new byte[]{1, 2, 3}),
+                        3L,
+                        "image/jpeg"
+                )
+        );
+
+        FoodLogEntity e = new FoodLogEntity();
+        e.setId("foodlog-1");
+        e.setMethod("PHOTO");
+        e.setDegradeLevel("DG-0");
+        e.setImageObjectKey("k1");
+        e.setImageContentType("image/jpeg");
+
+        var out = client.process(e, storage);
+
+        assertNotNull(out);
+        assertEquals("GEMINI", out.provider());
+
+        JsonNode effective = out.effective();
+        assertNotNull(effective);
+        assertEquals("Paella", effective.path("foodName").asText());
+
+        // ✅ repair 失敗後會走 fallbackUnknownFoodFromBrokenText -> UNKNOWN_FOOD + LOW_CONFIDENCE
+        assertTrue(containsWarning(effective, FoodLogWarning.UNKNOWN_FOOD.name()));
+        assertTrue(containsWarning(effective, FoodLogWarning.LOW_CONFIDENCE.name()));
+
+        // ✅ 最關鍵：只會 hit 2 次（main + text-only repair）
+        wm.verify(2, postRequestedFor(urlPathMatching(pathRegex)));
+
+        // ✅ token 加總：100+80=180, 50+40=90, 150+120=270
+        verify(telemetry, atLeastOnce()).ok(
+                eq("GEMINI"),
+                eq("gemini-vision"),
+                eq("foodlog-1"),
+                anyLong(),
+                eq(180),
+                eq(90),
+                eq(270)
+        );
+    }
+
+    @Test
+    void label_should_scale_to_whole_package_and_clear_servings_meta() throws Exception {
+        String pathRegex = "/v1beta/models/.*:generateContent";
+        ObjectMapper om = new ObjectMapper();
+
+        // ✅ 注意：label 的 "text" 內容就算有換行也沒差，helper 會幫你 escape
+        String labelText = """
+        {
+          "foodName":"Test Product",
+          "quantity":{"value":30,"unit":"GRAM"},
+          "nutrients":{"kcal":100,"protein":null,"fat":null,"carbs":null,"fiber":null,"sugar":null,"sodium":10},
+          "confidence":0.9,
+          "warnings":[],
+          "labelMeta":{"servingsPerContainer":2,"basis":"PER_SERVING"}
         }
-    }
+        """;
 
-    private static Object primitiveDefault(Class<?> t) {
-        if (t == boolean.class) return false;
-        if (t == byte.class) return (byte) 0;
-        if (t == short.class) return (short) 0;
-        if (t == int.class) return 0;
-        if (t == long.class) return 0L;
-        if (t == float.class) return 0f;
-        if (t == double.class) return 0d;
-        if (t == char.class) return (char) 0;
-        return 0;
-    }
+        String labelResp = geminiRespWithText(om, labelText, 10, 2, 12);
 
-    @Test
-    void normalize_ok_should_keep_nutrients() throws Exception {
-        GeminiProperties props = new GeminiProperties();
-        props.setApiKey("dummy"); // 不會用到（因為不打 http）
+        wm.stubFor(post(urlPathMatching(pathRegex))
+                .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody(labelResp)));
 
-        ProviderTelemetry telemetry = new ProviderTelemetry();
-        GeminiProviderClient client = newClient(props, telemetry);
+        RestClient http = restClientHttp11(wm.getRuntimeInfo().getHttpBaseUrl());
 
-        var raw = om.readTree("""
-          {
-            "foodName":"Chicken Salad",
-            "quantity":{"value":1,"unit":"SERVING"},
-            "nutrients":{"kcal":350,"protein":25,"fat":18,"carbs":20,"fiber":6,"sugar":5,"sodium":450},
-            "confidence":0.72
-          }
-        """);
+        GeminiProperties props = mock(GeminiProperties.class);
+        when(props.getApiKey()).thenReturn("TEST_API_KEY");
+        when(props.getMaxOutputTokens()).thenReturn(1024);
+        when(props.getTemperature()).thenReturn(0.0);
+        when(props.isLabelUseFunctionCalling()).thenReturn(false);
 
-        var m = GeminiProviderClient.class.getDeclaredMethod(
-                "normalizeToEffective",
-                com.fasterxml.jackson.databind.JsonNode.class
+        ProviderTelemetry telemetry = mock(ProviderTelemetry.class);
+
+        AiModelRouter router = mock(AiModelRouter.class);
+        when(router.resolveOrThrow(eq(ModelTier.MODEL_TIER_HIGH), eq(ModelMode.VISION)))
+                .thenReturn(new AiModelRouter.Resolved("GEMINI", "gemini-vision"));
+        when(router.resolveOrThrow(eq(ModelTier.MODEL_TIER_HIGH), eq(ModelMode.TEXT)))
+                .thenReturn(new AiModelRouter.Resolved("GEMINI", "gemini-text"));
+
+        GeminiProviderClient client = new GeminiProviderClient(http, props, om, telemetry, router);
+
+        StorageService storage = mock(StorageService.class);
+        when(storage.open(anyString())).thenReturn(
+                new StorageService.OpenResult(
+                        new ByteArrayInputStream(new byte[]{9, 9, 9}),
+                        3L,
+                        "image/jpeg"
+                )
         );
-        m.setAccessible(true);
 
-        ObjectNode eff = (ObjectNode) m.invoke(client, raw);
+        FoodLogEntity e = new FoodLogEntity();
+        e.setId("foodlog-label-1");
+        e.setMethod("LABEL");
+        e.setDegradeLevel("DG-0");
+        e.setImageObjectKey("k-label");
+        e.setImageContentType("image/jpeg");
 
-        assertThat(eff.get("foodName").asText()).isEqualTo("Chicken Salad");
-        assertThat(eff.get("quantity").get("unit").asText()).isEqualTo("SERVING");
-        assertThat(eff.get("nutrients").get("fiber").asDouble()).isEqualTo(6d);
-        assertThat(eff.get("confidence").asDouble()).isEqualTo(0.72d);
+        var out = client.process(e, storage);
+
+        JsonNode eff = out.effective();
+        assertEquals("Test Product", eff.path("foodName").asText());
+
+        // ✅ scale：100*2=200, 10*2=20
+        assertEquals(200.0, eff.path("nutrients").path("kcal").asDouble(), 0.0001);
+        assertEquals(20.0, eff.path("nutrients").path("sodium").asDouble(), 0.0001);
+
+        // ✅ quantity -> 1 SERVING（代表整包）
+        assertEquals(1.0, eff.path("quantity").path("value").asDouble(), 0.0001);
+        assertEquals("SERVING", eff.path("quantity").path("unit").asText());
+
+        // ✅ labelMeta：servings 清掉 + basis 改 WHOLE_PACKAGE
+        assertTrue(eff.has("labelMeta"));
+        assertTrue(eff.path("labelMeta").path("servingsPerContainer").isNull());
+        assertEquals("WHOLE_PACKAGE", eff.path("labelMeta").path("basis").asText());
+
+        wm.verify(1, postRequestedFor(urlPathMatching(pathRegex)));
+
+        verify(telemetry, atLeastOnce()).ok(
+                eq("GEMINI"),
+                eq("gemini-vision"),
+                eq("foodlog-label-1"),
+                anyLong(),
+                eq(10),
+                eq(2),
+                eq(12)
+        );
     }
 
-    /**
-     * ✅ 目前 normalizeToEffective 的行為：
-     * - nutrients 出現負數，不會 throw
-     * - 會把該欄位轉成 null（sanitized）
-     */
-    @Test
-    void normalize_negative_number_should_be_sanitized_to_null() throws Exception {
-        GeminiProperties props = new GeminiProperties();
-        props.setApiKey("dummy");
-
-        ProviderTelemetry telemetry = new ProviderTelemetry();
-        GeminiProviderClient client = newClient(props, telemetry);
-
-        var raw = om.readTree("""
-          {
-            "foodName":"X",
-            "quantity":{"value":1,"unit":"SERVING"},
-            "nutrients":{"kcal":-1,"protein":1,"fat":1,"carbs":1}
-          }
-        """);
-
-        var m = GeminiProviderClient.class.getDeclaredMethod(
-                "normalizeToEffective",
-                com.fasterxml.jackson.databind.JsonNode.class
-        );
-        m.setAccessible(true);
-
-        ObjectNode eff = (ObjectNode) m.invoke(client, raw);
-
-        // kcal 負數 → 被 sanitize 成 null
-        assertThat(eff.get("nutrients").get("kcal").isNull()).isTrue();
-
-        // 其他合法值仍保留
-        assertThat(eff.get("nutrients").get("protein").asDouble()).isEqualTo(1d);
-        assertThat(eff.get("nutrients").get("fat").asDouble()).isEqualTo(1d);
-        assertThat(eff.get("nutrients").get("carbs").asDouble()).isEqualTo(1d);
-
-        // confidence 未提供 → normalizeToEffective 會輸出 null
-        assertThat(eff.get("confidence").isNull()).isTrue();
+    private static boolean containsWarning(JsonNode effective, String code) {
+        if (effective == null) return false;
+        JsonNode w = effective.path("warnings");
+        if (!w.isArray()) return false;
+        for (JsonNode it : w) {
+            if (it != null && !it.isNull() && code.equalsIgnoreCase(it.asText())) return true;
+        }
+        return false;
     }
 }

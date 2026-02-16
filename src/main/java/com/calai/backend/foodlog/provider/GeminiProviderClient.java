@@ -28,7 +28,6 @@ import java.util.*;
 @Slf4j
 public class GeminiProviderClient implements ProviderClient {
 
-    private static final int MAX_UNKNOWN_FOOD_REPAIR_CALLS = 1;
     private static final int MAX_LABEL_REPAIR_CALLS = 1;
     private static final int PREVIEW_LEN = 200;
     private static final String FN_EMIT_NUTRITION = "emitNutrition";
@@ -89,7 +88,6 @@ public class GeminiProviderClient implements ProviderClient {
     private final ObjectMapper om;
     private final ProviderTelemetry telemetry;
     private final AiModelRouter modelRouter;
-    private static final int MAX_NAME_ONLY_ESTIMATE_CALLS = 1;
     public GeminiProviderClient(RestClient http, GeminiProperties props, ObjectMapper om,
                                 ProviderTelemetry telemetry, AiModelRouter modelRouter) {
         this.http = http;
@@ -250,19 +248,8 @@ public class GeminiProviderClient implements ProviderClient {
 
             if (allowTextRepair) {
                 if (isLabel) {
-                    // v1.2：LABEL repair 先 LOW(TEXT)
+                    // ✅ LABEL：封頂 1 次（固定 LOW(TEXT)）
                     repairModelIds.add(resolveModelIdTextByTier(ModelTier.MODEL_TIER_LOW));
-
-                    // 只有 base tier = HIGH 才允許再跑一次 HIGH(TEXT)
-                    ModelTier baseTier = resolveTierFromDegradeLevel(entity.getDegradeLevel());
-                    if (baseTier == ModelTier.MODEL_TIER_HIGH) {
-                        repairModelIds.add(resolveModelIdTextByTier(ModelTier.MODEL_TIER_HIGH));
-                    }
-
-                    // 仍受上限保護（避免你未來把 list 塞更多）
-                    if (repairModelIds.size() > MAX_LABEL_REPAIR_CALLS) {
-                        repairModelIds.subList(MAX_LABEL_REPAIR_CALLS, repairModelIds.size()).clear();
-                    }
                 } else {
                     // Photo/Album：維持你原本策略（跟 degrade tier 走）
                     repairModelIds.add(resolveModelIdText(entity));
@@ -270,16 +257,14 @@ public class GeminiProviderClient implements ProviderClient {
             }
 
             String lastText = baseRepairInput;
-            String lastModelIdText = null; // ✅ NEW：記住最後一次使用的 TEXT modelId
 
             // ===== 2) repair loop (TEXT-ONLY) =====
             for (String modelIdText : repairModelIds) {
-                lastModelIdText = modelIdText; // ✅ NEW：每次迴圈更新
 
                 String repairPromptText = buildTextOnlyRepairPrompt(isLabel, lastText);
                 CallResult rn = callAndExtractTextOnly(repairPromptText, modelIdText, entity.getId());
 
-                tok = Tok.mergePreferNew(tok, rn.tok);
+                tok = tok.plus(rn.tok);
                 lastText = rn.text;
 
                 JsonNode parsedN = tryParseJson(rn.text);
@@ -299,7 +284,7 @@ public class GeminiProviderClient implements ProviderClient {
                         // 不 return，讓下一輪（可能是 HIGH(TEXT)）有機會補完整
                     } else {
                         ObjectNode effective = normalizeToEffective(parsedN);
-                        return okAndReturn(modelId, entity, t0, tok, isLabel, parsedN, effective);
+                        return okAndReturn(modelIdText, entity, t0, tok, isLabel, parsedN, effective);
                     }
                 }
 
@@ -347,24 +332,6 @@ public class GeminiProviderClient implements ProviderClient {
                 ObjectNode effective = normalizeToEffective(fb);
                 return okAndReturn(modelId, entity, t0, tok, true, fb, effective);
             }
-
-            // ✅ Photo/Album：保底（不送圖片）→ name-only estimate
-            if (!isLabel && MAX_NAME_ONLY_ESTIMATE_CALLS > 0) {
-                String name = null;
-
-                name = getFoodNameOrNull(parsed1);
-                if (name == null) name = extractFoodNameFromBrokenText(lastText);
-
-                if (name != null && !name.isBlank()) {
-                    String midText = (lastModelIdText != null) ? lastModelIdText : resolveModelIdText(entity);
-                    String contextJson = (lastText != null && !lastText.isBlank()) ? lastText : null;
-                    ObjectNode estimated = tryNameOnlyEstimateOrNull(name, contextJson, midText, entity.getId());
-                    if (estimated != null) {
-                        return okAndReturn(modelId, entity, t0, tok, false, estimated, estimated);
-                    }
-                }
-            }
-
             ObjectNode fbUnknown = fallbackUnknownFoodFromBrokenText(lastText);
             ObjectNode effective = normalizeToEffective(fbUnknown);
             return okAndReturn(modelId, entity, t0, tok, false, fbUnknown, effective);
@@ -664,75 +631,6 @@ public class GeminiProviderClient implements ProviderClient {
         return root;
     }
 
-    private static String getFoodNameOrNull(JsonNode root) {
-        root = unwrapRootObjectOrNull(root);
-        if (root == null || !root.isObject()) return null;
-        JsonNode n = root.get("foodName");
-        if (n == null || n.isNull()) return null;
-        String s = n.asText(null);
-        return (s == null || s.isBlank()) ? null : s.trim();
-    }
-
-    private static void ensureLowConfidence(ObjectNode raw) {
-        if (raw == null) return;
-
-        // confidence <= 0.35
-        Double conf = parseNumberNodeOrText(raw.get("confidence"));
-        if (conf == null || conf > 0.35) raw.put("confidence", 0.35);
-
-        // warnings add LOW_CONFIDENCE
-        ArrayNode w = raw.withArray("warnings");
-        boolean has = false;
-        for (JsonNode it : w) {
-            if (it != null && !it.isNull() && FoodLogWarning.LOW_CONFIDENCE.name().equalsIgnoreCase(it.asText())) {
-                has = true; break;
-            }
-        }
-        if (!has) w.add(FoodLogWarning.LOW_CONFIDENCE.name());
-    }
-
-    private ObjectNode tryNameOnlyEstimateOrNull(String foodName, String contextJson, String modelIdText, String foodLogIdForLog) {
-        if (foodName == null || foodName.isBlank()) return null;
-
-        String sys = "You are a nutrition estimation engine. Return ONLY ONE minified JSON object. No markdown. No extra text.";
-
-        String ctx = (contextJson == null) ? "" : truncateForPrompt(contextJson, 1200);
-
-        String prompt = """
-        Estimate typical nutrition for ONE unit of the packaged food described below.
-
-        PRODUCT_NAME: %s
-
-        CONTEXT_JSON (may be incomplete; use only as hints):
-        %s
-
-        Output requirements:
-        - Return ONE MINIFIED JSON object ONLY (no markdown, no extra text, no extra keys).
-        - You MUST output ALL required keys:
-          foodName, quantity{value,unit}, nutrients{kcal,protein,fat,carbs,fiber,sugar,sodium}, confidence, warnings
-        - You MUST provide numeric estimates at least for: kcal, protein, fat, carbs (NOT all null).
-        - If uncertain, set confidence <= 0.35 and include LOW_CONFIDENCE warning.
-        - quantity: default 1 SERVING (unless context clearly implies grams/ml, then use GRAM/ML).
-        - sodium in mg; macros in g.
-        """.formatted(foodName, ctx);
-
-        CallResult r = callAndExtractTextOnly(prompt, modelIdText, foodLogIdForLog, sys);
-        JsonNode parsed = tryParseJson(r.text);
-        parsed = unwrapRootObjectOrNull(parsed);
-        if (parsed == null || !parsed.isObject()) return null;
-
-        // 若它仍然全 null，就當失敗
-        if (isAllNutrientsNull(parsed)) return null;
-
-        ObjectNode effective = normalizeToEffective(parsed);
-        roundNutrients1dp(effective); // ✅ name-only estimate 也 round
-
-        // 保底：強制低信心
-        ensureLowConfidence(effective);
-
-        return effective;
-    }
-
     private static String buildTextOnlyRepairPrompt(boolean isLabel, String previousOutput) {
         String prev = truncateForPrompt(previousOutput, 4000); // ✅ 防止 previousOutput 太肥吃爆 tokens
 
@@ -846,7 +744,7 @@ public class GeminiProviderClient implements ProviderClient {
 
         // Photo/Album：維持原本（不動）
         gen.put("responseMimeType", "application/json");
-        gen.set("_responseJsonSchema", nutritionJsonSchema());
+        gen.set("responseJsonSchema", nutritionJsonSchema());
         gen.put("maxOutputTokens", props.getMaxOutputTokens());
         gen.put("temperature", props.getTemperature());
         return root;
@@ -1201,12 +1099,12 @@ public class GeminiProviderClient implements ProviderClient {
     private static boolean isNoFoodTextSignal(String rawText) {
         if (rawText == null) return false;
         String lower = rawText.toLowerCase(Locale.ROOT);
-        return lower.contains("no food")
-               || lower.contains("no meal")
+        // 只保留「非常明確」的 no-food 說法
+        return lower.contains("no food detected")
+               || lower.contains("no food present")
+               || lower.contains("not a food")
                || lower.contains("not food")
-               || lower.contains("undetected")
-               || lower.contains("cannot identify")
-               || lower.contains("unable to identify");
+               || lower.contains("no meal");
     }
 
     private static String extractJoinedTextOrNull(JsonNode resp) {
@@ -1504,7 +1402,7 @@ public class GeminiProviderClient implements ProviderClient {
         return root;
     }
 
-    public final class NutritionQualityGate {
+    public static final class NutritionQualityGate {
 
         private NutritionQualityGate() {}
 
@@ -1988,35 +1886,42 @@ public class GeminiProviderClient implements ProviderClient {
     private static void applyWholePackageScalingIfNeeded(JsonNode raw, ObjectNode effective) {
         if (raw == null || effective == null) return;
 
-        boolean doScale = false;
         Double servings = null;
+        String basis = null;
 
         JsonNode lm = raw.get("labelMeta");
         if (lm != null && lm.isObject()) {
             servings = parseNumberNodeOrText(lm.get("servingsPerContainer"));
-            String basis = (lm.get("basis") == null || lm.get("basis").isNull())
-                    ? null : lm.get("basis").asText(null);
-
-            doScale = (servings != null && servings > 1.0) && "PER_SERVING".equalsIgnoreCase(basis);
+            basis = (lm.get("basis") == null || lm.get("basis").isNull()) ? null : lm.get("basis").asText(null);
         }
 
-        if (doScale) {
-            JsonNode nNode = effective.get("nutrients");
-            if (nNode != null && nNode.isObject()) {
-                ObjectNode n = (ObjectNode) nNode;
-                for (String k : new String[]{"kcal","protein","fat","carbs","fiber","sugar","sodium"}) {
-                    JsonNode v = n.get(k);
-                    if (v != null && v.isNumber()) {
-                        n.put(k, v.asDouble() * servings);
-                    }
+        boolean doScale = (servings != null && servings > 1.0) && "PER_SERVING".equalsIgnoreCase(basis);
+        if (!doScale) return;
+
+        // 1) scale nutrients
+        JsonNode nNode = effective.get("nutrients");
+        if (nNode != null && nNode.isObject()) {
+            ObjectNode n = (ObjectNode) nNode;
+            for (String k : new String[]{"kcal","protein","fat","carbs","fiber","sugar","sodium"}) {
+                JsonNode v = n.get(k);
+                if (v != null && v.isNumber()) {
+                    n.put(k, v.asDouble() * servings);
                 }
             }
+        }
 
-            JsonNode q = effective.get("quantity");
-            if (q != null && q.isObject()) {
-                ((ObjectNode) q).put("value", 1d);
-                ((ObjectNode) q).put("unit", "SERVING");
-            }
+        // 2) quantity: 表示「整包」但 enum 沒有 PACKAGE，只能用 1 SERVING 代表「一包」
+        ObjectNode q = (ObjectNode) effective.path("quantity");
+        if (q.isObject()) {
+            q.put("value", 1d);
+            q.put("unit", "SERVING");
+        }
+
+        // 3) ✅ 修正 labelMeta：避免下游重複 scale
+        if (effective.has("labelMeta") && effective.get("labelMeta").isObject()) {
+            ObjectNode outLm = (ObjectNode) effective.get("labelMeta");
+            outLm.putNull("servingsPerContainer");     // ✅ 建議清掉
+            outLm.put("basis", "WHOLE_PACKAGE");       // ✅ 關鍵：語意改成整包
         }
     }
 
@@ -2308,13 +2213,20 @@ public class GeminiProviderClient implements ProviderClient {
     private record CallResult(Tok tok, String text, JsonNode functionArgs) {}
 
     private record Tok(Integer promptTok, Integer candTok, Integer totalTok) {
-        static Tok mergePreferNew(Tok oldTok, Tok newTok) {
-            if (newTok == null) return oldTok;
+
+        Tok plus(Tok other) {
+            if (other == null) return this;
             return new Tok(
-                    newTok.promptTok != null ? newTok.promptTok : oldTok.promptTok,
-                    newTok.candTok != null ? newTok.candTok : oldTok.candTok,
-                    newTok.totalTok != null ? newTok.totalTok : oldTok.totalTok
+                    add(this.promptTok, other.promptTok),
+                    add(this.candTok, other.candTok),
+                    add(this.totalTok, other.totalTok)
             );
+        }
+
+        private static Integer add(Integer a, Integer b) {
+            if (a == null) return b;
+            if (b == null) return a;
+            return a + b;
         }
     }
 
