@@ -2263,5 +2263,4 @@ public class GeminiProviderClient implements ProviderClient {
             }
         }
     }
-
 }

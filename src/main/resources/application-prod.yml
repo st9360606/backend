@@ -133,6 +133,14 @@ app:
     products:
       monthly: [ "bitecal_monthly" ]
       yearly: [ "bitecal_yearly" ]
+  openfoodfacts:
+    base-url: "https://world.openfoodfacts.org"
+    connect-timeout: "PT3S"
+    read-timeout: "PT5S"
+    user-agent: "BitCal_AI/1.0 (contact: dev@bitcalai.example)"
+    cache:
+      ttl: "PT6H"
+      max-size: 50000
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000

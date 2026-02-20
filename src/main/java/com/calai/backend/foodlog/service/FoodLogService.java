@@ -1,6 +1,9 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
+import com.calai.backend.foodlog.barcode.OffHttpException;
+import com.calai.backend.foodlog.barcode.OffParseException;
+import com.calai.backend.foodlog.barcode.OpenFoodFactsLookupService;
 import com.calai.backend.foodlog.config.FoodLogTierResolver;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
@@ -38,7 +41,6 @@ import org.springframework.beans.factory.annotation.Value;
 import java.util.Locale;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper;
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -61,6 +63,17 @@ public class FoodLogService {
 
     private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024; // 8MB（先保守）
 
+    /**
+     * ✅ 所有入口統一的 deviceId normalize：
+     * - null / blank → "uid-{userId}"
+     * - trim 後回傳
+     */
+    private static String normalizeDeviceId(Long userId, String deviceId) {
+        if (deviceId == null) return "uid-" + userId;
+        String s = deviceId.trim();
+        return s.isEmpty() ? ("uid-" + userId) : s;
+    }
+
     private final FoodLogRepository repo;
     private final FoodLogTaskRepository taskRepo;
     private final StorageService storage;
@@ -74,15 +87,22 @@ public class FoodLogService {
     private final ClientActionMapper clientActionMapper;
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
-    private final OpenFoodFactsClient offClient;
     private final AbuseGuardService abuseGuard;
     private final EntitlementService entitlementService;
+    private final OpenFoodFactsLookupService offLookup;
 
     // =========================
     // S4-05：ALBUM
     // =========================
     @Transactional
-    public FoodLogEnvelope createAlbum(Long userId, String clientTz, String deviceId, MultipartFile file, String requestId) throws Exception{
+    public FoodLogEnvelope createAlbum(
+            Long userId,
+            String clientTz,
+            String deviceId,
+            MultipartFile file,
+            String requestId
+    ) throws Exception {
+
         ZoneId tz = parseTzOrUtc(clientTz);
         Instant serverNow = Instant.now();
         validateUploadBasics(file);
@@ -94,7 +114,7 @@ public class FoodLogService {
         rateLimiter.checkOrThrow(userId, tier, serverNow);
 
         boolean acquired = false;
-        String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
+        String tempKey = null;
 
         try {
             inFlight.acquireOrThrow(userId);
@@ -103,54 +123,52 @@ public class FoodLogService {
             ImageSniffer.Detection det;
             StorageService.SaveResult saved;
 
-            // 3) 上傳 → tempKey
+            // 1) 上傳 → tempKey
             try (InputStream raw = file.getInputStream();
                  PushbackInputStream in = new PushbackInputStream(raw, 16)) {
 
                 det = ImageSniffer.detect(in);
                 if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
 
-                // ✅ detect 成功就先決定 tempKey（帶 ext）
                 tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();
-
                 saved = storage.save(tempKey, in, det.contentType());
 
             } catch (Exception ex) {
-                // ✅ 上傳失敗也嘗試刪 temp（即使不存在也不會炸）
                 StorageCleanup.safeDeleteQuietly(storage, tempKey);
                 if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
-
                 idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 
             try {
-                // 4) 去重命中（不扣 quota）
+                // 2) 去重命中（不扣 quota）
                 var hit = repo.findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
                         userId,
                         saved.sha256(),
                         List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
                 );
 
-                // ✅ NEW：判斷 cacheHit（必須 effective 是 object 才算真正命中）
                 boolean cacheHit = hit.isPresent()
                                    && hit.get().getEffective() != null
                                    && hit.get().getEffective().isObject();
 
-                // ✅ NEW：Anti-abuse（會在觸發時直接丟 429 CooldownActiveException）
-                abuseGuard.onOperationAttempt(userId, deviceId, cacheHit, serverNow, tz);
+                // ✅ Anti-abuse：deviceId 統一 normalize，避免 null/blank key 汙染或 NPE
+                String did = normalizeDeviceId(userId, deviceId);
+                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, tz);
 
-                // 5) 建 log
+                // ✅ ALBUM：固定用「上傳時間」當作 capturedAtUtc
                 LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
 
                 FoodLogEntity e = new FoodLogEntity();
                 e.setUserId(userId);
                 e.setMethod("ALBUM");
                 e.setDegradeLevel("DG-0");
+
                 e.setCapturedAtUtc(serverNow);
                 e.setCapturedTz(tz.getId());
                 e.setCapturedLocalDate(todayLocal);
                 e.setServerReceivedAtUtc(serverNow);
+
                 e.setTimeSource(TimeSource.SERVER_RECEIVED);
                 e.setTimeSuspect(false);
 
@@ -158,15 +176,12 @@ public class FoodLogService {
                     e.setProvider(hit.get().getProvider());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
-
-                    // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
                     ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
                     markFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
                     AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, serverNow);
-                    // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
                     e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(defaultProvider());
                     e.setEffective(null);
@@ -176,7 +191,7 @@ public class FoodLogService {
                 repo.save(e);
                 idem.attach(userId, requestId, e.getId(), serverNow);
 
-                // 6) temp -> blobKey + refCount
+                // 3) temp -> blob + refCount
                 var retained = blobService.retainFromTemp(
                         userId,
                         tempKey,
@@ -206,9 +221,7 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                // ✅ 以前你這裡 hard-code ".../upload" 現在改成刪 tempKey
                 StorageCleanup.safeDeleteQuietly(storage, tempKey);
-
                 idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_ALBUM_FAILED", safeMsg(ex), true);
                 throw ex;
             }
@@ -285,8 +298,9 @@ public class FoodLogService {
                                    && hit.get().getEffective() != null
                                    && hit.get().getEffective().isObject();
 
-                // ✅ NEW：Anti-abuse（會在觸發時直接丟 429 CooldownActiveException）
-                abuseGuard.onOperationAttempt(userId, deviceId, cacheHit, serverNow, tz);
+                // ✅ Anti-abuse：deviceId 統一 normalize
+                String did = normalizeDeviceId(userId, deviceId);
+                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, tz);
 
                 // 6) 建 log（capturedLocalDate 用 resolved capturedAtUtc + client tz）
                 LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), tz).toLocalDate();
@@ -432,8 +446,9 @@ public class FoodLogService {
                                    && hit.get().getEffective() != null
                                    && hit.get().getEffective().isObject();
 
-                // ✅ NEW：Anti-abuse（會在觸發時直接丟 429 CooldownActiveException）
-                abuseGuard.onOperationAttempt(userId, deviceId, cacheHit, serverNow, tz);
+                // ✅ Anti-abuse：deviceId 統一 normalize
+                String did = normalizeDeviceId(userId, deviceId);
+                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, tz);
 
                 LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), tz).toLocalDate();
 
@@ -518,7 +533,14 @@ public class FoodLogService {
     // BARCODE：MVP（查不到 → TRY_LABEL）
     // =========================
     @Transactional
-    public FoodLogEnvelope createBarcodeMvp(Long userId, String barcode, String requestId) {
+    public FoodLogEnvelope createBarcodeMvp(
+            Long userId,
+            String clientTz,
+            String deviceId,
+            String barcode,
+            String preferredLangTag,
+            String requestId
+    ) {
         Instant now = Instant.now();
 
         if (barcode == null || barcode.isBlank()) {
@@ -526,37 +548,77 @@ public class FoodLogService {
         }
         String bc = barcode.trim();
 
-        // ✅ 基本 sanity（EAN/UPC 常見 8~14；你目前寬鬆 6~32 OK）
         if (bc.length() < 6 || bc.length() > 32) {
             throw new IllegalArgumentException("BARCODE_INVALID");
         }
+        if (!bc.chars().allMatch(Character::isDigit)) {
+            throw new IllegalArgumentException("BARCODE_INVALID");
+        }
 
+        // ✅ 1) Idempotency 要最早：同 requestId 重送直接回，不要再算 rate/abuse，也不要再打 OFF
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, now);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
-        // ✅ 仍要限流
+        ZoneId tz = parseTzOrUtc(clientTz);
+        LocalDate localDate = ZonedDateTime.ofInstant(now, tz).toLocalDate();
+
+        // ✅ 2) deviceId 統一 normalize（避免 null/blank 進 guard）
+        String did = normalizeDeviceId(userId, deviceId);
+
+        // ✅ 3) 仍要限流（你原本的策略 OK）
         EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
         rateLimiter.checkOrThrow(userId, tier, now);
 
-        // ✅ 建議：barcode 也用 UTC 先做 MVP（要更精準可改成接 clientTz header）
-        ZoneId tz = ZoneOffset.UTC;
-        LocalDate localDate = ZonedDateTime.ofInstant(now, tz).toLocalDate();
+        // ✅ 4) BARCODE 屬於 cheap op：避免誤觸「大量不同圖片」的 Rule A
+        // 方案A（最小改動）：當成 cacheHit=true
+        abuseGuard.onOperationAttempt(userId, did, true, now, tz);
 
-        // ===== 1) 查 OpenFoodFacts =====
+        // ✅ 5) langKey：交給 normalizeLangKey 處理（建議 controller 不必再做一次 normalize）
+        String langKey = OpenFoodFactsLookupService.normalizeLangKey(preferredLangTag);
+
         OffResult off;
         try {
-            var root = offClient.getProduct(bc);
-            off = OpenFoodFactsMapper.map(root);
+            JsonNode root = offLookup.getProduct(bc, preferredLangTag);
+            off = OpenFoodFactsMapper.map(root, preferredLangTag);
+
+        } catch (OffHttpException ex) {
+
+            if (ex.getStatus() == 404) {
+                return buildBarcodeFailedEnvelope(
+                        userId, bc, requestId, now, tz, localDate,
+                        "BARCODE_NOT_FOUND",
+                        "openfoodfacts 404 not found. barcode=" + bc
+                );
+            }
+
+            return buildBarcodeFailedEnvelope(
+                    userId, bc, requestId, now, tz, localDate,
+                    "BARCODE_LOOKUP_FAILED",
+                    "openfoodfacts http error. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
+            );
+
+        } catch (OffParseException ex) {
+
+            return buildBarcodeFailedEnvelope(
+                    userId, bc, requestId, now, tz, localDate,
+                    "BARCODE_LOOKUP_FAILED",
+                    "openfoodfacts parse error. code=" + ex.getCode() + ", msg=" + safeMsg(ex)
+            );
+
         } catch (Exception ex) {
-            // ✅ OFF 掛掉/timeout/JSON 壞：不要讓 API 500
-            return buildBarcodeFailedEnvelope(userId, bc, requestId, now, tz, localDate,
-                    "BARCODE_LOOKUP_FAILED", "openfoodfacts lookup failed: " + safeMsg(ex));
+
+            return buildBarcodeFailedEnvelope(
+                    userId, bc, requestId, now, tz, localDate,
+                    "BARCODE_LOOKUP_FAILED",
+                    "openfoodfacts unknown error: " + safeMsg(ex)
+            );
         }
 
-        // ===== 2) 查不到：維持你原本行為（引導 TRY_LABEL）=====
         if (off == null) {
-            return buildBarcodeFailedEnvelope(userId, bc, requestId, now, tz, localDate,
-                    "BARCODE_NOT_FOUND", "barcode not found: " + bc);
+            return buildBarcodeFailedEnvelope(
+                    userId, bc, requestId, now, tz, localDate,
+                    "BARCODE_NOT_FOUND", "barcode not found: " + bc
+            );
         }
 
         // ===== 3) 查到：建立 DRAFT + effective（符合你既有 schema）=====
@@ -574,45 +636,39 @@ public class FoodLogService {
         e.setTimeSource(TimeSource.SERVER_RECEIVED);
         e.setTimeSuspect(false);
 
-        // ✅ 建議存一份 barcode，之後歷史查詢/顯示會用到
         e.setBarcode(bc);
 
         // --- effective schema（最少必要欄位）---
         ObjectNode eff = JsonNodeFactory.instance.objectNode();
 
-        // foodName：OFF 可能為 null，保底給個字串避免 UI 空白
         String name = (off.productName() == null || off.productName().isBlank())
                 ? "Unknown product"
                 : off.productName();
         eff.put("foodName", name);
 
-        // quantity：OFF nutriments 大多是 per 100g
-        ObjectNode qty = eff.putObject("quantity");
-        qty.put("value", 100.0);
-        qty.put("unit", "GRAM");
+        // ✅ quantity + nutrients（整包 > 每份 > 每100g）
+        String basis = applyBarcodePortion(eff, off);
 
-        // nutrients：你 schema 需要的欄位都塞（缺的就 putNull）
-        ObjectNode n = eff.putObject("nutrients");
-        putNumOrNull(n, "kcal", off.kcalPer100g());
-        putNumOrNull(n, "protein", off.proteinPer100g());
-        putNumOrNull(n, "fat", off.fatPer100g());
-        putNumOrNull(n, "carbs", off.carbsPer100g());
+        // ✅ confidence：看 nutrients 是否有任一宏量營養素
+        ObjectNode nObj = (eff.get("nutrients") != null && eff.get("nutrients").isObject())
+                ? (ObjectNode) eff.get("nutrients")
+                : null;
 
-        // 你 schema 還有 fiber/sugar/sodium，OFF 先不硬猜：留 null
-        n.putNull("fiber");
-        n.putNull("sugar");
-        n.putNull("sodium");
+        boolean hasAnyMacro = nObj != null && (
+                (nObj.get("protein") != null && !nObj.get("protein").isNull())
+                || (nObj.get("fat") != null && !nObj.get("fat").isNull())
+                || (nObj.get("carbs") != null && !nObj.get("carbs").isNull())
+        );
 
-        // confidence：條碼+資料庫，信心通常高（但仍可能資料缺）
-        eff.put("confidence", 0.95);
+        eff.put("confidence", hasAnyMacro ? 0.98 : 0.92);
 
-        // （可選）aiMeta：保留來源資訊，對 debug 很有用
-        ObjectNode aiMeta = eff.putObject("aiMeta");
-        aiMeta.put("source", "OPENFOODFACTS");
-        aiMeta.put("basis", "PER_100G");
+        // ✅ aiMeta：補齊 barcode + source
+        ObjectNode aiMeta = ensureObj(eff, "aiMeta");
         aiMeta.put("barcode", bc);
+        aiMeta.put("source", "OPENFOODFACTS");
+        aiMeta.put("basis", basis);
+        aiMeta.put("lang", langKey);
 
-        // ✅ 套用你既有後處理（healthScore/sanityChecker/warnings whitelist）
         ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
         e.setEffective(processed);
 
@@ -623,8 +679,107 @@ public class FoodLogService {
         repo.save(e);
         idem.attach(userId, requestId, e.getId(), now);
 
-        // ✅ BARCODE 不需要 task
         return toEnvelope(e, null, requestId);
+    }
+
+    private String applyBarcodePortion(ObjectNode eff, OffResult off) {
+
+        // ===== 1) 優先：整包（需要 packageSize + per100）=====
+        boolean hasPkg = off.packageSizeValue() != null
+                         && off.packageSizeValue() > 0
+                         && off.packageSizeUnit() != null
+                         && !off.packageSizeUnit().isBlank();
+
+        boolean hasAnyPer100 = (off.kcalPer100g() != null
+                                || off.proteinPer100g() != null
+                                || off.fatPer100g() != null
+                                || off.carbsPer100g() != null
+                                || off.fiberPer100g() != null
+                                || off.sugarPer100g() != null
+                                || off.sodiumMgPer100g() != null);
+
+        if (hasPkg && hasAnyPer100) {
+
+            String unitRaw = off.packageSizeUnit().trim().toLowerCase(Locale.ROOT); // "g" or "ml"
+            String qtyUnit = unitRaw.contains("ml") ? "ML" : "GRAM";
+            double pkg = off.packageSizeValue();
+
+            ObjectNode qty = eff.putObject("quantity");
+            qty.put("value", pkg);
+            qty.put("unit", qtyUnit);
+
+            double factor = pkg / 100.0;
+
+            ObjectNode n = eff.putObject("nutrients");
+            putNumOrNull(n, "kcal", mul(off.kcalPer100g(), factor));
+            putNumOrNull(n, "protein", mul(off.proteinPer100g(), factor));
+            putNumOrNull(n, "fat", mul(off.fatPer100g(), factor));
+            putNumOrNull(n, "carbs", mul(off.carbsPer100g(), factor));
+            putNumOrNull(n, "fiber", mul(off.fiberPer100g(), factor));
+            putNumOrNull(n, "sugar", mul(off.sugarPer100g(), factor));
+            putNumOrNull(n, "sodium", mul(off.sodiumMgPer100g(), factor)); // mg 也照乘
+
+            return "WHOLE_PACKAGE";
+        }
+
+        // ===== 2) 次選：每份（需要 *_serving 任一存在）=====
+        boolean hasAnyServing = (off.kcalPerServing() != null
+                                 || off.proteinPerServing() != null
+                                 || off.fatPerServing() != null
+                                 || off.carbsPerServing() != null
+                                 || off.fiberPerServing() != null
+                                 || off.sugarPerServing() != null
+                                 || off.sodiumMgPerServing() != null);
+
+        if (hasAnyServing) {
+            ObjectNode qty = eff.putObject("quantity");
+            qty.put("value", 1.0);
+            qty.put("unit", "SERVING");
+
+            ObjectNode n = eff.putObject("nutrients");
+            putNumOrNull(n, "kcal", off.kcalPerServing());
+            putNumOrNull(n, "protein", off.proteinPerServing());
+            putNumOrNull(n, "fat", off.fatPerServing());
+            putNumOrNull(n, "carbs", off.carbsPerServing());
+            putNumOrNull(n, "fiber", off.fiberPerServing());
+            putNumOrNull(n, "sugar", off.sugarPerServing());
+            putNumOrNull(n, "sodium", off.sodiumMgPerServing());
+
+            return "PER_SERVING";
+        }
+
+        // ===== 3) 最後：退回 per100g（你原本）=====
+        ObjectNode qty = eff.putObject("quantity");
+        qty.put("value", 100.0);
+
+        String per100Unit = "GRAM";
+        if (off.packageSizeUnit() != null && off.packageSizeUnit().equalsIgnoreCase("ml")) {
+            per100Unit = "ML";
+        }
+        qty.put("unit", per100Unit);
+
+        ObjectNode n = eff.putObject("nutrients");
+        putNumOrNull(n, "kcal", off.kcalPer100g());
+        putNumOrNull(n, "protein", off.proteinPer100g());
+        putNumOrNull(n, "fat", off.fatPer100g());
+        putNumOrNull(n, "carbs", off.carbsPer100g());
+        putNumOrNull(n, "fiber", off.fiberPer100g());
+        putNumOrNull(n, "sugar", off.sugarPer100g());
+        putNumOrNull(n, "sodium", off.sodiumMgPer100g());
+
+        return "PER_100";
+    }
+
+    private static ObjectNode ensureObj(ObjectNode root, String field) {
+        JsonNode n = root.get(field);
+        if (n != null && n.isObject()) return (ObjectNode) n;
+        ObjectNode out = JsonNodeFactory.instance.objectNode();
+        root.set(field, out);
+        return out;
+    }
+
+    private static Double mul(Double v, double factor) {
+        return (v == null) ? null : v * factor;
     }
 
     private FoodLogEnvelope buildBarcodeFailedEnvelope(
@@ -640,7 +795,7 @@ public class FoodLogService {
         FoodLogEntity e = new FoodLogEntity();
         e.setUserId(userId);
         e.setMethod("BARCODE");
-        e.setProvider("BARCODE");
+        e.setProvider("OPENFOODFACTS");
         e.setDegradeLevel("DG-0");
         e.setCapturedAtUtc(now);
         e.setCapturedTz(tz.getId());
@@ -693,14 +848,14 @@ public class FoodLogService {
     }
 
     // ===== FoodLogService.toEnvelope()：
-// 1) task 只回 meaningful（QUEUED/RUNNING/FAILED）
-// 2) FAILED 時 error 一定回；retryAfterSec 優先 nextRetryAt，其次從 lastErrorMessage 解析 =====
+    // 1) task 只回 meaningful（QUEUED/RUNNING/FAILED）
+    // 2) FAILED 時 error 一定回；retryAfterSec 優先 nextRetryAt，其次從 lastErrorMessage 解析 =====
     private FoodLogEnvelope toEnvelope(FoodLogEntity e, FoodLogTaskEntity t, String requestId) {
         Instant now = Instant.now();
 
         JsonNode eff = e.getEffective();
         // ✅ v1.2：回應帶 tierUsed / fromCache
-        ModelTier tierUsed = FoodLogTierResolver.resolve(e.getDegradeLevel());
+        String tierUsed = resolveTierUsedDisplay(e);
         boolean fromCache = false;
         FoodLogEnvelope.NutritionResult nr = null;
 
@@ -827,7 +982,7 @@ public class FoodLogService {
                 e.getId(),
                 e.getStatus().name(),
                 e.getDegradeLevel(),
-                (tierUsed == null ? null : tierUsed.name()),
+                tierUsed,
                 fromCache,
                 nr,
                 task,
@@ -890,8 +1045,10 @@ public class FoodLogService {
         // ✅ 用原本 capturedTz（或你也可以改用 clientTz，但 retry 通常沿用原 log）
         ZoneId tz = parseTzOrUtc(log.getCapturedTz());
 
-        // ✅ NEW：retry 也算操作，給 abuseGuard（cacheHit=false）
-        abuseGuard.onOperationAttempt(userId, deviceId, false, now, tz);
+        // ✅ retry 也算操作，給 abuseGuard（cacheHit=false）
+        // ✅ deviceId 統一 normalize
+        String did = normalizeDeviceId(userId, deviceId);
+        abuseGuard.onOperationAttempt(userId, did, false, now, tz);
 
         // ✅ Step 1：retry 也算一次 Operation（會再打模型）
         AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, now);
@@ -1008,8 +1165,22 @@ public class FoodLogService {
         return (int) sec;
     }
 
+    static String resolveTierUsedDisplay(FoodLogEntity e) {
+        if (e == null) return null;
+
+        String method = e.getMethod();
+        if (method != null && "BARCODE".equalsIgnoreCase(method.trim())) {
+            return "BARCODE";
+        }
+
+        ModelTier mt = FoodLogTierResolver.resolve(e.getDegradeLevel());
+        return (mt == null) ? null : mt.name();
+    }
+
+
     private static int computePollAfterSec(FoodLogStatus status, FoodLogTaskEntity t, Instant now) {
-        int base = Math.max(1, t.getPollAfterSec()); // DB 目前固定 2
+        int pollAfter = t.getPollAfterSec();
+        int base = Math.max(1, pollAfter);
 
         // ✅ FAILED：用 nextRetryAtUtc 算剩餘秒數
         if (status == FoodLogStatus.FAILED) {

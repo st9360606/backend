@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.entitlement.service.EntitlementService;
-import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
+import com.calai.backend.foodlog.barcode.OpenFoodFactsLookupService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
@@ -44,12 +44,11 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock UserRateLimiter rateLimiter;
     @Mock EffectivePostProcessor postProcessor;
     @Mock ClientActionMapper clientActionMapper;
-    @Mock OpenFoodFactsClient offClient;
 
-    // ✅ NEW：你 service 新增的 final 依賴
+    // ✅ service 現在要的是 offLookup（不是 offClient）
+    @Mock OpenFoodFactsLookupService offLookup;
+
     @Mock AbuseGuardService abuseGuard;
-
-    // ✅ NEW：FoodLogService constructor 最後新增的參數
     @Mock EntitlementService entitlementService;
 
     private FoodLogService service;
@@ -63,9 +62,9 @@ class FoodLogServiceTaskVisibilityTest {
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper,
-                offClient,
                 abuseGuard,
-                entitlementService // ✅ 補上
+                entitlementService,
+                offLookup
         );
     }
 
@@ -96,8 +95,9 @@ class FoodLogServiceTaskVisibilityTest {
 
         verify(taskRepo, times(1)).findByFoodLogId("log-1");
         verifyNoInteractions(aiQuota);
-        verifyNoInteractions(abuseGuard); // getOne 不會用到
-        verifyNoInteractions(entitlementService); // getOne 不會用到（可留可刪）
+        verifyNoInteractions(abuseGuard);
+        verifyNoInteractions(entitlementService);
+        verifyNoInteractions(offLookup);
     }
 
     @Test
@@ -119,7 +119,8 @@ class FoodLogServiceTaskVisibilityTest {
         verify(taskRepo, never()).findByFoodLogId(anyString());
         verifyNoInteractions(aiQuota);
         verifyNoInteractions(abuseGuard);
-        verifyNoInteractions(entitlementService); // 可留可刪
+        verifyNoInteractions(entitlementService);
+        verifyNoInteractions(offLookup);
     }
 
     @Test
@@ -156,6 +157,7 @@ class FoodLogServiceTaskVisibilityTest {
         verify(taskRepo, times(1)).findByFoodLogId("log-3");
         verifyNoInteractions(aiQuota);
         verifyNoInteractions(abuseGuard);
-        verifyNoInteractions(entitlementService); // 可留可刪
+        verifyNoInteractions(entitlementService);
+        verifyNoInteractions(offLookup);
     }
 }

@@ -3,6 +3,7 @@ package com.calai.backend.foodlog.barcode;
 import com.calai.backend.Integration_testing.config.TestAuthConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -12,8 +13,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.mockito.Mockito.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -24,7 +26,9 @@ public class FoodLogBarcodeOffContractTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper om;
-    @MockitoBean OpenFoodFactsClient offClient;
+
+    // ✅ 改 mock 這個：FoodLogService 實際依賴的是 offLookup
+    @MockitoBean OpenFoodFactsLookupService offLookup;
 
     @Test
     void barcode_found_should_return_draft_with_nutrients() throws Exception {
@@ -46,7 +50,9 @@ public class FoodLogBarcodeOffContractTest {
         """;
 
         JsonNode root = om.readTree(offJson);
-        when(offClient.getProduct(bc)).thenReturn(root);
+
+        // ✅ preferredLangTag 在你的 controller 可能是 null，所以用 any()
+        when(offLookup.getProduct(eq(bc), any())).thenReturn(root);
 
         String body = """
         { "barcode": "%s" }
@@ -62,20 +68,22 @@ public class FoodLogBarcodeOffContractTest {
         assertThat(json.path("status").asText()).isEqualTo("DRAFT");
         assertThat(json.path("nutritionResult").path("nutrients").path("kcal").asDouble()).isEqualTo(520.0);
         assertThat(json.path("nutritionResult").path("source").path("method").asText()).isEqualTo("BARCODE");
+
+        verify(offLookup, times(1)).getProduct(eq(bc), any());
     }
 
     @Test
     void barcode_not_found_should_return_failed_and_try_label() throws Exception {
         String bc = "0000000000000";
 
-        String offJson = """
-        { "status": 0 }
-        """;
-        when(offClient.getProduct(bc)).thenReturn(om.readTree(offJson));
+        ObjectNode notFound = om.createObjectNode();
+        notFound.put("status", 0);
+
+        when(offLookup.getProduct(eq(bc), any())).thenReturn(notFound);
 
         String body = """
-        { "barcode": "%s" }
-        """.formatted(bc);
+    { "barcode": "%s" }
+    """.formatted(bc);
 
         String resp = mvc.perform(post("/api/v1/food-logs/barcode")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -87,5 +95,7 @@ public class FoodLogBarcodeOffContractTest {
         assertThat(json.path("status").asText()).isEqualTo("FAILED");
         assertThat(json.path("error").path("errorCode").asText()).isEqualTo("BARCODE_NOT_FOUND");
         assertThat(json.path("error").path("clientAction").asText()).isEqualTo("TRY_LABEL");
+
+        verify(offLookup, times(1)).getProduct(eq(bc), any());
     }
 }

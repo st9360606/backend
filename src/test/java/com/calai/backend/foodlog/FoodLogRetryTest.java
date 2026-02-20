@@ -1,10 +1,9 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.entitlement.service.EntitlementService;
-import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
+import com.calai.backend.foodlog.barcode.OpenFoodFactsLookupService;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
-import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
@@ -18,6 +17,7 @@ import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -46,16 +46,16 @@ class FoodLogRetryTest {
 
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
-        OpenFoodFactsClient offClient = mock(OpenFoodFactsClient.class);
 
-        // ✅ NEW：若 FoodLogService 新增了 entitlementService（常見）
+        AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
+        doNothing().when(abuseGuard).onOperationAttempt(anyLong(), anyString(), anyBoolean(), any(Instant.class), any(ZoneId.class));
+
         EntitlementService entitlementService = mock(EntitlementService.class);
         when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
                 .thenReturn(EntitlementService.Tier.TRIAL);
 
-        // ✅ NEW：FoodLogService 現在需要 abuseGuard
-        AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
-        doNothing().when(abuseGuard).onOperationAttempt(anyLong(), anyString(), anyBoolean(), any(Instant.class), any(ZoneId.class));
+        // ✅ FoodLogService 現在需要 offLookup（雖然 retry 用不到，但 constructor 需要）
+        OpenFoodFactsLookupService offLookup = mock(OpenFoodFactsLookupService.class);
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log1");
@@ -64,7 +64,7 @@ class FoodLogRetryTest {
         log.setLastErrorCode("PROVIDER_FAILED");
         log.setLastErrorMessage("boom");
         log.setCapturedTz("Asia/Taipei");
-        log.setMethod("PHOTO"); // ✅ 避免被 BARCODE 擋掉（保險）
+        log.setMethod("PHOTO"); // 避免被 BARCODE retry 擋掉
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t1");
@@ -76,7 +76,7 @@ class FoodLogRetryTest {
         when(repo.findByIdForUpdate("log1")).thenReturn(log);
         when(taskRepo.findByFoodLogIdForUpdate("log1")).thenReturn(Optional.of(task));
 
-        // retry() 最後會呼叫 getOne()，所以也要 stub
+        // retry() 最後會呼叫 getOne()：要 stub
         when(repo.findByIdAndUserId("log1", 1L)).thenReturn(Optional.of(log));
         when(taskRepo.findByFoodLogId("log1")).thenReturn(Optional.of(task));
 
@@ -89,12 +89,11 @@ class FoodLogRetryTest {
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper,
-                offClient,
                 abuseGuard,
-                entitlementService // ✅ 補上第 14 個參數（若你 IDE 顯示位置不同，移到正確的位置）
+                entitlementService,
+                offLookup
         );
 
-        // ✅ retry() 現在要 (userId, foodLogId, deviceId, requestId)
         svc.retry(1L, "log1", "device-1", "rid-1");
 
         assertEquals(FoodLogStatus.PENDING, log.getStatus());
@@ -127,14 +126,14 @@ class FoodLogRetryTest {
 
         EffectivePostProcessor postProcessor = mock(EffectivePostProcessor.class);
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
-        OpenFoodFactsClient offClient = mock(OpenFoodFactsClient.class);
 
         AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
 
-        // ✅ NEW：若 FoodLogService 新增了 entitlementService（常見）
         EntitlementService entitlementService = mock(EntitlementService.class);
         when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
                 .thenReturn(EntitlementService.Tier.TRIAL);
+
+        OpenFoodFactsLookupService offLookup = mock(OpenFoodFactsLookupService.class);
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
@@ -149,15 +148,16 @@ class FoodLogRetryTest {
                 inFlight, rateLimiter,
                 postProcessor,
                 clientActionMapper,
-                offClient,
                 abuseGuard,
-                entitlementService // ✅ 補上第 14 個參數
+                entitlementService,
+                offLookup
         );
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> svc.retry(1L, "log2", "device-1", "rid-2"));
 
         assertEquals("FOOD_LOG_NOT_RETRYABLE", ex.getMessage());
+
         verifyNoInteractions(aiQuota);
         verifyNoInteractions(abuseGuard);
     }

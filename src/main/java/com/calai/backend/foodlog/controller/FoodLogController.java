@@ -2,6 +2,7 @@ package com.calai.backend.foodlog.controller;
 
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.common.web.RequestIdFilter;
+import com.calai.backend.foodlog.barcode.OpenFoodFactsLang;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
@@ -31,7 +32,7 @@ public class FoodLogController {
     @PostMapping(value = "/album", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope album(
             @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
-            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId,
             @RequestPart("file") MultipartFile file,
             HttpServletRequest req
     ) throws Exception {
@@ -84,13 +85,27 @@ public class FoodLogController {
      */
     @PostMapping(value = "/barcode", consumes = MediaType.APPLICATION_JSON_VALUE)
     public FoodLogEnvelope barcode(
-            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW（可先收著，未必用）
+            @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId,
+            @RequestHeader(value = "X-App-Lang", required = false) String appLang,
+            @RequestHeader(value = "Accept-Language", required = false) String acceptLanguage,
             @RequestBody BarcodeRequest body,
             HttpServletRequest req
     ) {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
-        return service.createBarcodeMvp(uid, body == null ? null : body.barcode(), requestId);
+
+        // ✅ 統一：只取第一個 lang tag（支援 Accept-Language 字串）
+        String preferredLangTag = OpenFoodFactsLang.firstLangTagOrNull(
+                (appLang != null && !appLang.isBlank()) ? appLang : acceptLanguage
+        );
+
+        return service.createBarcodeMvp(
+                uid, clientTz, deviceId,
+                body == null ? null : body.barcode(),
+                preferredLangTag,
+                requestId
+        );
     }
 
 
