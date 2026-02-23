@@ -34,6 +34,8 @@ import org.springframework.web.multipart.MultipartFile;
 import com.calai.backend.foodlog.service.cleanup.StorageCleanup;
 import java.io.InputStream;
 import java.io.PushbackInputStream;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.*;
 import java.util.List;
 import java.util.Optional;
@@ -898,13 +900,13 @@ public class FoodLogService {
                     textOrNull(eff, "foodName"),
                     q == null ? null : new FoodLogEnvelope.Quantity(doubleOrNull(q, "value"), textOrNull(q, "unit")),
                     n == null ? null : new FoodLogEnvelope.Nutrients(
-                            doubleOrNull(n, "kcal"),
-                            doubleOrNull(n, "protein"),
-                            doubleOrNull(n, "fat"),
-                            doubleOrNull(n, "carbs"),
-                            doubleOrNull(n, "fiber"),
-                            doubleOrNull(n, "sugar"),
-                            doubleOrNull(n, "sodium")
+                            round1(doubleOrNull(n, "kcal")),
+                            round1(doubleOrNull(n, "protein")),
+                            round1(doubleOrNull(n, "fat")),
+                            round1(doubleOrNull(n, "carbs")),
+                            round1(doubleOrNull(n, "fiber")),
+                            round1(doubleOrNull(n, "sugar")),
+                            round1(doubleOrNull(n, "sodium"))
                     ),
                     intOrNull(eff, "healthScore"),
                     doubleOrNull(eff, "confidence"),
@@ -998,6 +1000,15 @@ public class FoodLogService {
         if (aiMetaNode instanceof ObjectNode o) aiMeta = o;
         else aiMeta = effective.putObject("aiMeta");
         aiMeta.put("fromCache", true);
+    }
+
+    private static Double round1(Double v) {
+        if (v == null) return null;
+        if (v.isNaN() || v.isInfinite()) return null; // 保守：避免序列化怪值
+        // ✅ BigDecimal.valueOf 避免 new BigDecimal(double) 的精度陷阱
+        return BigDecimal.valueOf(v)
+                .setScale(1, RoundingMode.HALF_UP)
+                .doubleValue();
     }
 
     @Transactional(readOnly = true)

@@ -130,8 +130,8 @@ app:
       yearly: [ "bitecal_yearly" ]
   openfoodfacts:
     base-url: "https://world.openfoodfacts.org"
-    connect-timeout: "PT3S"
-    read-timeout: "PT5S"
+    connect-timeout: "PT5S"
+    read-timeout: "PT12S"
     user-agent: "BitCal_AI/1.0 (contact: dev@bitcalai.example)"
     cache:
       ttl: "PT6H"
