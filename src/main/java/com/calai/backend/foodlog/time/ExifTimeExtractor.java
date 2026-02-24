@@ -55,6 +55,9 @@ public final class ExifTimeExtractor {
 
             // 2) OffsetTimeOriginal（可能不存在）
             String off = dir.getString(TAG_OFFSET_TIME_ORIGINAL);
+            if (off != null) {
+                off = off.replace("\u0000", "").trim();
+            }
 
             return parseExifDateTimeToInstant(dt, off, clientTz);
 

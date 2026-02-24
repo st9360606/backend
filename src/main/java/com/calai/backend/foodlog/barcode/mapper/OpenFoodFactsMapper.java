@@ -189,24 +189,35 @@ public final class OpenFoodFactsMapper {
     // =========================
 
     /**
-     * OFF sodium_* / salt_* 多數情況是「g」
-     * 我們統一輸出「mg」
-     *
-     * 防呆：
-     * - 若數值 > 100，幾乎可視為廠商把 mg 誤填到 g 欄位（不論 100g/serving）
-     * -> 視為已是 mg，不再乘 1000
+     * OFF sodium_* / salt_* 可能是 g，也可能帶 unit=mg（或髒資料）
+     * 我們統一輸出「mg sodium」
+     * 優先順序：
+     * 1) 看 unit 欄位（*_unit 或 base_unit）
+     * 2) 沒 unit 才用 heuristic（>100 視為 mg）
      */
     private static Double sodiumMgFrom(JsonNode nutr, String sodiumKey, String saltKey) {
         Double sodium = numberOrNull(nutr, sodiumKey);
+        String sodiumUnit = nutrimentUnit(nutr, sodiumKey); // e.g. sodium_unit / sodium_100g_unit
+
         if (sodium != null) {
-            if (sodium > 100.0) return sodium;      // already mg (misfilled)
-            return sodium * 1000.0;                 // g -> mg
+            if (isMgUnit(sodiumUnit)) return sodium;          // already mg
+            if (isGramUnit(sodiumUnit)) return sodium * 1000.0; // g -> mg
+
+            // fallback heuristic（無 unit）
+            if (sodium > 100.0) return sodium; // likely already mg (misfilled)
+            return sodium * 1000.0;            // assume g
         }
 
         Double salt = numberOrNull(nutr, saltKey);
+        String saltUnit = nutrimentUnit(nutr, saltKey); // e.g. salt_unit / salt_serving_unit
+
         if (salt != null) {
-            if (salt > 100.0) return salt / 2.5;    // salt_mg -> sodium_mg
-            return (salt / 2.5) * 1000.0;           // salt_g -> sodium_g -> mg
+            if (isMgUnit(saltUnit)) return salt / 2.5;           // salt_mg -> sodium_mg
+            if (isGramUnit(saltUnit)) return (salt / 2.5) * 1000.0; // salt_g -> sodium_g -> mg
+
+            // fallback heuristic（無 unit）
+            if (salt > 100.0) return salt / 2.5;      // likely salt_mg
+            return (salt / 2.5) * 1000.0;             // assume salt_g
         }
 
         return null;
@@ -284,8 +295,8 @@ public final class OpenFoodFactsMapper {
     // Number Parsing (耐髒解析)
     // =========================
 
-    private static final Pattern P_NUM = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
-    private static final Pattern P_QTY = Pattern.compile("(?:(\\d+)\\s*[x×]\\s*)?(\\d+(?:[\\.,]\\d+)?)\\s*([a-zA-Z]+)");
+    private static final Pattern P_NUM = Pattern.compile("[-+]?(?:\\d+\\.\\d+|\\d+|\\.\\d+)(?:[eE][-+]?\\d+)?");
+    private static final Pattern P_QTY = Pattern.compile("(?:(\\d+)\\s*[x×]\\s*)?([\\d][\\d.,']*)\\s*([a-zA-Z]+)");
 
     private static final Set<String> SUPPORTED_UNITS = Set.of("g", "kg", "mg", "ml", "l", "lt", "cl", "dl");
 
@@ -294,7 +305,7 @@ public final class OpenFoodFactsMapper {
     private static ParsedQty parseQty(String raw) {
         if (raw == null) return null;
 
-        String s = raw.trim().toLowerCase(Locale.ROOT).replace(',', '.');
+        String s = raw.trim().toLowerCase(Locale.ROOT);
         Matcher m = P_QTY.matcher(s);
 
         ParsedQty best = null;
@@ -306,8 +317,10 @@ public final class OpenFoodFactsMapper {
 
             if (valRaw == null || unit == null) continue;
 
+            String normalizedVal = normalizeNumberish(valRaw);
+
             double v;
-            try { v = Double.parseDouble(valRaw); }
+            try { v = Double.parseDouble(normalizedVal); }
             catch (NumberFormatException ignore) { continue; }
 
             int mult = 1;
@@ -342,12 +355,105 @@ public final class OpenFoodFactsMapper {
         String raw = v.asText(null);
         if (raw == null) return null;
 
-        String s = raw.trim().replace(',', '.');
+        String s = normalizeNumberish(raw);
         Matcher m = P_NUM.matcher(s);
         if (!m.find()) return null;
 
         try { return Double.parseDouble(m.group()); }
         catch (NumberFormatException e) { return null; }
+    }
+
+    /**
+     * 常見數字字串正規化：
+     * - 1,234.5  -> 1234.5（美規）
+     * - 1.234,5  -> 1234.5（歐規）
+     * - 12,5     -> 12.5
+     * - 1,234    -> 1234
+     * - 1.234    -> 1234（若看起來像千分位）
+     */
+    private static String normalizeNumberish(String raw) {
+        String s = raw.trim()
+                .replace("\u00A0", "") // NBSP
+                .replace(" ", "")
+                .replace("'", "")
+                .replace("’", "");
+
+        int lastComma = s.lastIndexOf(',');
+        int lastDot = s.lastIndexOf('.');
+
+        if (lastComma >= 0 && lastDot >= 0) {
+            // 最後出現的分隔符視為小數點
+            if (lastComma > lastDot) {
+                // 歐規：1.234,5 -> 1234.5
+                s = s.replace(".", "").replace(',', '.');
+            } else {
+                // 美規：1,234.5 -> 1234.5
+                s = s.replace(",", "");
+            }
+        } else if (lastComma >= 0) {
+            // 只有逗號：可能是千分位，也可能是小數點
+            if (looksLikeThousandsSeparated(s, ',')) {
+                s = s.replace(",", "");
+            } else {
+                s = s.replace(',', '.');
+            }
+        } else if (lastDot >= 0) {
+            // 只有點：可能是千分位，也可能是小數點
+            if (looksLikeThousandsSeparated(s, '.')) {
+                s = s.replace(".", "");
+            }
+        }
+
+        return s;
+    }
+
+    /** 判斷是否像 1,234 / 12,345 / 1.234 / 12.345 這種千分位格式 */
+    private static boolean looksLikeThousandsSeparated(String s, char sep) {
+        if (s == null || s.isBlank()) return false;
+
+        int start = (s.startsWith("-") || s.startsWith("+")) ? 1 : 0;
+        if (start >= s.length()) return false;
+
+        String body = s.substring(start);
+        String[] parts = body.split(Pattern.quote(String.valueOf(sep)));
+        if (parts.length < 2) return false;
+
+        if (parts[0].isEmpty() || parts[0].length() > 3) return false;
+        if (!parts[0].chars().allMatch(Character::isDigit)) return false;
+
+        for (int i = 1; i < parts.length; i++) {
+            String p = parts[i];
+            if (p.length() != 3) return false;
+            if (!p.chars().allMatch(Character::isDigit)) return false;
+        }
+        return true;
+    }
+
+    private static String nutrimentUnit(JsonNode nutr, String nutrientKeyWithSuffix) {
+        if (nutr == null || nutr.isNull() || nutrientKeyWithSuffix == null || nutrientKeyWithSuffix.isBlank()) {
+            return null;
+        }
+
+        // 先找精確欄位：例如 sodium_100g_unit / salt_serving_unit
+        String exact = lowerTrimOrNull(nutr.get(nutrientKeyWithSuffix + "_unit"));
+        if (!isBlank(exact)) return exact;
+
+        // 再找 base 欄位：例如 sodium_unit / salt_unit
+        int idx = nutrientKeyWithSuffix.indexOf('_');
+        String base = (idx > 0) ? nutrientKeyWithSuffix.substring(0, idx) : nutrientKeyWithSuffix;
+        return lowerTrimOrNull(nutr.get(base + "_unit"));
+    }
+
+    private static boolean isMgUnit(String u) {
+        if (u == null) return false;
+        String s = u.trim().toLowerCase(Locale.ROOT);
+        return s.equals("mg") || s.startsWith("milligram");
+    }
+
+    private static boolean isGramUnit(String u) {
+        if (u == null) return false;
+        String s = u.trim().toLowerCase(Locale.ROOT);
+        return s.equals("g") || s.equals("gr") || s.startsWith("gram");
     }
 
     // =========================

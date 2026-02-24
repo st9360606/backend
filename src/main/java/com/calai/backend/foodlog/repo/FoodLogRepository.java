@@ -26,6 +26,13 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
             Long userId, String imageSha256, java.util.List<FoodLogStatus> status
     );
 
+    Optional<FoodLogEntity> findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+            Long userId,
+            java.util.Collection<String> methods,
+            String imageSha256,
+            java.util.Collection<FoodLogStatus> statuses
+    );
+
     @Query("""
                 select f from FoodLogEntity f
                 where f.userId = :userId

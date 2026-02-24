@@ -38,7 +38,7 @@ public class OpenFoodFactsClient {
 
         String body = http.get()
                 .uri(uriBuilder -> {
-                    var b = uriBuilder.path("/api/v2/product/{barcode}.json");
+                    var b = uriBuilder.path("/api/v2/product/{barcode}");
                     if (fields != null && !fields.isEmpty()) {
                         b = b.queryParam("fields", String.join(",", fields));
                     }

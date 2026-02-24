@@ -14,7 +14,7 @@ public class LocalTempBlobCleanerProperties {
     /** 一鍵開關（prod 想關就關） */
     private boolean enabled = true;
 
-    /** 保留多久（超過就刪） */
+    /** 保留多久（超過就刪檔；空資料夾可提前刪） */
     private Duration keep = Duration.ofHours(6);
 
     /** 掃描最大深度（避免深層目錄拖慢） */
@@ -28,8 +28,9 @@ public class LocalTempBlobCleanerProperties {
     private boolean deleteEmptyDirs = true;
 
     /**
-     * tmp 子路徑（相對於 base-dir）
-     * 例：base=./data，tmpSubdir=blobs/tmp => ./data/blobs/tmp
+     * tmp 子路徑（相對於每個 user 目錄）
+     * 例：base=./data，userDir=./data/user-1，tmpSubdir=blobs/tmp
+     * 最終掃描：./data/user-1/blobs/tmp
      */
     private String tmpSubdir = "blobs/tmp";
 
@@ -55,3 +56,4 @@ public class LocalTempBlobCleanerProperties {
     public String getTmpSubdir() { return tmpSubdir; }
     public void setTmpSubdir(String tmpSubdir) { this.tmpSubdir = tmpSubdir; }
 }
+

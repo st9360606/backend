@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.entitlement.service.EntitlementService;
-import com.calai.backend.foodlog.barcode.OpenFoodFactsLookupService;
+import com.calai.backend.foodlog.barcode.BarcodeLookupService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
@@ -25,9 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
+import org.springframework.transaction.support.TransactionTemplate;
 import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -44,12 +43,10 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock UserRateLimiter rateLimiter;
     @Mock EffectivePostProcessor postProcessor;
     @Mock ClientActionMapper clientActionMapper;
-
-    // ✅ service 現在要的是 offLookup（不是 offClient）
-    @Mock OpenFoodFactsLookupService offLookup;
-
+    @Mock BarcodeLookupService barcodeLookupService;
     @Mock AbuseGuardService abuseGuard;
     @Mock EntitlementService entitlementService;
+    @Mock TransactionTemplate txTemplate;
 
     private FoodLogService service;
 
@@ -64,7 +61,8 @@ class FoodLogServiceTaskVisibilityTest {
                 clientActionMapper,
                 abuseGuard,
                 entitlementService,
-                offLookup
+                barcodeLookupService,
+                txTemplate
         );
     }
 
@@ -97,7 +95,7 @@ class FoodLogServiceTaskVisibilityTest {
         verifyNoInteractions(aiQuota);
         verifyNoInteractions(abuseGuard);
         verifyNoInteractions(entitlementService);
-        verifyNoInteractions(offLookup);
+        verifyNoInteractions(barcodeLookupService);
     }
 
     @Test
@@ -120,7 +118,7 @@ class FoodLogServiceTaskVisibilityTest {
         verifyNoInteractions(aiQuota);
         verifyNoInteractions(abuseGuard);
         verifyNoInteractions(entitlementService);
-        verifyNoInteractions(offLookup);
+        verifyNoInteractions(barcodeLookupService);
     }
 
     @Test
@@ -158,6 +156,6 @@ class FoodLogServiceTaskVisibilityTest {
         verifyNoInteractions(aiQuota);
         verifyNoInteractions(abuseGuard);
         verifyNoInteractions(entitlementService);
-        verifyNoInteractions(offLookup);
+        verifyNoInteractions(barcodeLookupService);
     }
 }

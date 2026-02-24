@@ -30,11 +30,12 @@ spring:
         format_sql: false
         jdbc:
           time_zone: UTC         # 與 DB 溝通用 UTC
-
   data:
     redis:
       host: localhost
       port: 6379
+      timeout: 2s
+      client-type: lettuce
 
   mail:
     host: smtp.gmail.com
@@ -114,7 +115,7 @@ app:
       connect-timeout: 5s
       read-timeout: 30s
       max-output-tokens: 1024
-      temperature: 1.0
+      temperature: 0.1
   features:
     dev-image-endpoint: true
     dev-debug-endpoints: true
@@ -129,13 +130,20 @@ app:
       monthly: [ "bitecal_monthly" ]
       yearly: [ "bitecal_yearly" ]
   openfoodfacts:
+    redis-prefix: "bitecal-dev"     # ✅ 建議每個環境不同
     base-url: "https://world.openfoodfacts.org"
+    basic-auth-user: ""
+    basic-auth-pass: ""
     connect-timeout: "PT5S"
     read-timeout: "PT12S"
     user-agent: "BitCal_AI/1.0 (contact: dev@bitcalai.example)"
+    global-read-limit-per-min: 90   # 建議 < 100，留 buffer（OFF 100 req/min）
+    lock-ttl: "PT30S"
+    circuit-ttl: "PT5M" # 429/403 時熔斷 5 分鐘（你可改 3m/10m）
     cache:
-      ttl: "PT6H"
-      max-size: 50000
+      positive-ttl: "P30D"          # found: 7–30天（你可調）
+      negative-ttl: "PT12H"         # not found: 6–24小時（你可調）
+      purge-delay: "PT1H"
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000
@@ -154,11 +162,11 @@ app:
       base-dir: ./data # TODO 要排程刪除
       tmp-cleaner:
         enabled: true
-        tmp-subdir: "blobs/tmp"     # 相對於 base-dir  cleaner 只會掃描 base-dir/tmp-subdir 子樹，並做 tmpDir.startsWith(baseDir) 防呆，避免配置錯誤誤刪其他路徑。建議 production 若改用雲端 object storage，可直接 enabled=false 關閉。
-        keep: "PT6H"                # 超過 6 小時的 tmp 檔會刪
-        fixed-delay: "PT10M"        # 每 10 分鐘跑一次
-        initial-delay: "PT1M"       # 啟動後 1 分鐘第一次執行
-        max-depth: 8                # 避免深層走訪拖慢
+        tmp-subdir: "blobs/tmp"   # 相對於每個 user-* 目錄，例如 ./data/user-1/blobs/tmp
+        keep: "PT6H"              # 檔案超過 6 小時才刪；空資料夾可提前刪
+        fixed-delay: "PT1H"      # 每次執行結束後等待 10 分鐘再跑下一次
+        initial-delay: "PT1M"     # 啟動後 1 分鐘跑第一次
+        max-depth: 8
         delete-empty-dirs: true
 
   retention:
@@ -201,6 +209,7 @@ logging:
   level:
     org.springframework.scheduling: INFO
     com.calai.backend.workout.job: INFO
+    com.calai.backend.foodlog.task: INFO
 
 workout:
   estimate:

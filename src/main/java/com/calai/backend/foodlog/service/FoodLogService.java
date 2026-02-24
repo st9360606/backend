@@ -1,9 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
-import com.calai.backend.foodlog.barcode.OffHttpException;
-import com.calai.backend.foodlog.barcode.OffParseException;
-import com.calai.backend.foodlog.barcode.OpenFoodFactsLookupService;
+import com.calai.backend.foodlog.barcode.*;
 import com.calai.backend.foodlog.config.FoodLogTierResolver;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
@@ -30,6 +28,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import com.calai.backend.foodlog.service.cleanup.StorageCleanup;
 import java.io.InputStream;
@@ -41,9 +40,11 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper;
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
@@ -64,6 +65,8 @@ public class FoodLogService {
     private static final String LABEL_PROVIDER = "GEMINI";
 
     private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024; // 8MB（先保守）
+    private static final List<String> DEDUPE_METHODS_PHOTO_ALBUM = List.of("PHOTO", "ALBUM");
+    private static final List<String> DEDUPE_METHODS_LABEL = List.of("LABEL");
 
     /**
      * ✅ 所有入口統一的 deviceId normalize：
@@ -91,12 +94,13 @@ public class FoodLogService {
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
     private final AbuseGuardService abuseGuard;
     private final EntitlementService entitlementService;
-    private final OpenFoodFactsLookupService offLookup;
+    private final BarcodeLookupService barcodeLookupService;
+    private final TransactionTemplate txTemplate; // ✅ 短交易用
 
     // =========================
     // S4-05：ALBUM
     // =========================
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createAlbum(
             Long userId,
             String clientTz,
@@ -117,6 +121,7 @@ public class FoodLogService {
 
         boolean acquired = false;
         String tempKey = null;
+        ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
             inFlight.acquireOrThrow(userId);
@@ -144,8 +149,9 @@ public class FoodLogService {
 
             try {
                 // 2) 去重命中（不扣 quota）
-                var hit = repo.findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+                var hit = repo.findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
                         userId,
+                        DEDUPE_METHODS_PHOTO_ALBUM,
                         saved.sha256(),
                         List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
                 );
@@ -194,7 +200,7 @@ public class FoodLogService {
                 idem.attach(userId, requestId, e.getId(), serverNow);
 
                 // 3) temp -> blob + refCount
-                var retained = blobService.retainFromTemp(
+                retained = blobService.retainFromTemp(
                         userId,
                         tempKey,
                         saved.sha256(),
@@ -223,7 +229,7 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey, retained);
                 idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_ALBUM_FAILED", safeMsg(ex), true);
                 throw ex;
             }
@@ -236,7 +242,7 @@ public class FoodLogService {
     // =========================
     // S4-08：PHOTO
     // =========================
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createPhoto(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId tz = parseTzOrUtc(clientTz);
@@ -251,6 +257,7 @@ public class FoodLogService {
 
         boolean acquired = false;
         String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
+        ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
             inFlight.acquireOrThrow(userId);
@@ -289,8 +296,9 @@ public class FoodLogService {
                 CapturedTimeResolver.Result r = timeResolver.resolve(exifUtc.orElse(null), deviceUtc, serverNow);
 
                 // 5) 去重命中（不扣 quota）
-                var hit = repo.findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+                var hit = repo.findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
                         userId,
+                        DEDUPE_METHODS_PHOTO_ALBUM,
                         saved.sha256(),
                         List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
                 );
@@ -343,7 +351,7 @@ public class FoodLogService {
                 idem.attach(userId, requestId, e.getId(), serverNow);
 
                 // 7) temp -> blob + refCount
-                var retained = blobService.retainFromTemp(
+                retained = blobService.retainFromTemp(
                         userId,
                         tempKey,
                         saved.sha256(),
@@ -374,8 +382,8 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                // ✅ 以前你這裡 hard-code ".../upload" 現在改成刪 tempKey
-                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                // ✅ 若 retain 後失敗：新建 blob 要刪 blobKey；重用 blob 不可誤刪
+                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey, retained);
                 idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_PHOTO_FAILED", safeMsg(ex), true);
                 throw ex;
             }
@@ -388,7 +396,7 @@ public class FoodLogService {
     // =========================
     // LABEL：營養標示（Gemini 3 Flash）
     // =========================
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createLabel(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId tz = parseTzOrUtc(clientTz);
@@ -404,6 +412,7 @@ public class FoodLogService {
 
         boolean acquired = false;
         String tempKey = null;
+        ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
             inFlight.acquireOrThrow(userId);
@@ -437,8 +446,9 @@ public class FoodLogService {
                 CapturedTimeResolver.Result r = timeResolver.resolve(exifUtc.orElse(null), deviceUtc, serverNow);
 
                 // 3) 去重命中（不扣 quota）
-                var hit = repo.findFirstByUserIdAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+                var hit = repo.findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
                         userId,
+                        DEDUPE_METHODS_LABEL,
                         saved.sha256(),
                         List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
                 );
@@ -490,7 +500,7 @@ public class FoodLogService {
                 idem.attach(userId, requestId, e.getId(), serverNow);
 
                 // 4) temp -> blob + refCount
-                var retained = blobService.retainFromTemp(
+                retained = blobService.retainFromTemp(
                         userId,
                         tempKey,
                         saved.sha256(),
@@ -521,7 +531,7 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                StorageCleanup.safeDeleteQuietly(storage, tempKey);
+                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey, retained);
                 idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_LABEL_FAILED", safeMsg(ex), true);
                 throw ex;
             }
@@ -531,10 +541,6 @@ public class FoodLogService {
         }
     }
 
-    // =========================
-    // BARCODE：MVP（查不到 → TRY_LABEL）
-    // =========================
-    @Transactional
     public FoodLogEnvelope createBarcodeMvp(
             Long userId,
             String clientTz,
@@ -548,140 +554,216 @@ public class FoodLogService {
         if (barcode == null || barcode.isBlank()) {
             throw new IllegalArgumentException("BARCODE_REQUIRED");
         }
-        String bc = barcode.trim();
 
-        if (bc.length() < 6 || bc.length() > 32) {
-            throw new IllegalArgumentException("BARCODE_INVALID");
-        }
-        if (!bc.chars().allMatch(Character::isDigit)) {
-            throw new IllegalArgumentException("BARCODE_INVALID");
-        }
+        // ✅ normalizeOrThrow 已完成格式/長度/digits 驗證
+        // raw 保留給 trace/aiMeta；norm 才是查詢/DB key
+        var bn = BarcodeNormalizer.normalizeOrThrow(barcode);
+        String bcRaw = bn.rawInput();
+        String bcNorm = bn.normalized();
 
-        // ✅ 1) Idempotency 要最早：同 requestId 重送直接回，不要再算 rate/abuse，也不要再打 OFF
+        // ✅ 1) Idempotency 最早（這裡會自己開短 tx）
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, now);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
-        ZoneId tz = parseTzOrUtc(clientTz);
-        LocalDate localDate = ZonedDateTime.ofInstant(now, tz).toLocalDate();
-
-        // ✅ 2) deviceId 統一 normalize（避免 null/blank 進 guard）
-        String did = normalizeDeviceId(userId, deviceId);
-
-        // ✅ 3) 仍要限流（你原本的策略 OK）
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
-        rateLimiter.checkOrThrow(userId, tier, now);
-
-        // ✅ 4) BARCODE 屬於 cheap op：避免誤觸「大量不同圖片」的 Rule A
-        // 方案A（最小改動）：當成 cacheHit=true
-        abuseGuard.onOperationAttempt(userId, did, true, now, tz);
-
-        // ✅ 5) langKey：交給 normalizeLangKey 處理（建議 controller 不必再做一次 normalize）
-        String langKey = OpenFoodFactsLookupService.normalizeLangKey(preferredLangTag);
-
-        OffResult off;
         try {
-            JsonNode root = offLookup.getProduct(bc, preferredLangTag);
-            off = OpenFoodFactsMapper.map(root, preferredLangTag);
+            ZoneId tz = parseTzOrUtc(clientTz);
+            LocalDate localDate = ZonedDateTime.ofInstant(now, tz).toLocalDate();
 
-        } catch (OffHttpException ex) {
+            // ✅ 2) deviceId normalize
+            String did = normalizeDeviceId(userId, deviceId);
 
-            if (ex.getStatus() == 404) {
-                return buildBarcodeFailedEnvelope(
-                        userId, bc, requestId, now, tz, localDate,
-                        "BARCODE_NOT_FOUND",
-                        "openfoodfacts 404 not found. barcode=" + bc
+            // ✅ 3) rate limit（交易外）
+            EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
+            rateLimiter.checkOrThrow(userId, tier, now);
+
+            // ✅ 4) barcode cheap op（交易外）
+            abuseGuard.onBarcodeAttempt(userId, did, now, tz);
+
+            // ✅ 5) lang normalize（交易外）
+            String langKey = OpenFoodFactsLang.normalizeLangKey(preferredLangTag);
+
+            // ✅ 6) lookup（交易外：OFF + cache + redis lock）
+            BarcodeLookupService.LookupResult r;
+            try {
+                r = barcodeLookupService.lookupOff(bcRaw, langKey);
+
+            } catch (OffHttpException ex) {
+                // ✅ OffHttpException 目前只有 status / bodySnippet，沒有 code getter
+                // ✅ 不要拿 safeMsg(ex)（message）去比對 "PROVIDER_RATE_LIMITED"（error code）
+                boolean providerLimited = (ex.getStatus() == 429 || ex.getStatus() == 403);
+
+                if (providerLimited) {
+                    return persistBarcodeFailedEnvelopeTx(
+                            userId, bcNorm, requestId, now, tz, localDate,
+                            "PROVIDER_RATE_LIMITED",
+                            "openfoodfacts rate-limited/banned risk. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
+                    );
+                }
+
+                return persistBarcodeFailedEnvelopeTx(
+                        userId, bcNorm, requestId, now, tz, localDate,
+                        "BARCODE_LOOKUP_FAILED",
+                        "openfoodfacts http error. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
+                );
+
+            } catch (OffParseException ex) {
+
+                return persistBarcodeFailedEnvelopeTx(
+                        userId, bcNorm, requestId, now, tz, localDate,
+                        "BARCODE_LOOKUP_FAILED",
+                        "openfoodfacts parse error. code=" + ex.getCode() + ", msg=" + safeMsg(ex)
+                );
+
+            } catch (Exception ex) {
+
+                return persistBarcodeFailedEnvelopeTx(
+                        userId, bcNorm, requestId, now, tz, localDate,
+                        "BARCODE_LOOKUP_FAILED",
+                        "openfoodfacts unknown error: " + safeMsg(ex)
                 );
             }
 
-            return buildBarcodeFailedEnvelope(
-                    userId, bc, requestId, now, tz, localDate,
-                    "BARCODE_LOOKUP_FAILED",
-                    "openfoodfacts http error. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
+            // ✅ 防呆：service 回 null
+            if (r == null) {
+                return persistBarcodeFailedEnvelopeTx(
+                        userId, bcNorm, requestId, now, tz, localDate,
+                        "BARCODE_LOOKUP_FAILED",
+                        "barcode lookup returned null result"
+                );
+            }
+
+            // ✅ 找不到（含 negative cache）
+            if (!r.found() || r.off() == null) {
+                String failRaw = firstNonBlank(r.barcodeRaw(), bcRaw);
+                String failNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
+
+                return persistBarcodeFailedEnvelopeTx(
+                        userId, failNorm, requestId, now, tz, localDate,
+                        "BARCODE_NOT_FOUND",
+                        "openfoodfacts not found. raw=" + failRaw + ", norm=" + failNorm
+                );
+            }
+
+            // ✅ 查到 → 短交易寫 DB + attach
+            return persistBarcodeSuccessEnvelopeTx(
+                    userId, bcRaw, bcNorm, requestId, now, tz, localDate, r, langKey
             );
 
-        } catch (OffParseException ex) {
-
-            return buildBarcodeFailedEnvelope(
-                    userId, bc, requestId, now, tz, localDate,
-                    "BARCODE_LOOKUP_FAILED",
-                    "openfoodfacts parse error. code=" + ex.getCode() + ", msg=" + safeMsg(ex)
+        } catch (RuntimeException ex) {
+            // ✅ 關鍵：reserve 成功後若中途炸掉（rate limit/cooldown/DB error），要釋放 requestId
+            idem.failAndReleaseIfNeeded(
+                    userId,
+                    requestId,
+                    "CREATE_BARCODE_FAILED",
+                    safeMsg(ex),
+                    true
             );
-
-        } catch (Exception ex) {
-
-            return buildBarcodeFailedEnvelope(
-                    userId, bc, requestId, now, tz, localDate,
-                    "BARCODE_LOOKUP_FAILED",
-                    "openfoodfacts unknown error: " + safeMsg(ex)
-            );
+            throw ex;
         }
+    }
 
-        if (off == null) {
-            return buildBarcodeFailedEnvelope(
-                    userId, bc, requestId, now, tz, localDate,
-                    "BARCODE_NOT_FOUND", "barcode not found: " + bc
-            );
-        }
-
-        // ===== 3) 查到：建立 DRAFT + effective（符合你既有 schema）=====
-        FoodLogEntity e = new FoodLogEntity();
-        e.setUserId(userId);
-        e.setMethod("BARCODE");
-        e.setProvider("OPENFOODFACTS");
-        e.setDegradeLevel("DG-0");
-
-        e.setCapturedAtUtc(now);
-        e.setCapturedTz(tz.getId());
-        e.setCapturedLocalDate(localDate);
-        e.setServerReceivedAtUtc(now);
-
-        e.setTimeSource(TimeSource.SERVER_RECEIVED);
-        e.setTimeSuspect(false);
-
-        e.setBarcode(bc);
-
-        // --- effective schema（最少必要欄位）---
-        ObjectNode eff = JsonNodeFactory.instance.objectNode();
-
-        String name = (off.productName() == null || off.productName().isBlank())
-                ? "Unknown product"
-                : off.productName();
-        eff.put("foodName", name);
-
-        // ✅ quantity + nutrients（整包 > 每份 > 每100g）
-        String basis = applyBarcodePortion(eff, off);
-
-        // ✅ confidence：看 nutrients 是否有任一宏量營養素
-        ObjectNode nObj = (eff.get("nutrients") != null && eff.get("nutrients").isObject())
-                ? (ObjectNode) eff.get("nutrients")
-                : null;
-
-        boolean hasAnyMacro = nObj != null && (
-                (nObj.get("protein") != null && !nObj.get("protein").isNull())
-                || (nObj.get("fat") != null && !nObj.get("fat").isNull())
-                || (nObj.get("carbs") != null && !nObj.get("carbs").isNull())
+    private FoodLogEnvelope persistBarcodeFailedEnvelopeTx(
+            Long userId,
+            String bc,
+            String requestId,
+            Instant now,
+            ZoneId tz,
+            LocalDate localDate,
+            String errorCode,
+            String errorMsg
+    ) {
+        FoodLogEnvelope out = txTemplate.execute(status ->
+                buildBarcodeFailedEnvelope(
+                        userId, bc, requestId, now, tz, localDate, errorCode, errorMsg
+                )
         );
+        if (out == null) {
+            throw new IllegalStateException("BARCODE_TX_FAILED_EMPTY_RESULT");
+        }
+        return out;
+    }
 
-        eff.put("confidence", hasAnyMacro ? 0.98 : 0.92);
+    private FoodLogEnvelope persistBarcodeSuccessEnvelopeTx(
+            Long userId,
+            String bcRaw,
+            String bcNorm,
+            String requestId,
+            Instant now,
+            ZoneId tz,
+            LocalDate localDate,
+            BarcodeLookupService.LookupResult r,
+            String langKey
+    ) {
+        FoodLogEnvelope out = txTemplate.execute(status -> {
+            OffResult off = r.off();
 
-        // ✅ aiMeta：補齊 barcode + source
-        ObjectNode aiMeta = ensureObj(eff, "aiMeta");
-        aiMeta.put("barcode", bc);
-        aiMeta.put("source", "OPENFOODFACTS");
-        aiMeta.put("basis", basis);
-        aiMeta.put("lang", langKey);
+            // ===== 查到：建立 DRAFT + effective =====
+            FoodLogEntity e = new FoodLogEntity();
+            e.setUserId(userId);
+            e.setMethod("BARCODE");
+            e.setProvider("OPENFOODFACTS");
+            e.setDegradeLevel("DG-0");
 
-        ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
-        e.setEffective(processed);
+            e.setCapturedAtUtc(now);
+            e.setCapturedTz(tz.getId());
+            e.setCapturedLocalDate(localDate);
+            e.setServerReceivedAtUtc(now);
 
-        e.setStatus(FoodLogStatus.DRAFT);
-        e.setLastErrorCode(null);
-        e.setLastErrorMessage(null);
+            e.setTimeSource(TimeSource.SERVER_RECEIVED);
+            e.setTimeSuspect(false);
 
-        repo.save(e);
-        idem.attach(userId, requestId, e.getId(), now);
+            String resolvedRaw = firstNonBlank(bcRaw, r.barcodeRaw());
+            String resolvedNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
 
-        return toEnvelope(e, null, requestId);
+            // ✅ DB 一律存 normalized
+            e.setBarcode(resolvedNorm);
+
+            ObjectNode eff = JsonNodeFactory.instance.objectNode();
+
+            String name = (off.productName() == null || off.productName().isBlank())
+                    ? "Unknown product"
+                    : off.productName();
+            eff.put("foodName", name);
+
+            String basis = applyBarcodePortion(eff, off);
+
+            ObjectNode nObj = (eff.get("nutrients") != null && eff.get("nutrients").isObject())
+                    ? (ObjectNode) eff.get("nutrients")
+                    : null;
+
+            boolean hasAnyMacro = nObj != null && (
+                    (nObj.get("protein") != null && !nObj.get("protein").isNull())
+                    || (nObj.get("fat") != null && !nObj.get("fat").isNull())
+                    || (nObj.get("carbs") != null && !nObj.get("carbs").isNull())
+            );
+
+            eff.put("confidence", hasAnyMacro ? 0.98 : 0.92);
+
+            ObjectNode aiMeta = ensureObj(eff, "aiMeta");
+            aiMeta.put("barcodeRaw", resolvedRaw);
+            aiMeta.put("barcodeNorm", resolvedNorm);
+            aiMeta.put("fromCache", r.fromCache());
+            aiMeta.put("source", "OPENFOODFACTS");
+            aiMeta.put("basis", basis);
+            aiMeta.put("lang", langKey);
+
+            ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
+            e.setEffective(processed);
+
+            e.setStatus(FoodLogStatus.DRAFT);
+            e.setLastErrorCode(null);
+            e.setLastErrorMessage(null);
+
+            repo.save(e);
+            idem.attach(userId, requestId, e.getId(), now);
+
+            return toEnvelope(e, null, requestId);
+        });
+
+        if (out == null) {
+            throw new IllegalStateException("BARCODE_TX_FAILED_EMPTY_RESULT");
+        }
+        return out;
     }
 
     private String applyBarcodePortion(ObjectNode eff, OffResult off) {
@@ -817,8 +899,11 @@ public class FoodLogService {
     }
 
     private static void putNumOrNull(ObjectNode obj, String field, Double v) {
-        if (v == null) obj.putNull(field);
-        else obj.put(field, v);
+        if (v == null || !Double.isFinite(v)) {
+            obj.putNull(field);
+        } else {
+            obj.put(field, v);
+        }
     }
 
 
@@ -1011,6 +1096,14 @@ public class FoodLogService {
                 .doubleValue();
     }
 
+    private static String firstNonBlank(String... values) {
+        if (values == null) return "";
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v;
+        }
+        return "";
+    }
+
     @Transactional(readOnly = true)
     public OpenedImage openImage(Long userId, String foodLogId) {
         var log = repo.findByIdAndUserId(foodLogId, userId)
@@ -1040,6 +1133,7 @@ public class FoodLogService {
         rateLimiter.checkOrThrow(userId, tier, now);
 
         FoodLogEntity log = repo.findByIdForUpdate(foodLogId);
+        if (log == null) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
 
         if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
@@ -1099,24 +1193,47 @@ public class FoodLogService {
     // helpers
     // =========================
 
-    // ===== FoodLogService 新增/保留這段 helper：從 message 抽 retryAfterSec =====
-// 放在 FoodLogService helpers 區塊即可（你原本若已有就用這版覆蓋）
+    private static void cleanupUploadOrBlobAfterFailure(
+            StorageService storage,
+            Long userId,
+            String requestId,
+            String tempKey,
+            ImageBlobService.RetainResult retained
+    ) {
+        // ✅ retain 後若這次是新建 blob，失敗時要刪 blobKey，避免孤兒檔
+        if (retained != null && retained.newlyCreated()) {
+            String blobKey = retained.objectKey();
+            if (blobKey != null && !blobKey.isBlank()) {
+                StorageCleanup.safeDeleteQuietly(storage, blobKey);
+                return;
+            }
+        }
 
-    private static final java.util.regex.Pattern P_SUGGESTED_RETRY_AFTER =
-            java.util.regex.Pattern.compile("suggestedRetryAfterSec=(\\d+)");
+        // ✅ 尚未 retain 或是重用既有 blob：清 temp 即可（刪不到也沒關係）
+        StorageCleanup.safeDeleteQuietly(storage, tempKey);
+        if (tempKey == null) {
+            StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
+        }
+    }
+
+    // ===== FoodLogService 新增/保留這段 helper：從 message 抽 retryAfterSec =====
+    // 放在 FoodLogService helpers 區塊即可（你原本若已有就用這版覆蓋）
+
+    private static final Pattern P_SUGGESTED_RETRY_AFTER =
+            Pattern.compile("suggestedRetryAfterSec=(\\d+)");
     private static final java.util.regex.Pattern P_RETRY_AFTER =
-            java.util.regex.Pattern.compile("retryAfterSec=(\\d+)");
+            Pattern.compile("retryAfterSec=(\\d+)");
 
     private static Integer parseRetryAfterFromMessageOrNull(String msg) {
         if (msg == null || msg.isBlank()) return null;
 
-        java.util.regex.Matcher m1 = P_SUGGESTED_RETRY_AFTER.matcher(msg);
+        Matcher m1 = P_SUGGESTED_RETRY_AFTER.matcher(msg);
         if (m1.find()) {
             try { return clampInt(Integer.parseInt(m1.group(1)), 0, 3600); }
             catch (Exception ignored) {}
         }
 
-        java.util.regex.Matcher m2 = P_RETRY_AFTER.matcher(msg);
+        Matcher m2 = P_RETRY_AFTER.matcher(msg);
         if (m2.find()) {
             try { return clampInt(Integer.parseInt(m2.group(1)), 0, 3600); }
             catch (Exception ignored) {}
@@ -1159,13 +1276,41 @@ public class FoodLogService {
     }
 
     private static Integer intOrNull(JsonNode node, String field) {
+        if (node == null || node.isNull()) return null;
         JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asInt();
+        if (v == null || v.isNull()) return null;
+        if (v.isIntegralNumber()) return v.asInt();
+        if (v.isTextual()) {
+            String s = v.asText(null);
+            if (s == null || s.isBlank()) return null;
+            try {
+                return Integer.parseInt(s.trim());
+            } catch (NumberFormatException ignore) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static Double doubleOrNull(JsonNode node, String field) {
+        if (node == null || node.isNull()) return null;
         JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asDouble();
+        if (v == null || v.isNull()) return null;
+        if (v.isNumber()) {
+            double d = v.asDouble();
+            return Double.isFinite(d) ? d : null;
+        }
+        if (v.isTextual()) {
+            String s = v.asText(null);
+            if (s == null || s.isBlank()) return null;
+            try {
+                double d = Double.parseDouble(s.trim());
+                return Double.isFinite(d) ? d : null;
+            } catch (NumberFormatException ignore) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static Integer computeRetryAfterSecOrNull(FoodLogTaskEntity t, Instant now) {
@@ -1190,8 +1335,12 @@ public class FoodLogService {
 
 
     private static int computePollAfterSec(FoodLogStatus status, FoodLogTaskEntity t, Instant now) {
-        int pollAfter = t.getPollAfterSec();
-        int base = Math.max(1, pollAfter);
+        if (t == null) return 2;
+
+        Integer pollAfterObj = t.getPollAfterSec();
+        int base = Math.max(1, pollAfterObj == null ? 2 : pollAfterObj);
+
+        FoodLogTaskEntity.TaskStatus ts = t.getTaskStatus();
 
         // ✅ FAILED：用 nextRetryAtUtc 算剩餘秒數
         if (status == FoodLogStatus.FAILED) {
@@ -1204,7 +1353,7 @@ public class FoodLogService {
         if (status == FoodLogStatus.PENDING) {
 
             // 1) QUEUED：依排隊時間退避（>30s→5、>60s→8、>120s→10）
-            if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.QUEUED) {
+            if (ts == FoodLogTaskEntity.TaskStatus.QUEUED) {
                 Instant created = t.getCreatedAtUtc();
                 if (created == null) {
                     // createdAt 不存在：保守回 base（通常 2）
@@ -1224,12 +1373,13 @@ public class FoodLogService {
             }
 
             // 2) RUNNING：維持原本（Demo 體感好）
-            if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING) {
+            if (ts == FoodLogTaskEntity.TaskStatus.RUNNING) {
                 return clamp(base, 2, 10);
             }
 
             // 3) 其他狀態（理論上少見）：輕度退避
-            int attempts = Math.max(0, t.getAttempts());
+            Integer attemptsObj = t.getAttempts();
+            int attempts = Math.max(0, attemptsObj == null ? 0 : attemptsObj);
             int v = base + Math.min(attempts, 6);
             return clamp(v, 2, 10);
         }

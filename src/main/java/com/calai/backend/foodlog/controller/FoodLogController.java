@@ -76,7 +76,7 @@ public class FoodLogController {
         return service.createLabel(uid, clientTz, deviceId, deviceCapturedAtUtc, file, requestId);
     }
 
-    public record BarcodeRequest(String barcode) {}
+    public record BarcodeRequest(String barcode, String locale) {}
 
     /**
      * ✅ BARCODE：MVP 先做「查不到 → TRY_LABEL」
@@ -96,9 +96,12 @@ public class FoodLogController {
         String requestId = RequestIdFilter.getOrCreate(req);
 
         // ✅ 統一：只取第一個 lang tag（支援 Accept-Language 字串）
-        String preferredLangTag = OpenFoodFactsLang.firstLangTagOrNull(
-                (appLang != null && !appLang.isBlank()) ? appLang : acceptLanguage
-        );
+        String preferredLangTag =
+                (body != null && body.locale() != null && !body.locale().isBlank())
+                        ? body.locale()
+                        : OpenFoodFactsLang.firstLangTagOrNull(
+                        (appLang != null && !appLang.isBlank()) ? appLang : acceptLanguage
+                );
 
         return service.createBarcodeMvp(
                 uid, clientTz, deviceId,
@@ -107,7 +110,6 @@ public class FoodLogController {
                 requestId
         );
     }
-
 
     @GetMapping("/{id}")
     public FoodLogEnvelope getOne(@PathVariable String id, HttpServletRequest req) {

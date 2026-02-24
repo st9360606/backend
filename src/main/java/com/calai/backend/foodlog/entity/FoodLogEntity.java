@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 
@@ -137,11 +138,9 @@ public class FoodLogEntity {
                     root.remove("nutrients");
                 } else {
                     ObjectNode merged;
-
                     JsonNode existing = root.get("nutrients");
                     if (existing != null && existing.isObject()) {
-                        // ✅ 不需要 (ObjectNode) cast
-                        merged = existing.deepCopy();
+                        merged = (ObjectNode) existing.deepCopy();
                     } else {
                         merged = JsonNodeFactory.instance.objectNode();
                     }
@@ -149,12 +148,12 @@ public class FoodLogEntity {
                     if (!newValue.isObject()) {
                         throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
                     }
-
-                    // ✅ Jackson 新版建議用 properties() 取代 fields()
-                    for (Map.Entry<String, JsonNode> e : newValue.properties()) {
-                        merged.set(e.getKey(), e.getValue());
+                    // ✅ 相容寫法：用 ObjectNode#fields()（跨 Jackson 版本較穩）
+                    ObjectNode patch = (ObjectNode) newValue;
+                    for (Iterator<Map.Entry<String, JsonNode>> it = patch.fields(); it.hasNext(); ) {
+                        Map.Entry<String, JsonNode> en = it.next();
+                        merged.set(en.getKey(), en.getValue());
                     }
-
                     root.set("nutrients", merged);
                 }
             }

@@ -23,7 +23,10 @@ public class LocalDiskStorageService implements StorageService {
     @Override
     public SaveResult save(String objectKey, InputStream in, String contentType) throws Exception {
         Path path = resolve(objectKey);
-        Files.createDirectories(path.getParent());
+        Path parent = path.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
 
         MessageDigest md = MessageDigest.getInstance("SHA-256");
 
@@ -37,6 +40,14 @@ public class LocalDiskStorageService implements StorageService {
                 out.write(buf, 0, n);
                 size += n;
             }
+
+        } catch (Exception ex) {
+            try {
+                Files.deleteIfExists(path);
+            } catch (Exception ignored) {
+                // best-effort
+            }
+            throw ex;
         }
 
         String sha256 = HexFormat.of().formatHex(md.digest());
@@ -70,7 +81,11 @@ public class LocalDiskStorageService implements StorageService {
     public void move(String fromObjectKey, String toObjectKey) throws Exception {
         Path from = resolve(fromObjectKey);
         Path to = resolve(toObjectKey);
-        Files.createDirectories(to.getParent());
+
+        Path toParent = to.getParent();
+        if (toParent != null) {
+            Files.createDirectories(toParent);
+        }
 
         try {
             Files.move(from, to, StandardCopyOption.ATOMIC_MOVE);
@@ -80,10 +95,31 @@ public class LocalDiskStorageService implements StorageService {
         }
     }
 
+    /**
+     * ✅ Best-effort：刪除 objectKey 的父資料夾（若為空）
+     * 例如：
+     * user-1/blobs/tmp/{requestId}/upload.jpg -> 嘗試刪除 {requestId} 目錄
+     */
+    public void deleteEmptyParentDirQuietly(String objectKey) {
+        try {
+            Path file = resolve(objectKey);
+            Path parent = file.getParent();
+            if (parent == null) return;
+            if (!Files.exists(parent) || !Files.isDirectory(parent)) return;
+
+            try (DirectoryStream<Path> ds = Files.newDirectoryStream(parent)) {
+                if (!ds.iterator().hasNext()) {
+                    Files.deleteIfExists(parent);
+                }
+            }
+        } catch (Exception ignored) {
+            // best-effort，不影響主流程
+        }
+    }
+
     private Path resolve(String objectKey) {
         Path p = baseDir.resolve(objectKey).normalize();
         if (!p.startsWith(baseDir)) throw new SecurityException("Invalid objectKey");
         return p;
     }
-
 }

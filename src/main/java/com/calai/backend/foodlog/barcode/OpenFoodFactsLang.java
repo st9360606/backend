@@ -1,9 +1,14 @@
 package com.calai.backend.foodlog.barcode;
 
 import java.util.*;
+import java.util.regex.Pattern;
 
 public final class OpenFoodFactsLang {
     private OpenFoodFactsLang() {}
+
+    // ✅ 允許 BCP47 常見格式子集（足夠應付 app / Accept-Language）
+    private static final Pattern SAFE_LANG_TAG =
+            Pattern.compile("^[A-Za-z]{1,8}([_-][A-Za-z0-9]{1,8}){0,3}$");
 
     public static String firstLangTagOrNull(String raw) {
         return pickFirstLangTag(raw);
@@ -59,7 +64,20 @@ public final class OpenFoodFactsLang {
 
         int semi = first.indexOf(';');
         if (semi >= 0) first = first.substring(0, semi).trim();
+        if (first.isEmpty()) return null;
 
-        return first.isEmpty() ? null : first;
+        // ✅ wildcard 保留；其他需符合白名單
+        if (!"*".equals(first) && !SAFE_LANG_TAG.matcher(first).matches()) {
+            return null;
+        }
+
+        return first;
+    }
+
+    public static String normalizeLangKey(String raw) {
+        String tag = firstLangTagOrNull(raw);
+        if (tag == null || tag.isBlank()) return "";
+        String norm = tag.trim().replace('_', '-').toLowerCase(Locale.ROOT);
+        return "*".equals(norm) ? "" : norm;
     }
 }
