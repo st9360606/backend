@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -14,6 +15,7 @@ public interface ImageBlobRepository extends JpaRepository<ImageBlobEntity, Long
     Optional<ImageBlobEntity> findByUserIdAndSha256(Long userId, String sha256);
 
     /** 新 blob：INSERT IGNORE，成功回 1 */
+    @Transactional
     @Modifying
     @Query(
             value = """
@@ -31,6 +33,7 @@ public interface ImageBlobRepository extends JpaRepository<ImageBlobEntity, Long
                     @Param("now") Instant now);
 
     /** 既有 blob：ref_count + 1 */
+    @Transactional
     @Modifying
     @Query(
             value = """
@@ -44,6 +47,7 @@ public interface ImageBlobRepository extends JpaRepository<ImageBlobEntity, Long
     int retain(@Param("userId") Long userId, @Param("sha256") String sha256, @Param("now") Instant now);
 
     /** release：ref_count - 1（不讓它變負） */
+    @Transactional
     @Modifying
     @Query(
             value = """
@@ -65,6 +69,7 @@ public interface ImageBlobRepository extends JpaRepository<ImageBlobEntity, Long
     )
     Integer getRefCount(@Param("userId") Long userId, @Param("sha256") String sha256);
 
+    @Transactional
     @Modifying
     @Query(
             value = """

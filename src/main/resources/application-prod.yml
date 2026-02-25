@@ -165,10 +165,20 @@ app:
         enabled: true
         tmp-subdir: "blobs/tmp"   # 相對於每個 user-* 目錄，例如 ./data/user-1/blobs/tmp
         keep: "PT6H"              # 檔案超過 6 小時才刪；空資料夾可提前刪
-        fixed-delay: "PT1H"      # 每次執行結束後等待 10 分鐘再跑下一次
+        fixed-delay: "PT6H"        # 每 6 小時跑一次
         initial-delay: "PT1M"     # 啟動後 1 分鐘跑第一次
         max-depth: 8
         delete-empty-dirs: true
+      sha256-orphan-cleaner:
+        enabled: true               # ✅ 先開著，但搭配 dry-run
+        dry-run: true               # ✅ 先觀察 log，確認安全後改 false
+        sha256-subdir: "blobs/sha256"
+        min-age: "PT1H"             # 檔案至少 1 小時以上才檢查（保守）
+        fixed-delay: "PT6H"         # 每 6 小時跑一次
+        initial-delay: "PT5M"       # 啟動後 5 分鐘跑第一次
+        max-delete-per-run: 100     # 單次最多刪 100 個
+        max-depth: 8
+        delete-empty-dirs: false    # sha256 通常是平面檔案目錄，先關閉即可
 
   retention:
     foodlog:
