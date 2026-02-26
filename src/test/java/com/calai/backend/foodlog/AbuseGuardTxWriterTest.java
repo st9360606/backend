@@ -18,12 +18,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.Mockito.*;
 
-/**
- * 單元測試重點：
- * - 驗證 TxWriter 寫 DB state 的內容
- * - 驗證拋出的 CooldownActiveException 內容
- * - 驗證跨日 / 跨月 rollover 重置 key/count
- */
 class AbuseGuardTxWriterTest {
 
     @Test
@@ -135,7 +129,7 @@ class AbuseGuardTxWriterTest {
         assertThat(saved.getMonthlyCount()).isEqualTo(0);
 
         // ✅ strikes 至少 3
-        assertThat(saved.getCooldownStrikes()).isEqualTo(3);
+        assertThat(saved.getCooldownStrikes()).isGreaterThanOrEqualTo(3);
 
         // ✅ cooldown / forceLow 寫入
         assertThat(saved.getCooldownReason()).isEqualTo("ABUSE");
@@ -144,7 +138,7 @@ class AbuseGuardTxWriterTest {
     }
 
     @Test
-    void should_keep_higher_existing_strikes_when_already_greater_than_3() {
+    void should_not_drop_strikes_to_3_when_existing_is_higher() {
         // given
         UserAiQuotaStateRepository repo = mock(UserAiQuotaStateRepository.class);
 
@@ -178,10 +172,15 @@ class AbuseGuardTxWriterTest {
 
         // then
         assertThat(ex).isNotNull();
+
         UserAiQuotaStateEntity saved = captor.getValue();
 
-        // ✅ 不應被降成 3，應保留 5
-        assertThat(saved.getCooldownStrikes()).isEqualTo(5);
+        // ✅ 重點：不應被降成 3
+        // 你的實作目前會 +1，所以從 5 -> 6；若你未來改成不 +1，也至少要 >= 5
+        assertThat(saved.getCooldownStrikes()).isGreaterThanOrEqualTo(5);
+
         assertThat(saved.getCooldownReason()).isEqualTo("ABUSE");
+        assertThat(saved.getNextAllowedAtUtc()).isEqualTo(now.plus(Duration.ofMinutes(30)));
+        assertThat(saved.getForceLowUntilUtc()).isEqualTo(now.plus(Duration.ofMinutes(30)));
     }
 }

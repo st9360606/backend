@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 class LocalTempBlobCleanerTest {
 
@@ -21,21 +20,29 @@ class LocalTempBlobCleanerTest {
     Path temp;
 
     @Test
-    void clean_should_delete_old_files_under_tmp_only() throws Exception {
+    void clean_should_delete_old_files_under_user_tmp_only() throws Exception {
+        // Arrange
         Path base = temp;
 
-        Path tmpDir = base.resolve("blobs/tmp");
+        long userId = 1L;
+        Path userDir = base.resolve("user-" + userId);
+
+        // ✅ Cleaner 會掃：{base}/user-*/blobs/tmp
+        Path tmpDir = userDir.resolve("blobs/tmp");
         Files.createDirectories(tmpDir.resolve("a/b"));
 
-        Path safeDir = base.resolve("blobs/keep");
+        // ✅ 安全區：同一個 user 底下，但不是 tmp
+        Path safeDir = userDir.resolve("blobs/keep");
         Files.createDirectories(safeDir);
         Path safeFile = safeDir.resolve("keep.txt");
         Files.writeString(safeFile, "keep");
 
+        // ✅ 舊檔：超過 keep(6h) → 應刪
         Path oldFile = tmpDir.resolve("a/b/old.txt");
         Files.writeString(oldFile, "old");
         Files.setLastModifiedTime(oldFile, FileTime.from(Instant.now().minus(Duration.ofHours(7))));
 
+        // ✅ 新檔：未超過 keep → 保留
         Path freshFile = tmpDir.resolve("fresh.txt");
         Files.writeString(freshFile, "fresh");
         Files.setLastModifiedTime(freshFile, FileTime.from(Instant.now().minus(Duration.ofMinutes(30))));
@@ -45,20 +52,25 @@ class LocalTempBlobCleanerTest {
         props.setKeep(Duration.ofHours(6));
         props.setMaxDepth(20);
         props.setDeleteEmptyDirs(true);
-        props.setTmpSubdir("blobs/tmp");
+        props.setTmpSubdir("blobs/tmp"); // 相對於 userDir（user-*/{tmpSubdir}）
 
-        // ✅ 不要繼承 LocalDiskStorageService：直接 mock getBaseDir()
-        LocalDiskStorageService storage = mock(LocalDiskStorageService.class);
-        when(storage.getBaseDir()).thenReturn(base);
+        // ✅ 建議：不要 mock，避免 Mockito agent 警告
+        LocalDiskStorageService storage = new LocalDiskStorageService(base.toString());
 
         LocalTempBlobCleaner cleaner = new LocalTempBlobCleaner(storage, props);
+
+        // Act
         cleaner.clean();
 
+        // Assert
         assertFalse(Files.exists(oldFile), "old file should be deleted");
         assertTrue(Files.exists(freshFile), "fresh file should remain");
         assertTrue(Files.exists(safeFile), "non-tmp file should remain");
 
+        // old.txt 刪掉後 a/b 應成空資料夾 → 應刪
         assertFalse(Files.exists(tmpDir.resolve("a/b")), "empty nested tmp dir should be deleted");
+
+        // tmp root 不刪（cleaner 設計就是保留 root）
         assertTrue(Files.exists(tmpDir), "tmp root dir should remain");
     }
 }
