@@ -4,6 +4,12 @@ server:
   address: 0.0.0.0
 
 spring:
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 15MB
+      max-request-size: 20MB
+      file-size-threshold: 2MB
   task:
     scheduling:
       pool:
@@ -12,7 +18,6 @@ spring:
       shutdown:
         await-termination: true
         await-termination-period: 30s
-
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true

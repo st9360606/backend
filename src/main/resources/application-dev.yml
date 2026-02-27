@@ -4,22 +4,25 @@ server:
   address: 0.0.0.0
 
 spring:
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 15MB
+      max-request-size: 20MB
+      file-size-threshold: 2MB
   task:
     scheduling:
       pool:
-        size: 6                 # 由 2 提升到 6：promotion/purge/retention 等可並行
+        size: 6
       thread-name-prefix: "sched-"
       shutdown:
         await-termination: true
         await-termination-period: 30s
-    # 若你偏好全局設定時區（依 Boot 版本），也可加上（仍建議註解端顯式 zone 保險）
-    # time-zone: Asia/Taipei
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true
     username: root
     password: root
-
   jpa:
     hibernate:
       ddl-auto: none             # 無自動建表；請用 Flyway/Liquibase
@@ -29,7 +32,7 @@ spring:
       hibernate:
         format_sql: false
         jdbc:
-          time_zone: UTC         # 與 DB 溝通用 UTC
+          time_zone: UTC
   data:
     redis:
       host: localhost
