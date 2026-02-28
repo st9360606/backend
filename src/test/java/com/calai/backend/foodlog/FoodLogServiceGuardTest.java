@@ -4,7 +4,7 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.barcode.OpenFoodFactsClient;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
+import com.calai.backend.foodlog.quota.service.QuotaService;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
@@ -36,7 +36,8 @@ class FoodLogServiceGuardTest {
     @Mock StorageService storage;
     @Mock ObjectMapper om;
 
-    @Mock AiQuotaEngine aiQuota;
+    @Mock
+    QuotaService aiQuota;
     @Mock IdempotencyService idem;
     @Mock ImageBlobService blobService;
     @Mock UserInFlightLimiter inFlight;

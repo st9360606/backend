@@ -39,3 +39,14 @@ WHERE user_id = 1 AND status='ACTIVE';
 UPDATE usage_counters
 SET used_count = 200
 WHERE user_id=1 AND local_date='2026-01-27';
+
+
+-- 只把到期日往後推 30 天
+UPDATE calai.user_entitlements
+SET
+    valid_to_utc = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 DAY),
+    status = 'ACTIVE',
+    last_verified_at_utc = UTC_TIMESTAMP(),
+    updated_at_utc = UTC_TIMESTAMP()
+WHERE user_id = 1
+  AND entitlement_type = 'MONTHLY';

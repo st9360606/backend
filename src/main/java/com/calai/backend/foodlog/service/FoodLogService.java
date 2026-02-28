@@ -14,7 +14,7 @@ import com.calai.backend.foodlog.image.ImageSniffer;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.model.ClientAction;
 import com.calai.backend.foodlog.quota.model.ModelTier;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
+import com.calai.backend.foodlog.quota.service.QuotaService;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
@@ -83,7 +83,7 @@ public class FoodLogService {
     private final FoodLogTaskRepository taskRepo;
     private final StorageService storage;
     private final ObjectMapper om;
-    private final AiQuotaEngine aiQuota;
+    private final QuotaService quota;
     private final IdempotencyService idem;
     private final ImageBlobService blobService;
     private final UserInFlightLimiter inFlight;
@@ -189,7 +189,7 @@ public class FoodLogService {
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, serverNow);
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, serverNow);
                     e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(defaultProvider());
                     e.setEffective(null);
@@ -339,7 +339,7 @@ public class FoodLogService {
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, serverNow);
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, serverNow);
                     // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
                     e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(defaultProvider());
@@ -488,7 +488,7 @@ public class FoodLogService {
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
                     // ✅ 未命中：扣 AI quota，provider 固定 GEMINI
-                    AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, serverNow);
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, serverNow);
                     // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
                     e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(LABEL_PROVIDER);
@@ -1156,7 +1156,7 @@ public class FoodLogService {
         abuseGuard.onOperationAttempt(userId, did, false, now, tz);
 
         // ✅ Step 1：retry 也算一次 Operation（會再打模型）
-        AiQuotaEngine.Decision d = aiQuota.consumeOperationOrThrow(userId, tz, now);
+        QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, now);
 
         // ✅ 先用 degradeLevel 反映 tier，方便你觀測（Step 2 才會真正選模型）
         log.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");

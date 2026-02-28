@@ -2,7 +2,7 @@ package com.calai.backend.foodlog.quota;
 
 import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
+import com.calai.backend.foodlog.quota.service.QuotaService;
 import com.calai.backend.foodlog.quota.web.CooldownActiveException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,10 +21,10 @@ import static org.mockito.Mockito.when;
 
 @ActiveProfiles("test")
 @SpringBootTest
-class AiQuotaEngineTest {
+class QuotaServiceTest {
 
     @Autowired
-    AiQuotaEngine engine;
+    QuotaService engine;
 
     // ✅ NEW: replaces @MockBean
     @MockitoBean

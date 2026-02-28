@@ -9,7 +9,7 @@ import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.model.ClientAction;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
+import com.calai.backend.foodlog.quota.service.QuotaService;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
@@ -36,7 +36,8 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock FoodLogRepository repo;
     @Mock FoodLogTaskRepository taskRepo;
     @Mock StorageService storage;
-    @Mock AiQuotaEngine aiQuota;
+    @Mock
+    QuotaService aiQuota;
     @Mock IdempotencyService idem;
     @Mock ImageBlobService imageBlobService;
     @Mock UserInFlightLimiter inFlight;

@@ -109,7 +109,7 @@ public class FoodLogDedupQuotaTest {
     }
 
     /**
-     * ✅ 兼容 TRIAL / PAID：AiQuotaEngine 可能增加 daily 或 monthly
+     * ✅ 兼容 TRIAL / PAID：QuotaService 可能增加 daily 或 monthly
      * 所以這裡用 dailyCount + monthlyCount 當總 used（適合這支測試的「增量」斷言）
      */
     private int usedTotal(Long userId) {

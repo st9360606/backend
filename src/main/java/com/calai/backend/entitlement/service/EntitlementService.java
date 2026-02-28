@@ -2,6 +2,7 @@ package com.calai.backend.entitlement.service;
 
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
@@ -9,6 +10,7 @@ import java.time.Instant;
 import java.util.Locale;
 
 @RequiredArgsConstructor
+@Slf4j
 @Service
 public class EntitlementService {
 
@@ -18,14 +20,24 @@ public class EntitlementService {
 
     public Tier resolveTier(Long userId, Instant nowUtc) {
         var list = repo.findActive(userId, nowUtc, PageRequest.of(0, 5));
+        log.info("resolveTier userId={} nowUtc={} activeEntitlements={}", userId, nowUtc, list.size());
+
         if (list.isEmpty()) return Tier.NONE;
 
-        // 若同時存在，取「最高」：YEARLY > MONTHLY > TRIAL
         Tier best = Tier.NONE;
         for (var e : list) {
             Tier t = parseTier(e.getEntitlementType());
+            log.info("entitlement id={} type={} status={} validFrom={} validTo={} parsedTier={}",
+                    e.getId(),
+                    e.getEntitlementType(),
+                    e.getStatus(),
+                    e.getValidFromUtc(),
+                    e.getValidToUtc(),
+                    t
+            );
             if (rank(t) > rank(best)) best = t;
         }
+        log.info("resolveTier result userId={} tier={}", userId, best);
         return best;
     }
 

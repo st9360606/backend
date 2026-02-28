@@ -6,15 +6,18 @@ import com.calai.backend.foodlog.quota.model.CooldownReason;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.quota.repo.UserAiQuotaStateRepository;
 import com.calai.backend.foodlog.quota.web.CooldownActiveException;
+import com.calai.backend.foodlog.web.SubscriptionRequiredException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 @Service
-public class AiQuotaEngine {
+public class QuotaService {
 
     private final UserAiQuotaStateRepository repo;
     private final EntitlementService entitlementService;
@@ -39,7 +42,7 @@ public class AiQuotaEngine {
 
     public record Decision(ModelTier tierUsed) {}
 
-    public AiQuotaEngine(UserAiQuotaStateRepository repo, EntitlementService entitlementService) {
+    public QuotaService(UserAiQuotaStateRepository repo, EntitlementService entitlementService) {
         this.repo = repo;
         this.entitlementService = entitlementService;
     }
@@ -51,7 +54,7 @@ public class AiQuotaEngine {
         boolean isPaid  = (tier == EntitlementService.Tier.MONTHLY || tier == EntitlementService.Tier.YEARLY);
 
         if (!isTrial && !isPaid) {
-            throw new com.calai.backend.foodlog.web.SubscriptionRequiredException("SUBSCRIPTION_REQUIRED");
+            throw new SubscriptionRequiredException("SUBSCRIPTION_REQUIRED");
         }
 
         int premiumLimit = isTrial ? trialPremiumLimit : paidPremiumLimit;
@@ -173,12 +176,12 @@ public class AiQuotaEngine {
     }
 
     private static String dayKey(Instant nowUtc, ZoneId tz) {
-        return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")
-                       .format(java.time.ZonedDateTime.ofInstant(nowUtc, tz)) + "@" + tz.getId();
+        return DateTimeFormatter.ofPattern("yyyy-MM-dd")
+                       .format(ZonedDateTime.ofInstant(nowUtc, tz)) + "@" + tz.getId();
     }
 
     private static String monthKey(Instant nowUtc, ZoneId tz) {
-        return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM")
-                       .format(java.time.ZonedDateTime.ofInstant(nowUtc, tz)) + "@" + tz.getId();
+        return DateTimeFormatter.ofPattern("yyyy-MM")
+                       .format(ZonedDateTime.ofInstant(nowUtc, tz)) + "@" + tz.getId();
     }
 }

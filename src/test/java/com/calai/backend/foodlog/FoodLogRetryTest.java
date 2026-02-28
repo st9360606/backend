@@ -8,7 +8,7 @@ import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
-import com.calai.backend.foodlog.quota.service.AiQuotaEngine;
+import com.calai.backend.foodlog.quota.service.QuotaService;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.FoodLogService;
@@ -40,7 +40,7 @@ class FoodLogRetryTest {
         StorageService storage = mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
 
-        AiQuotaEngine aiQuota = mock(AiQuotaEngine.class);
+        QuotaService aiQuota = mock(QuotaService.class);
         IdempotencyService idem = mock(IdempotencyService.class);
         ImageBlobService blobService = mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
@@ -90,7 +90,7 @@ class FoodLogRetryTest {
         when(taskRepo.findByFoodLogId("log1")).thenReturn(Optional.of(task));
 
         when(aiQuota.consumeOperationOrThrow(eq(1L), eq(ZoneId.of("Asia/Taipei")), any(Instant.class)))
-                .thenReturn(new AiQuotaEngine.Decision(ModelTier.MODEL_TIER_HIGH));
+                .thenReturn(new QuotaService.Decision(ModelTier.MODEL_TIER_HIGH));
 
         FoodLogService svc = new FoodLogService(
                 repo, taskRepo, storage, om,
@@ -135,7 +135,7 @@ class FoodLogRetryTest {
         StorageService storage = mock(StorageService.class);
         ObjectMapper om = new ObjectMapper();
 
-        AiQuotaEngine aiQuota = mock(AiQuotaEngine.class);
+        QuotaService aiQuota = mock(QuotaService.class);
         IdempotencyService idem = mock(IdempotencyService.class);
         ImageBlobService blobService = mock(ImageBlobService.class);
         UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
