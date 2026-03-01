@@ -4,6 +4,8 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.barcode.*;
 import com.calai.backend.foodlog.config.FoodLogTierResolver;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
+import com.calai.backend.foodlog.mapper.OffCategoryResolver;
+import com.calai.backend.foodlog.mapper.OffEffectiveBuilder;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
@@ -20,12 +22,15 @@ import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.task.FoodLogWarning;
+import com.calai.backend.foodlog.task.ProviderClient;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
 import com.calai.backend.foodlog.web.ModelRefusedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -38,7 +43,6 @@ import java.math.RoundingMode;
 import java.time.*;
 import java.util.List;
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Value;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -48,21 +52,20 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
+@Slf4j
 @RequiredArgsConstructor
 @Service
 public class FoodLogService {
 
-    @Value("${app.foodlog.provider:STUB}")
-    private String defaultProviderRaw;
+    private final ProviderClient providerClient;
 
     private String defaultProvider() {
-        if (defaultProviderRaw == null) return "STUB";
-        String v = defaultProviderRaw.trim();
-        if (v.isEmpty()) return "STUB";
-        return v.toUpperCase(Locale.ROOT);
+        String code = providerClient.providerCode();
+        if (code == null || code.isBlank()) {
+            throw new IllegalStateException("PROVIDER_CODE_MISSING");
+        }
+        return code.trim().toUpperCase(Locale.ROOT);
     }
-
-    private static final String LABEL_PROVIDER = "GEMINI";
 
     private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024; // 8MB（先保守）
     private static final List<String> DEDUPE_METHODS_PHOTO_ALBUM = List.of("PHOTO", "ALBUM");
@@ -109,7 +112,8 @@ public class FoodLogService {
             String requestId
     ) throws Exception {
 
-        ZoneId tz = parseTzOrUtc(clientTz);
+        ZoneId captureTz = parseTzOrUtc(clientTz);
+        ZoneId quotaTz = ZoneOffset.UTC; // hotfix：正式版建議改成 user profile timezone
         Instant serverNow = Instant.now();
         validateUploadBasics(file);
 
@@ -162,10 +166,10 @@ public class FoodLogService {
 
                 // ✅ Anti-abuse：deviceId 統一 normalize，避免 null/blank key 汙染或 NPE
                 String did = normalizeDeviceId(userId, deviceId);
-                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, tz);
+                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, quotaTz);
 
                 // ✅ ALBUM：固定用「上傳時間」當作 capturedAtUtc
-                LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, tz).toLocalDate();
+                LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, captureTz).toLocalDate();
 
                 FoodLogEntity e = new FoodLogEntity();
                 e.setUserId(userId);
@@ -173,7 +177,7 @@ public class FoodLogService {
                 e.setDegradeLevel("DG-0");
 
                 e.setCapturedAtUtc(serverNow);
-                e.setCapturedTz(tz.getId());
+                e.setCapturedTz(captureTz.getId());
                 e.setCapturedLocalDate(todayLocal);
                 e.setServerReceivedAtUtc(serverNow);
 
@@ -182,14 +186,15 @@ public class FoodLogService {
 
                 if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
                     e.setProvider(hit.get().getProvider());
+                    e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
                     ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-                    markFromCache(processed);
+                    markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, serverNow);
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
                     e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(defaultProvider());
                     e.setEffective(null);
@@ -245,7 +250,8 @@ public class FoodLogService {
     @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createPhoto(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
-        ZoneId tz = parseTzOrUtc(clientTz);
+        ZoneId captureTz = parseTzOrUtc(clientTz);
+        ZoneId quotaTz = ZoneOffset.UTC; // hotfix
         Instant serverNow = Instant.now();
         validateUploadBasics(file);
 
@@ -287,7 +293,7 @@ public class FoodLogService {
 
             try {
                 // 2) EXIF（從 tempKey 再 open 一次讀）
-                Optional<Instant> exifUtc = ExifTimeExtractor.tryReadCapturedAtUtc(storage, tempKey, tz);
+                Optional<Instant> exifUtc = ExifTimeExtractor.tryReadCapturedAtUtc(storage, tempKey, captureTz);
 
                 // 3) deviceCapturedAtUtc（App 可傳）
                 Instant deviceUtc = parseInstantOrNull(deviceCapturedAtUtc);
@@ -310,10 +316,10 @@ public class FoodLogService {
 
                 // ✅ Anti-abuse：deviceId 統一 normalize
                 String did = normalizeDeviceId(userId, deviceId);
-                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, tz);
+                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, quotaTz);
 
                 // 6) 建 log（capturedLocalDate 用 resolved capturedAtUtc + client tz）
-                LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), tz).toLocalDate();
+                LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), captureTz).toLocalDate();
 
                 FoodLogEntity e = new FoodLogEntity();
                 e.setUserId(userId);
@@ -321,7 +327,7 @@ public class FoodLogService {
                 e.setDegradeLevel("DG-0");
 
                 e.setCapturedAtUtc(r.capturedAtUtc());
-                e.setCapturedTz(tz.getId());
+                e.setCapturedTz(captureTz.getId());
                 e.setCapturedLocalDate(localDate);
                 e.setServerReceivedAtUtc(serverNow);
 
@@ -330,16 +336,17 @@ public class FoodLogService {
 
                 if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
                     e.setProvider(hit.get().getProvider());
+                    e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
 
                     // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
                     ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-                    markFromCache(processed);
+                    markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, serverNow);
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
                     // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
                     e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
                     e.setProvider(defaultProvider());
@@ -399,7 +406,8 @@ public class FoodLogService {
     @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createLabel(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
-        ZoneId tz = parseTzOrUtc(clientTz);
+        ZoneId captureTz = parseTzOrUtc(clientTz);
+        ZoneId quotaTz = ZoneOffset.UTC; // hotfix
         Instant serverNow = Instant.now();
         validateUploadBasics(file);
 
@@ -441,7 +449,7 @@ public class FoodLogService {
 
             try {
                 // 2) EXIF / device / server time resolve（沿用 photo 規則）
-                Optional<Instant> exifUtc = ExifTimeExtractor.tryReadCapturedAtUtc(storage, tempKey, tz);
+                Optional<Instant> exifUtc = ExifTimeExtractor.tryReadCapturedAtUtc(storage, tempKey, captureTz);
                 Instant deviceUtc = parseInstantOrNull(deviceCapturedAtUtc);
                 CapturedTimeResolver.Result r = timeResolver.resolve(exifUtc.orElse(null), deviceUtc, serverNow);
 
@@ -460,9 +468,9 @@ public class FoodLogService {
 
                 // ✅ Anti-abuse：deviceId 統一 normalize
                 String did = normalizeDeviceId(userId, deviceId);
-                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, tz);
+                abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, quotaTz);
 
-                LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), tz).toLocalDate();
+                LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), captureTz).toLocalDate();
 
                 FoodLogEntity e = new FoodLogEntity();
                 e.setUserId(userId);
@@ -470,7 +478,7 @@ public class FoodLogService {
                 e.setDegradeLevel("DG-0");
 
                 e.setCapturedAtUtc(r.capturedAtUtc());
-                e.setCapturedTz(tz.getId());
+                e.setCapturedTz(captureTz.getId());
                 e.setCapturedLocalDate(localDate);
                 e.setServerReceivedAtUtc(serverNow);
 
@@ -480,18 +488,19 @@ public class FoodLogService {
                 if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
                     // ✅ 命中：直接複製 effective，不扣 quota、不建 task
                     e.setProvider(hit.get().getProvider());
+                    e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
                     ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-                    markFromCache(processed);
+                    markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
                 } else {
-                    // ✅ 未命中：扣 AI quota，provider 固定 GEMINI
-                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, serverNow);
+                    // ✅ 未命中：扣 AI quota，provider 由實際 ProviderClient 決定
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
                     // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
                     e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
-                    e.setProvider(LABEL_PROVIDER);
+                    e.setProvider(defaultProvider());
                     e.setEffective(null);
                     e.setStatus(FoodLogStatus.PENDING);
                 }
@@ -566,8 +575,9 @@ public class FoodLogService {
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
         try {
-            ZoneId tz = parseTzOrUtc(clientTz);
-            LocalDate localDate = ZonedDateTime.ofInstant(now, tz).toLocalDate();
+            ZoneId captureTz = parseTzOrUtc(clientTz);
+            ZoneId quotaTz = ZoneOffset.UTC;
+            LocalDate localDate = ZonedDateTime.ofInstant(now, captureTz).toLocalDate();
 
             // ✅ 2) deviceId normalize
             String did = normalizeDeviceId(userId, deviceId);
@@ -577,7 +587,7 @@ public class FoodLogService {
             rateLimiter.checkOrThrow(userId, tier, now);
 
             // ✅ 4) barcode cheap op（交易外）
-            abuseGuard.onBarcodeAttempt(userId, did, now, tz);
+            abuseGuard.onBarcodeAttempt(userId, did, now, quotaTz);
 
             // ✅ 5) lang normalize（交易外）
             String langKey = OpenFoodFactsLang.normalizeLangKey(preferredLangTag);
@@ -588,20 +598,18 @@ public class FoodLogService {
                 r = barcodeLookupService.lookupOff(bcRaw, langKey);
 
             } catch (OffHttpException ex) {
-                // ✅ OffHttpException 目前只有 status / bodySnippet，沒有 code getter
-                // ✅ 不要拿 safeMsg(ex)（message）去比對 "PROVIDER_RATE_LIMITED"（error code）
                 boolean providerLimited = (ex.getStatus() == 429 || ex.getStatus() == 403);
 
                 if (providerLimited) {
                     return persistBarcodeFailedEnvelopeTx(
-                            userId, bcNorm, requestId, now, tz, localDate,
+                            userId, bcNorm, requestId, now, captureTz, localDate,
                             "PROVIDER_RATE_LIMITED",
                             "openfoodfacts rate-limited/banned risk. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
                     );
                 }
 
                 return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, tz, localDate,
+                        userId, bcNorm, requestId, now, captureTz, localDate,
                         "BARCODE_LOOKUP_FAILED",
                         "openfoodfacts http error. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
                 );
@@ -609,7 +617,7 @@ public class FoodLogService {
             } catch (OffParseException ex) {
 
                 return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, tz, localDate,
+                        userId, bcNorm, requestId, now, captureTz, localDate,
                         "BARCODE_LOOKUP_FAILED",
                         "openfoodfacts parse error. code=" + ex.getCode() + ", msg=" + safeMsg(ex)
                 );
@@ -617,7 +625,7 @@ public class FoodLogService {
             } catch (Exception ex) {
 
                 return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, tz, localDate,
+                        userId, bcNorm, requestId, now, captureTz, localDate,
                         "BARCODE_LOOKUP_FAILED",
                         "openfoodfacts unknown error: " + safeMsg(ex)
                 );
@@ -626,7 +634,7 @@ public class FoodLogService {
             // ✅ 防呆：service 回 null
             if (r == null) {
                 return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, tz, localDate,
+                        userId, bcNorm, requestId, now, captureTz, localDate,
                         "BARCODE_LOOKUP_FAILED",
                         "barcode lookup returned null result"
                 );
@@ -638,19 +646,29 @@ public class FoodLogService {
                 String failNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
 
                 return persistBarcodeFailedEnvelopeTx(
-                        userId, failNorm, requestId, now, tz, localDate,
+                        userId, failNorm, requestId, now, captureTz, localDate,
                         "BARCODE_NOT_FOUND",
                         "openfoodfacts not found. raw=" + failRaw + ", norm=" + failNorm
                 );
             }
 
+            if (!OffEffectiveBuilder.hasUsableNutrition(r.off())) {
+                String failRaw = firstNonBlank(r.barcodeRaw(), bcRaw);
+                String failNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
+
+                return persistBarcodeFailedEnvelopeTx(
+                        userId, failNorm, requestId, now, captureTz, localDate,
+                        "BARCODE_NUTRITION_UNAVAILABLE",
+                        "openfoodfacts found identity but no usable nutrition. raw=" + failRaw + ", norm=" + failNorm
+                );
+            }
+
             // ✅ 查到 → 短交易寫 DB + attach
             return persistBarcodeSuccessEnvelopeTx(
-                    userId, bcRaw, bcNorm, requestId, now, tz, localDate, r, langKey
+                    userId, bcRaw, bcNorm, requestId, now, captureTz, localDate, r, langKey
             );
 
         } catch (RuntimeException ex) {
-            // ✅ 關鍵：reserve 成功後若中途炸掉（rate limit/cooldown/DB error），要釋放 requestId
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
@@ -667,14 +685,14 @@ public class FoodLogService {
             String bc,
             String requestId,
             Instant now,
-            ZoneId tz,
+            ZoneId captureTz,
             LocalDate localDate,
             String errorCode,
             String errorMsg
     ) {
         FoodLogEnvelope out = txTemplate.execute(status ->
                 buildBarcodeFailedEnvelope(
-                        userId, bc, requestId, now, tz, localDate, errorCode, errorMsg
+                        userId, bc, requestId, now, captureTz, localDate, errorCode, errorMsg
                 )
         );
         if (out == null) {
@@ -689,7 +707,7 @@ public class FoodLogService {
             String bcNorm,
             String requestId,
             Instant now,
-            ZoneId tz,
+            ZoneId captureTz,
             LocalDate localDate,
             BarcodeLookupService.LookupResult r,
             String langKey
@@ -705,7 +723,7 @@ public class FoodLogService {
             e.setDegradeLevel("DG-0");
 
             e.setCapturedAtUtc(now);
-            e.setCapturedTz(tz.getId());
+            e.setCapturedTz(captureTz.getId());
             e.setCapturedLocalDate(localDate);
             e.setServerReceivedAtUtc(now);
 
@@ -725,27 +743,28 @@ public class FoodLogService {
                     : off.productName();
             eff.put("foodName", name);
 
-            String basis = applyBarcodePortion(eff, off);
+            String basis = OffEffectiveBuilder.applyPortion(eff, off);
+            eff.putArray("warnings");
 
-            ObjectNode nObj = (eff.get("nutrients") != null && eff.get("nutrients").isObject())
-                    ? (ObjectNode) eff.get("nutrients")
-                    : null;
+            boolean hasCoreNutrition = OffEffectiveBuilder.hasCoreNutrition(off);
+            eff.put("confidence", hasCoreNutrition ? 0.98 : 0.92);
 
-            boolean hasAnyMacro = nObj != null && (
-                    (nObj.get("protein") != null && !nObj.get("protein").isNull())
-                    || (nObj.get("fat") != null && !nObj.get("fat").isNull())
-                    || (nObj.get("carbs") != null && !nObj.get("carbs").isNull())
-            );
+            if (!hasCoreNutrition) {
+                eff.withArray("warnings").add(FoodLogWarning.LOW_CONFIDENCE.name());
+            }
 
-            eff.put("confidence", hasAnyMacro ? 0.98 : 0.92);
+            OffCategoryResolver.Resolved resolvedCategory = OffCategoryResolver.resolve(off);
 
             ObjectNode aiMeta = ensureObj(eff, "aiMeta");
             aiMeta.put("barcodeRaw", resolvedRaw);
             aiMeta.put("barcodeNorm", resolvedNorm);
-            aiMeta.put("fromCache", r.fromCache());
+            aiMeta.put("offFromCache", r.fromCache());
             aiMeta.put("source", "OPENFOODFACTS");
             aiMeta.put("basis", basis);
             aiMeta.put("lang", langKey);
+            aiMeta.put("hasCoreNutrition", hasCoreNutrition);
+            aiMeta.put("foodCategory", resolvedCategory.category().name());
+            aiMeta.put("foodSubCategory", resolvedCategory.subCategory().name());
 
             ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
             e.setEffective(processed);
@@ -766,94 +785,6 @@ public class FoodLogService {
         return out;
     }
 
-    private String applyBarcodePortion(ObjectNode eff, OffResult off) {
-
-        // ===== 1) 優先：整包（需要 packageSize + per100）=====
-        boolean hasPkg = off.packageSizeValue() != null
-                         && off.packageSizeValue() > 0
-                         && off.packageSizeUnit() != null
-                         && !off.packageSizeUnit().isBlank();
-
-        boolean hasAnyPer100 = (off.kcalPer100g() != null
-                                || off.proteinPer100g() != null
-                                || off.fatPer100g() != null
-                                || off.carbsPer100g() != null
-                                || off.fiberPer100g() != null
-                                || off.sugarPer100g() != null
-                                || off.sodiumMgPer100g() != null);
-
-        if (hasPkg && hasAnyPer100) {
-
-            String unitRaw = off.packageSizeUnit().trim().toLowerCase(Locale.ROOT); // "g" or "ml"
-            String qtyUnit = unitRaw.contains("ml") ? "ML" : "GRAM";
-            double pkg = off.packageSizeValue();
-
-            ObjectNode qty = eff.putObject("quantity");
-            qty.put("value", pkg);
-            qty.put("unit", qtyUnit);
-
-            double factor = pkg / 100.0;
-
-            ObjectNode n = eff.putObject("nutrients");
-            putNumOrNull(n, "kcal", mul(off.kcalPer100g(), factor));
-            putNumOrNull(n, "protein", mul(off.proteinPer100g(), factor));
-            putNumOrNull(n, "fat", mul(off.fatPer100g(), factor));
-            putNumOrNull(n, "carbs", mul(off.carbsPer100g(), factor));
-            putNumOrNull(n, "fiber", mul(off.fiberPer100g(), factor));
-            putNumOrNull(n, "sugar", mul(off.sugarPer100g(), factor));
-            putNumOrNull(n, "sodium", mul(off.sodiumMgPer100g(), factor)); // mg 也照乘
-
-            return "WHOLE_PACKAGE";
-        }
-
-        // ===== 2) 次選：每份（需要 *_serving 任一存在）=====
-        boolean hasAnyServing = (off.kcalPerServing() != null
-                                 || off.proteinPerServing() != null
-                                 || off.fatPerServing() != null
-                                 || off.carbsPerServing() != null
-                                 || off.fiberPerServing() != null
-                                 || off.sugarPerServing() != null
-                                 || off.sodiumMgPerServing() != null);
-
-        if (hasAnyServing) {
-            ObjectNode qty = eff.putObject("quantity");
-            qty.put("value", 1.0);
-            qty.put("unit", "SERVING");
-
-            ObjectNode n = eff.putObject("nutrients");
-            putNumOrNull(n, "kcal", off.kcalPerServing());
-            putNumOrNull(n, "protein", off.proteinPerServing());
-            putNumOrNull(n, "fat", off.fatPerServing());
-            putNumOrNull(n, "carbs", off.carbsPerServing());
-            putNumOrNull(n, "fiber", off.fiberPerServing());
-            putNumOrNull(n, "sugar", off.sugarPerServing());
-            putNumOrNull(n, "sodium", off.sodiumMgPerServing());
-
-            return "PER_SERVING";
-        }
-
-        // ===== 3) 最後：退回 per100g（你原本）=====
-        ObjectNode qty = eff.putObject("quantity");
-        qty.put("value", 100.0);
-
-        String per100Unit = "GRAM";
-        if (off.packageSizeUnit() != null && off.packageSizeUnit().equalsIgnoreCase("ml")) {
-            per100Unit = "ML";
-        }
-        qty.put("unit", per100Unit);
-
-        ObjectNode n = eff.putObject("nutrients");
-        putNumOrNull(n, "kcal", off.kcalPer100g());
-        putNumOrNull(n, "protein", off.proteinPer100g());
-        putNumOrNull(n, "fat", off.fatPer100g());
-        putNumOrNull(n, "carbs", off.carbsPer100g());
-        putNumOrNull(n, "fiber", off.fiberPer100g());
-        putNumOrNull(n, "sugar", off.sugarPer100g());
-        putNumOrNull(n, "sodium", off.sodiumMgPer100g());
-
-        return "PER_100";
-    }
-
     private static ObjectNode ensureObj(ObjectNode root, String field) {
         JsonNode n = root.get(field);
         if (n != null && n.isObject()) return (ObjectNode) n;
@@ -862,16 +793,12 @@ public class FoodLogService {
         return out;
     }
 
-    private static Double mul(Double v, double factor) {
-        return (v == null) ? null : v * factor;
-    }
-
     private FoodLogEnvelope buildBarcodeFailedEnvelope(
             Long userId,
             String bc,
             String requestId,
             Instant now,
-            ZoneId tz,
+            ZoneId captureTz,
             LocalDate localDate,
             String errorCode,
             String errorMsg
@@ -882,7 +809,7 @@ public class FoodLogService {
         e.setProvider("OPENFOODFACTS");
         e.setDegradeLevel("DG-0");
         e.setCapturedAtUtc(now);
-        e.setCapturedTz(tz.getId());
+        e.setCapturedTz(captureTz.getId());
         e.setCapturedLocalDate(localDate);
         e.setServerReceivedAtUtc(now);
         e.setTimeSource(TimeSource.SERVER_RECEIVED);
@@ -898,15 +825,6 @@ public class FoodLogService {
         return toEnvelope(e, null, requestId);
     }
 
-    private static void putNumOrNull(ObjectNode obj, String field, Double v) {
-        if (v == null || !Double.isFinite(v)) {
-            obj.putNull(field);
-        } else {
-            obj.put(field, v);
-        }
-    }
-
-
     // ===== FoodLogService.getOne()：只在 QUEUED/RUNNING/FAILED 才回 task =====
     @Transactional(readOnly = true)
     public FoodLogEnvelope getOne(Long userId, String id, String requestId) {
@@ -915,8 +833,15 @@ public class FoodLogService {
 
         // Safety/Recitation/Harm 一律回 422（不走 envelope 的 error 欄位）
         ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(e.getLastErrorCode());
+        if (reason != null) {
+            log.warn("food_log_provider_refused foodLogId={} reason={} code={} msg={}",
+                    e.getId(),
+                    reason,
+                    e.getLastErrorCode(),
+                    e.getLastErrorMessage());
 
-        if (reason != null) {throw new ModelRefusedException(reason, e.getLastErrorMessage());}
+            throw new ModelRefusedException(reason, e.getLastErrorCode());
+        }
 
         FoodLogTaskEntity t = null;
         if (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED) {
@@ -941,17 +866,22 @@ public class FoodLogService {
         Instant now = Instant.now();
 
         JsonNode eff = e.getEffective();
-        // ✅ v1.2：回應帶 tierUsed / fromCache
-        String tierUsed = resolveTierUsedDisplay(e);
-        boolean fromCache = false;
-        FoodLogEnvelope.NutritionResult nr = null;
 
-        java.util.List<String> warnings = null;
+        // ✅ quota / degrade 觀點
+        String tierUsed = resolveTierUsedDisplay(e);
+
+        // ✅ 是否結果重用
+        boolean fromCache = resolveResultFromCache(eff);
+
+        FoodLogEnvelope.NutritionResult nr = null;
+        List<String> warnings = null;
         String degradedReason = null;
 
-        if (eff != null && eff.isObject()) {
+        // ✅ P2-3：實際解析路徑
+        // 優先取 effective.aiMeta.source；沒有就 fallback provider
+        String resolvedBy = null;
 
-            // warnings
+        if (eff != null && eff.isObject()) {
             JsonNode w = eff.get("warnings");
             if (w != null && w.isArray()) {
                 warnings = new java.util.ArrayList<>();
@@ -963,14 +893,22 @@ public class FoodLogService {
                 if (warnings.isEmpty()) warnings = null;
             }
 
-            // degradedReason
             JsonNode aiMeta = eff.get("aiMeta");
             if (aiMeta != null && aiMeta.isObject()) {
                 JsonNode dr = aiMeta.get("degradedReason");
-                if (dr != null && !dr.isNull()) degradedReason = dr.asText(null);
-                JsonNode fc = aiMeta.get("fromCache");
-                if (fc != null && fc.isBoolean()) fromCache = fc.asBoolean();
+                if (dr != null && !dr.isNull()) {
+                    degradedReason = dr.asText(null);
+                }
+
+                JsonNode src = aiMeta.get("source");
+                if (src != null && !src.isNull()) {
+                    String s = src.asText(null);
+                    if (s != null && !s.isBlank()) {
+                        resolvedBy = s.trim();
+                    }
+                }
             }
+
             if (degradedReason == null && warnings != null) {
                 if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) degradedReason = "NO_FOOD";
                 else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) degradedReason = "UNKNOWN_FOOD";
@@ -978,9 +916,14 @@ public class FoodLogService {
             }
         }
 
+        if (resolvedBy == null || resolvedBy.isBlank()) {
+            resolvedBy = e.getProvider();
+        }
+
         if (eff != null && !eff.isNull()) {
             JsonNode n = eff.get("nutrients");
             JsonNode q = eff.get("quantity");
+
             nr = new FoodLogEnvelope.NutritionResult(
                     textOrNull(eff, "foodName"),
                     q == null ? null : new FoodLogEnvelope.Quantity(doubleOrNull(q, "value"), textOrNull(q, "unit")),
@@ -997,7 +940,13 @@ public class FoodLogService {
                     doubleOrNull(eff, "confidence"),
                     warnings,
                     degradedReason,
-                    new FoodLogEnvelope.Source(e.getMethod(), e.getProvider())
+                    aiMetaTextOrNull(eff, "foodCategory"),
+                    aiMetaTextOrNull(eff, "foodSubCategory"),
+                    new FoodLogEnvelope.Source(
+                            e.getMethod(),
+                            e.getProvider(),
+                            resolvedBy
+                    )
             );
         }
 
@@ -1010,23 +959,20 @@ public class FoodLogService {
             task = new FoodLogEnvelope.Task(t.getId(), poll);
         }
 
-        // ✅ error：FAILED 一定回；retryAfterSec 優先 nextRetryAt，其次解析 message
+        // ✅ FAILED 才回 error
         FoodLogEnvelope.ApiError err = null;
         if (e.getStatus() == FoodLogStatus.FAILED) {
 
-            Integer retryAfter = computeRetryAfterSecOrNull(t, now); // 1) nextRetryAtUtc（若 t==null -> null）
+            Integer retryAfter = computeRetryAfterSecOrNull(t, now);
 
             if (retryAfter == null && t != null) {
-                // 2) task.lastErrorMessage（若你將來有 markFailed 的路徑）
                 retryAfter = parseRetryAfterFromMessageOrNull(t.getLastErrorMessage());
             }
 
             if (retryAfter == null) {
-                // 3) log.lastErrorMessage（你 429 CANCELLED 會塞 suggestedRetryAfterSec 在這裡）
                 retryAfter = parseRetryAfterFromMessageOrNull(e.getLastErrorMessage());
             }
 
-            // 4) 429 fallback（UI 至少有提示）
             if (retryAfter == null && "PROVIDER_RATE_LIMITED".equalsIgnoreCase(e.getLastErrorCode())) {
                 retryAfter = 20;
             }
@@ -1042,25 +988,28 @@ public class FoodLogService {
             );
         }
 
-        // ✅ DRAFT 提示：若是 per100(gram/ml) 且缺淨重，提示 UI「把淨重一起拍進來」
-        if (err == null && e.getStatus() == FoodLogStatus.DRAFT && nr != null && warnings != null) {
+        // ✅ 成功態提示改走 hints
+        List<FoodLogEnvelope.Hint> hints = null;
+
+        if (e.getStatus() == FoodLogStatus.DRAFT && nr != null && warnings != null) {
 
             boolean hasServingUnknown = warnings.stream()
                     .anyMatch("SERVING_SIZE_UNKNOWN"::equalsIgnoreCase);
 
             boolean isPer100GramOrMl = nr.quantity() != null
                                        && nr.quantity().unit() != null
-                                       && ( "GRAM".equalsIgnoreCase(nr.quantity().unit()) || "ML".equalsIgnoreCase(nr.quantity().unit()) )
+                                       && ("GRAM".equalsIgnoreCase(nr.quantity().unit())
+                                           || "ML".equalsIgnoreCase(nr.quantity().unit()))
                                        && nr.quantity().value() != null
                                        && Math.abs(nr.quantity().value() - 100.0) < 0.0001;
 
             if (hasServingUnknown && isPer100GramOrMl) {
-                // ✅ schema 不變：沿用 error 欄位當「提示型 action」
-                // UI 看到這個就顯示「請把淨重/內容量一起拍進來」
-                err = new FoodLogEnvelope.ApiError(
-                        "SERVING_SIZE_UNKNOWN",
-                        ClientAction.RETAKE_PHOTO.name(),
-                        null
+                hints = List.of(
+                        new FoodLogEnvelope.Hint(
+                                "SERVING_SIZE_UNKNOWN",
+                                ClientAction.RETAKE_PHOTO.name(),
+                                "Please include net weight or serving size in the photo."
+                        )
                 );
             }
         }
@@ -1074,17 +1023,34 @@ public class FoodLogService {
                 nr,
                 task,
                 err,
+                hints,
                 new FoodLogEnvelope.Trace(requestId)
         );
     }
 
-    private static void markFromCache(ObjectNode effective) {
+    private static boolean resolveResultFromCache(JsonNode effective) {
+        if (effective == null || effective.isNull() || !effective.isObject()) {
+            return false;
+        }
+        JsonNode aiMeta = effective.get("aiMeta");
+        if (aiMeta == null || !aiMeta.isObject()) {
+            return false;
+        }
+        JsonNode resultCache = aiMeta.get("resultFromCache");
+        return resultCache != null && resultCache.isBoolean() && resultCache.asBoolean();
+    }
+
+    private static void markResultFromCache(ObjectNode effective) {
         if (effective == null) return;
         JsonNode aiMetaNode = effective.get("aiMeta");
         ObjectNode aiMeta;
-        if (aiMetaNode instanceof ObjectNode o) aiMeta = o;
-        else aiMeta = effective.putObject("aiMeta");
-        aiMeta.put("fromCache", true);
+        if (aiMetaNode instanceof ObjectNode o) {
+            aiMeta = o;
+        } else {
+            aiMeta = effective.putObject("aiMeta");
+        }
+        // ✅ 新語意：只代表「結果重用」
+        aiMeta.put("resultFromCache", true);
     }
 
     private static Double round1(Double v) {
@@ -1147,18 +1113,16 @@ public class FoodLogService {
             throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
         }
 
-        // ✅ 用原本 capturedTz（或你也可以改用 clientTz，但 retry 通常沿用原 log）
-        ZoneId tz = parseTzOrUtc(log.getCapturedTz());
+        ZoneId quotaTz = ZoneOffset.UTC;
 
         // ✅ retry 也算操作，給 abuseGuard（cacheHit=false）
-        // ✅ deviceId 統一 normalize
         String did = normalizeDeviceId(userId, deviceId);
-        abuseGuard.onOperationAttempt(userId, did, false, now, tz);
+        abuseGuard.onOperationAttempt(userId, did, false, now, quotaTz);
 
         // ✅ Step 1：retry 也算一次 Operation（會再打模型）
-        QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tz, now);
+        QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, now);
 
-        // ✅ 先用 degradeLevel 反映 tier，方便你觀測（Step 2 才會真正選模型）
+        // ✅ 先用 degradeLevel 反映 tier，方便你觀測
         log.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
 
         // ✅ 重排 task
@@ -1181,9 +1145,7 @@ public class FoodLogService {
         taskRepo.save(task);
 
         // ✅ reset log
-        log.setStatus(FoodLogStatus.PENDING);
-        log.setLastErrorCode(null);
-        log.setLastErrorMessage(null);
+        resetForRetry(log);
         repo.save(log);
 
         return getOne(userId, foodLogId, requestId);
@@ -1192,6 +1154,29 @@ public class FoodLogService {
     // =========================
     // helpers
     // =========================
+
+    static void resetForRetry(FoodLogEntity log) {
+        log.setStatus(FoodLogStatus.PENDING);
+        log.setEffective(null);
+        log.setLastErrorCode(null);
+        log.setLastErrorMessage(null);
+    }
+
+    private static String aiMetaTextOrNull(JsonNode effective, String field) {
+        if (effective == null || effective.isNull()) return null;
+
+        JsonNode aiMeta = effective.get("aiMeta");
+        if (aiMeta == null || !aiMeta.isObject()) return null;
+
+        JsonNode v = aiMeta.get(field);
+        if (v == null || v.isNull()) return null;
+
+        String s = v.asText(null);
+        if (s == null) return null;
+
+        s = s.trim();
+        return s.isEmpty() ? null : s;
+    }
 
     private static void cleanupUploadOrBlobAfterFailure(
             StorageService storage,

@@ -14,6 +14,7 @@ public record FoodLogEnvelope(
         NutritionResult nutritionResult,
         Task task,
         ApiError error,
+        List<Hint> hints,
         Trace trace
 ) {
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -25,6 +26,8 @@ public record FoodLogEnvelope(
             Double confidence,
             List<String> warnings,
             String degradedReason,
+            String foodCategory,
+            String foodSubCategory,
             Source source
     ) {}
 
@@ -42,14 +45,31 @@ public record FoodLogEnvelope(
             Double sodium
     ) {}
 
+    /**
+     * ✅ P2-3：
+     * - method：使用者入口（PHOTO / ALBUM / LABEL / BARCODE）
+     * - provider：主 provider（GEMINI / OPENFOODFACTS）
+     * - resolvedBy：實際解析路徑（AUTO_BARCODE / NAME_SEARCH / OPENFOODFACTS / GEMINI）
+     */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Source(String method, String provider) {}
+    public record Source(
+            String method,
+            String provider,
+            String resolvedBy
+    ) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Task(String taskId, Integer pollAfterSec) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ApiError(String errorCode, String clientAction, Integer retryAfterSec) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Hint(
+            String hintCode,
+            String clientAction,
+            String message
+    ) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Trace(String requestId) {}

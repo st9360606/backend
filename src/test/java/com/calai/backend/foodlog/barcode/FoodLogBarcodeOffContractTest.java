@@ -13,6 +13,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -26,40 +29,43 @@ class FoodLogBarcodeOffContractTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper om;
+
     @MockitoBean BarcodeLookupService barcodeLookupService;
 
     @Test
     void barcode_found_should_return_draft_with_nutrients() throws Exception {
         String bc = "1234567890123";
 
-        // ✅ 只需要提供 FoodLogService 會用到的欄位（per100g）
         OffResult off = new OffResult(
                 "Test Cookies",
 
                 // per 100g/ml
-                520.0,  // kcalPer100g
-                8.0,    // proteinPer100g
-                30.0,   // fatPer100g
-                55.0,   // carbsPer100g
-                null,   // fiberPer100g
-                null,   // sugarPer100g
-                null,   // sodiumMgPer100g
+                520.0,
+                8.0,
+                30.0,
+                55.0,
+                null,
+                null,
+                null,
 
                 // per serving
                 null, null, null, null, null, null, null,
 
                 // package size
-                null, null
+                null, null,
+
+                // category tags
+                List.of() // ✅ 新增
         );
 
         when(barcodeLookupService.lookupOff(eq(bc), any()))
                 .thenReturn(new LookupResult(
-                        bc,                     // barcodeRaw
-                        bc,                     // barcodeNorm
-                        true,                   // found
-                        false,                  // fromCache
-                        "OPENFOODFACTS",        // provider
-                        off                     // off
+                        bc,
+                        bc,
+                        true,
+                        false,
+                        "OPENFOODFACTS",
+                        off
                 ));
 
         String body = """
@@ -89,10 +95,10 @@ class FoodLogBarcodeOffContractTest {
                 .thenReturn(new LookupResult(
                         bc,
                         bc,
-                        false,                  // found = false
+                        false,
                         false,
                         "OPENFOODFACTS",
-                        null                    // off = null
+                        null
                 ));
 
         String body = """

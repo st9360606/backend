@@ -20,24 +20,37 @@ public class EntitlementService {
 
     public Tier resolveTier(Long userId, Instant nowUtc) {
         var list = repo.findActive(userId, nowUtc, PageRequest.of(0, 5));
-        log.info("resolveTier userId={} nowUtc={} activeEntitlements={}", userId, nowUtc, list.size());
+
+        if (log.isDebugEnabled()) {
+            log.debug("resolveTier userId={} nowUtc={} activeEntitlements={}", userId, nowUtc, list.size());
+        }
+
+        if (list.size() > 1) {
+            log.warn("multiple_active_entitlements userId={} count={}", userId, list.size());
+        }
 
         if (list.isEmpty()) return Tier.NONE;
 
         Tier best = Tier.NONE;
         for (var e : list) {
             Tier t = parseTier(e.getEntitlementType());
-            log.info("entitlement id={} type={} status={} validFrom={} validTo={} parsedTier={}",
-                    e.getId(),
-                    e.getEntitlementType(),
-                    e.getStatus(),
-                    e.getValidFromUtc(),
-                    e.getValidToUtc(),
-                    t
-            );
+
+            if (log.isDebugEnabled()) {
+                log.debug(
+                        "entitlement id={} type={} status={} validFrom={} validTo={} parsedTier={}",
+                        e.getId(),
+                        e.getEntitlementType(),
+                        e.getStatus(),
+                        e.getValidFromUtc(),
+                        e.getValidToUtc(),
+                        t
+                );
+            }
             if (rank(t) > rank(best)) best = t;
         }
-        log.info("resolveTier result userId={} tier={}", userId, best);
+        if (log.isDebugEnabled()) {
+            log.debug("resolveTier result userId={} tier={}", userId, best);
+        }
         return best;
     }
 

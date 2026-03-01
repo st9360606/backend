@@ -10,6 +10,7 @@ import com.calai.backend.foodlog.web.SubscriptionRequiredException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -47,18 +48,25 @@ public class QuotaService {
         this.entitlementService = entitlementService;
     }
 
+    /**
+     * ✅ 新版：由外部傳入已解析好的 entitlement tier，避免重複查詢
+     */
     @Transactional
-    public Decision consumeOperationOrThrow(Long userId, ZoneId userTz, Instant nowUtc) {
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, nowUtc);
+    public Decision consumeOperationOrThrow(
+            Long userId,
+            EntitlementService.Tier tier,
+            ZoneId userTz,
+            Instant nowUtc
+    ) {
         boolean isTrial = (tier == EntitlementService.Tier.TRIAL);
-        boolean isPaid  = (tier == EntitlementService.Tier.MONTHLY || tier == EntitlementService.Tier.YEARLY);
+        boolean isPaid = (tier == EntitlementService.Tier.MONTHLY || tier == EntitlementService.Tier.YEARLY);
 
         if (!isTrial && !isPaid) {
             throw new SubscriptionRequiredException("SUBSCRIPTION_REQUIRED");
         }
 
         int premiumLimit = isTrial ? trialPremiumLimit : paidPremiumLimit;
-        int totalLimit   = isTrial ? trialTotalLimit   : paidTotalLimit;
+        int totalLimit = isTrial ? trialTotalLimit : paidTotalLimit;
 
         UserAiQuotaStateEntity s = repo.findForUpdate(userId).orElseGet(() -> {
             UserAiQuotaStateEntity n = new UserAiQuotaStateEntity();
@@ -77,6 +85,28 @@ public class QuotaService {
         CooldownReason reason = parseReason(s.getCooldownReason());
         boolean cooldownJustExpired = false;
 
+        // C) 先做換日 / 換月 reset（OVER_QUOTA 在新週期應立即清除）
+        String dk = dayKey(nowUtc, userTz);
+        if (!dk.equals(s.getDailyKey())) {
+            s.setDailyKey(dk);
+            s.setDailyCount(0);
+            if (reason == CooldownReason.OVER_QUOTA) {
+                clearOverQuotaCooldown(s);
+            }
+        }
+
+        String mk = monthKey(nowUtc, userTz);
+        if (!mk.equals(s.getMonthlyKey())) {
+            s.setMonthlyKey(mk);
+            s.setMonthlyCount(0);
+            if (reason == CooldownReason.OVER_QUOTA) {
+                clearOverQuotaCooldown(s);
+            }
+        }
+
+        // reset 後 reason 要重抓
+        reason = parseReason(s.getCooldownReason());
+
         // A) cooldown active => 429
         if (s.getNextAllowedAtUtc() != null) {
             if (nowUtc.isBefore(s.getNextAllowedAtUtc())) {
@@ -89,55 +119,39 @@ public class QuotaService {
                         reason
                 );
             } else {
-                // cooldown 到期：清 nextAllowedAtUtc，但「不要」清 strikes（至少 OVER_QUOTA 要保留）
                 cooldownJustExpired = true;
                 s.setNextAllowedAtUtc(null);
-                // ABUSE/RATE_LIMIT 若你想在到期後歸零可自行加條件；OVER_QUOTA 不要歸零
+
+                // 非 OVER_QUOTA 的 cooldown 到期後清乾淨
+                if (reason != CooldownReason.OVER_QUOTA) {
+                    s.setCooldownReason(null);
+                    s.setCooldownStrikes(0);
+                }
             }
         }
 
-        // B) forceLow 到期清掉（這個可以清）
+        // B) forceLow 到期清掉
         if (s.getForceLowUntilUtc() != null && !nowUtc.isBefore(s.getForceLowUntilUtc())) {
             s.setForceLowUntilUtc(null);
         }
 
-        // C) 換日/換月 reset（只對 OVER_QUOTA：到新週期才歸零 strikes）
-        String dk = dayKey(nowUtc, userTz);
-        if (!dk.equals(s.getDailyKey())) {
-            s.setDailyKey(dk);
-            s.setDailyCount(0);
-            if (parseReason(s.getCooldownReason()) == CooldownReason.OVER_QUOTA) {
-                s.setCooldownStrikes(0);
-                s.setCooldownReason(null);
-                s.setNextAllowedAtUtc(null);
-            }
-        }
-        String mk = monthKey(nowUtc, userTz);
-        if (!mk.equals(s.getMonthlyKey())) {
-            s.setMonthlyKey(mk);
-            s.setMonthlyCount(0);
-            if (parseReason(s.getCooldownReason()) == CooldownReason.OVER_QUOTA) {
-                s.setCooldownStrikes(0);
-                s.setCooldownReason(null);
-                s.setNextAllowedAtUtc(null);
-            }
-        }
-
         int used = isTrial ? (s.getDailyCount() + 1) : (s.getMonthlyCount() + 1);
 
-        // D) 超額：第一次(或下一次)先進 cooldown；但 cooldown 剛到期的「下一次」允許且強制 LOW
+        // D) 超額：先進 cooldown；cooldown 剛到期的下一次允許且強制 LOW
         if (used > totalLimit) {
             if (cooldownJustExpired && reason == CooldownReason.OVER_QUOTA) {
-                // ✅ 下一次允許（強制 LOW）
-                if (isTrial) s.setDailyCount(used);
-                else s.setMonthlyCount(used);
+                if (isTrial) {
+                    s.setDailyCount(used);
+                } else {
+                    s.setMonthlyCount(used);
+                }
 
-                s.setForceLowUntilUtc(nowUtc.plusSeconds(60)); // 讓本次一定落在 LOW
+                s.setForceLowUntilUtc(nowUtc.plusSeconds(60));
                 repo.save(s);
                 return new Decision(ModelTier.MODEL_TIER_LOW);
             }
 
-            int strikes = Math.min(3, s.getCooldownStrikes() + 1); // 只需要 1~3
+            int strikes = Math.min(3, s.getCooldownStrikes() + 1);
             s.setCooldownStrikes(strikes);
 
             int minutes = Math.min(maxCooldownMinutes, strikes * cooldownStepMinutes);
@@ -157,10 +171,15 @@ public class QuotaService {
         }
 
         // E) 未超額：正常計數 + tier 分段
-        if (isTrial) s.setDailyCount(used);
-        else s.setMonthlyCount(used);
+        if (isTrial) {
+            s.setDailyCount(used);
+        } else {
+            s.setMonthlyCount(used);
+        }
 
-        ModelTier tierUsed = (used <= premiumLimit) ? ModelTier.MODEL_TIER_HIGH : ModelTier.MODEL_TIER_LOW;
+        ModelTier tierUsed = (used <= premiumLimit)
+                ? ModelTier.MODEL_TIER_HIGH
+                : ModelTier.MODEL_TIER_LOW;
 
         if (s.getForceLowUntilUtc() != null && nowUtc.isBefore(s.getForceLowUntilUtc())) {
             tierUsed = ModelTier.MODEL_TIER_LOW;
@@ -170,9 +189,21 @@ public class QuotaService {
         return new Decision(tierUsed);
     }
 
+    /**
+     * ✅ 舊版 wrapper：保留相容
+     */
+    @Transactional
+    public Decision consumeOperationOrThrow(Long userId, ZoneId userTz, Instant nowUtc) {
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, nowUtc);
+        return consumeOperationOrThrow(userId, tier, userTz, nowUtc);
+    }
+
     private static CooldownReason parseReason(String s) {
-        try { return (s == null) ? null : CooldownReason.valueOf(s); }
-        catch (Exception ignore) { return null; }
+        try {
+            return (s == null) ? null : CooldownReason.valueOf(s);
+        } catch (Exception ignore) {
+            return null;
+        }
     }
 
     private static String dayKey(Instant nowUtc, ZoneId tz) {
@@ -183,5 +214,12 @@ public class QuotaService {
     private static String monthKey(Instant nowUtc, ZoneId tz) {
         return DateTimeFormatter.ofPattern("yyyy-MM")
                        .format(ZonedDateTime.ofInstant(nowUtc, tz)) + "@" + tz.getId();
+    }
+
+    private static void clearOverQuotaCooldown(UserAiQuotaStateEntity s) {
+        s.setCooldownStrikes(0);
+        s.setCooldownReason(null);
+        s.setNextAllowedAtUtc(null);
+        s.setForceLowUntilUtc(null); // ✅ 新週期一起清掉，避免跨日殘留 forced LOW
     }
 }

@@ -2,6 +2,12 @@ package com.calai.backend.foodlog.barcode.mapper;
 
 import com.calai.backend.foodlog.barcode.OpenFoodFactsLang;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -38,12 +44,35 @@ public final class OpenFoodFactsMapper {
 
             // package size (normalized to g or ml)
             Double packageSizeValue,
-            String packageSizeUnit // "g" or "ml"
+            String packageSizeUnit, // "g" or "ml"
+
+            // NEW: OFF taxonomy/category tags
+            List<String> categoryTags
     ) {}
 
     /** 舊呼叫點不壞：沿用原本行為（偏 generic / en fallback） */
     public static OffResult map(JsonNode root) {
         return map(root, null);
+    }
+
+    /**
+     * NEW:
+     * 讓 name search 取得的單一 product node 也能走同一套 OFF mapping 規則。
+     *
+     * 用法：
+     * - Barcode lookup: map(root, preferredLangTag)
+     * - Name search item: mapProduct(productNode, preferredLangTag)
+     */
+    public static OffResult mapProduct(JsonNode productNode, String preferredLangTag) {
+        if (productNode == null || productNode.isNull() || productNode.isMissingNode() || !productNode.isObject()) {
+            return null;
+        }
+
+        ObjectNode fakeRoot = JsonNodeFactory.instance.objectNode();
+        fakeRoot.put("status", 1);
+        fakeRoot.set("product", productNode);
+
+        return map(fakeRoot, preferredLangTag);
     }
 
     /** NEW：依 preferredLangTag 選 product_name_{lang} */
@@ -80,13 +109,17 @@ public final class OpenFoodFactsMapper {
         // ===== 3) identity =====
         String name = resolveProductName(product, preferredLangTag);
         PackageSize pkg = parsePackageSize(product);
+        List<String> categoryTags = extractCategoryTags(product);
 
         boolean hasAnyNutrition = Stream.of(
                 kcal100, p100, f100, c100, fiber100, sugar100, sodiumMg100,
                 kcalSrv, pSrv, fSrv, cSrv, fiberSrv, sugarSrv, sodiumMgSrv
         ).anyMatch(Objects::nonNull);
 
-        boolean hasAnyIdentity = (name != null && !name.isBlank()) || (pkg != null && pkg.value() > 0);
+        boolean hasAnyIdentity =
+                (name != null && !name.isBlank())
+                || (pkg != null && pkg.value() > 0)
+                || !categoryTags.isEmpty();
 
         if (!hasAnyNutrition && !hasAnyIdentity) return null;
 
@@ -95,13 +128,87 @@ public final class OpenFoodFactsMapper {
                 kcal100, p100, f100, c100, fiber100, sugar100, sodiumMg100,
                 kcalSrv, pSrv, fSrv, cSrv, fiberSrv, sugarSrv, sodiumMgSrv,
                 pkg == null ? null : pkg.value(),
-                pkg == null ? null : pkg.unit()
+                pkg == null ? null : pkg.unit(),
+                categoryTags
         );
     }
 
     // =========================
-    // US 判斷
+    // 以下維持你原本內容不變
     // =========================
+
+    public static List<String> extractCategoryTags(JsonNode product) {
+        if (product == null || product.isNull() || product.isMissingNode()) {
+            return List.of();
+        }
+
+        Set<String> out = new LinkedHashSet<>();
+
+        addNormalizedTags(out, product.get("categories_tags"));
+        addNormalizedTags(out, product.get("categories_hierarchy"));
+
+        JsonNode categories = product.get("categories");
+        if (categories != null && categories.isTextual()) {
+            String raw = categories.asText("");
+            if (!raw.isBlank()) {
+                String[] parts = raw.split("[,，]");
+                for (String part : parts) {
+                    String normalized = normalizeCategoryToken(part);
+                    if (normalized != null) {
+                        out.add(normalized);
+                    }
+                }
+            }
+        }
+
+        return new ArrayList<>(out);
+    }
+
+    private static void addNormalizedTags(Set<String> out, JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) return;
+
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (item == null || item.isNull()) continue;
+                String normalized = normalizeCategoryToken(item.asText(null));
+                if (normalized != null) {
+                    out.add(normalized);
+                }
+            }
+            return;
+        }
+
+        if (node.isTextual()) {
+            String raw = node.asText(null);
+            if (raw != null && !raw.isBlank()) {
+                String[] parts = raw.split("[,，]");
+                for (String part : parts) {
+                    String normalized = normalizeCategoryToken(part);
+                    if (normalized != null) {
+                        out.add(normalized);
+                    }
+                }
+            }
+        }
+    }
+
+    private static String normalizeCategoryToken(String raw) {
+        if (raw == null) return null;
+
+        String s = raw.trim().toLowerCase(Locale.ROOT);
+        if (s.isBlank()) return null;
+
+        int colon = s.indexOf(':');
+        if (colon >= 0 && colon < s.length() - 1) {
+            s = s.substring(colon + 1);
+        }
+
+        s = s.replace('_', '-');
+        s = s.replaceAll("\\s+", "-");
+        s = s.trim();
+
+        return s.isBlank() ? null : s;
+    }
 
     private static final Set<String> US_TAGS = Set.of(
             "en:us",
@@ -117,7 +224,6 @@ public final class OpenFoodFactsMapper {
     private static boolean isUsLabel(JsonNode product) {
         if (product == null || product.isNull()) return false;
 
-        // countries_tags 可能是 array，也可能被弄成 string（髒資料）
         JsonNode tags = product.get("countries_tags");
         if (tags != null && !tags.isNull() && !tags.isMissingNode()) {
             if (tags.isArray()) {
@@ -131,33 +237,17 @@ public final class OpenFoodFactsMapper {
             }
         }
 
-        // fallback：countries 可能是 "United States, Canada"
         String countries = product.path("countries").asText("");
         return !countries.isBlank() && countries.toLowerCase(Locale.ROOT).contains("united states");
     }
 
-    // =========================
-    // Carbs Normalization
-    // =========================
-
-    /**
-     * 歸一化碳水：
-     * - US：Total Carbohydrate 通常包含 fiber
-     * - EU：Carbohydrates 通常不含 fiber
-     * 統一輸出 Available Carbohydrates（不含 fiber）
-     */
     private static Double normalizeCarbs(JsonNode nutr, String carbKey, Double fiberValue, boolean isUsLabel) {
         Double rawCarbs = numberOrNull(nutr, carbKey);
         if (rawCarbs == null) return null;
         if (!isUsLabel || fiberValue == null) return rawCarbs;
 
-        // 防負數：輸出 available carbs
         return Math.max(0.0, rawCarbs - fiberValue);
     }
-
-    // =========================
-    // Energy kcal/kJ
-    // =========================
 
     private static Double resolveKcal(JsonNode nutr, String suffix) {
         if (nutr == null || nutr.isNull()) return null;
@@ -171,7 +261,6 @@ public final class OpenFoodFactsMapper {
         if (isBlank(unit)) unit = lowerTrimOrNull(nutr.get("energy-kj_unit"));
 
         if (kcal != null) {
-            // 防呆：unit=kj 且 kcal≈generic，極可能 energy-kcal_* 被誤填成 kJ
             if (isKj(unit) && generic != null && approxEqualRel(kcal, generic, 0.02)) {
                 return kcal / KJ_PER_KCAL;
             }
@@ -184,48 +273,31 @@ public final class OpenFoodFactsMapper {
         return isKcal(unit) ? generic : generic / KJ_PER_KCAL;
     }
 
-    // =========================
-    // Sodium / Salt
-    // =========================
-
-    /**
-     * OFF sodium_* / salt_* 可能是 g，也可能帶 unit=mg（或髒資料）
-     * 我們統一輸出「mg sodium」
-     * 優先順序：
-     * 1) 看 unit 欄位（*_unit 或 base_unit）
-     * 2) 沒 unit 才用 heuristic（>100 視為 mg）
-     */
     private static Double sodiumMgFrom(JsonNode nutr, String sodiumKey, String saltKey) {
         Double sodium = numberOrNull(nutr, sodiumKey);
-        String sodiumUnit = nutrimentUnit(nutr, sodiumKey); // e.g. sodium_unit / sodium_100g_unit
+        String sodiumUnit = nutrimentUnit(nutr, sodiumKey);
 
         if (sodium != null) {
-            if (isMgUnit(sodiumUnit)) return sodium;          // already mg
-            if (isGramUnit(sodiumUnit)) return sodium * 1000.0; // g -> mg
+            if (isMgUnit(sodiumUnit)) return sodium;
+            if (isGramUnit(sodiumUnit)) return sodium * 1000.0;
 
-            // fallback heuristic（無 unit）
-            if (sodium > 100.0) return sodium; // likely already mg (misfilled)
-            return sodium * 1000.0;            // assume g
+            if (sodium > 100.0) return sodium;
+            return sodium * 1000.0;
         }
 
         Double salt = numberOrNull(nutr, saltKey);
-        String saltUnit = nutrimentUnit(nutr, saltKey); // e.g. salt_unit / salt_serving_unit
+        String saltUnit = nutrimentUnit(nutr, saltKey);
 
         if (salt != null) {
-            if (isMgUnit(saltUnit)) return salt / 2.5;           // salt_mg -> sodium_mg
-            if (isGramUnit(saltUnit)) return (salt / 2.5) * 1000.0; // salt_g -> sodium_g -> mg
+            if (isMgUnit(saltUnit)) return salt / 2.5;
+            if (isGramUnit(saltUnit)) return (salt / 2.5) * 1000.0;
 
-            // fallback heuristic（無 unit）
-            if (salt > 100.0) return salt / 2.5;      // likely salt_mg
-            return (salt / 2.5) * 1000.0;             // assume salt_g
+            if (salt > 100.0) return salt / 2.5;
+            return (salt / 2.5) * 1000.0;
         }
 
         return null;
     }
-
-    // =========================
-    // i18n Product Name
-    // =========================
 
     private static String resolveProductName(JsonNode product, String preferredLangTag) {
         if (preferredLangTag != null) {
@@ -250,10 +322,6 @@ public final class OpenFoodFactsMapper {
         }
         return null;
     }
-
-    // =========================
-    // Package Size Parsing
-    // =========================
 
     private record PackageSize(double value, String unit) {}
 
@@ -281,19 +349,15 @@ public final class OpenFoodFactsMapper {
         String u = unitRaw.trim().toLowerCase(Locale.ROOT);
         return switch (u) {
             case "g", "gram", "grams" -> (value > 0) ? new PackageSize(value, "g") : null;
-            case "kg"                 -> (value > 0) ? new PackageSize(value * 1000.0, "g") : null;
-            case "mg"                 -> (value > 0) ? new PackageSize(value / 1000.0, "g") : null;
-            case "ml"                 -> (value > 0) ? new PackageSize(value, "ml") : null;
-            case "l", "lt"            -> (value > 0) ? new PackageSize(value * 1000.0, "ml") : null;
-            case "cl"                 -> (value > 0) ? new PackageSize(value * 10.0, "ml") : null;
-            case "dl"                 -> (value > 0) ? new PackageSize(value * 100.0, "ml") : null;
-            default                   -> null;
+            case "kg" -> (value > 0) ? new PackageSize(value * 1000.0, "g") : null;
+            case "mg" -> (value > 0) ? new PackageSize(value / 1000.0, "g") : null;
+            case "ml" -> (value > 0) ? new PackageSize(value, "ml") : null;
+            case "l", "lt" -> (value > 0) ? new PackageSize(value * 1000.0, "ml") : null;
+            case "cl" -> (value > 0) ? new PackageSize(value * 10.0, "ml") : null;
+            case "dl" -> (value > 0) ? new PackageSize(value * 100.0, "ml") : null;
+            default -> null;
         };
     }
-
-    // =========================
-    // Number Parsing (耐髒解析)
-    // =========================
 
     private static final Pattern P_NUM = Pattern.compile("[-+]?(?:\\d+\\.\\d+|\\d+|\\.\\d+)(?:[eE][-+]?\\d+)?");
     private static final Pattern P_QTY = Pattern.compile("(?:(\\d+)\\s*[x×]\\s*)?([\\d][\\d.,']*)\\s*([a-zA-Z]+)");
@@ -363,17 +427,9 @@ public final class OpenFoodFactsMapper {
         catch (NumberFormatException e) { return null; }
     }
 
-    /**
-     * 常見數字字串正規化：
-     * - 1,234.5  -> 1234.5（美規）
-     * - 1.234,5  -> 1234.5（歐規）
-     * - 12,5     -> 12.5
-     * - 1,234    -> 1234
-     * - 1.234    -> 1234（若看起來像千分位）
-     */
     private static String normalizeNumberish(String raw) {
         String s = raw.trim()
-                .replace("\u00A0", "") // NBSP
+                .replace("\u00A0", "")
                 .replace(" ", "")
                 .replace("'", "")
                 .replace("’", "");
@@ -382,23 +438,18 @@ public final class OpenFoodFactsMapper {
         int lastDot = s.lastIndexOf('.');
 
         if (lastComma >= 0 && lastDot >= 0) {
-            // 最後出現的分隔符視為小數點
             if (lastComma > lastDot) {
-                // 歐規：1.234,5 -> 1234.5
                 s = s.replace(".", "").replace(',', '.');
             } else {
-                // 美規：1,234.5 -> 1234.5
                 s = s.replace(",", "");
             }
         } else if (lastComma >= 0) {
-            // 只有逗號：可能是千分位，也可能是小數點
             if (looksLikeThousandsSeparated(s, ',')) {
                 s = s.replace(",", "");
             } else {
                 s = s.replace(',', '.');
             }
         } else if (lastDot >= 0) {
-            // 只有點：可能是千分位，也可能是小數點
             if (looksLikeThousandsSeparated(s, '.')) {
                 s = s.replace(".", "");
             }
@@ -407,7 +458,6 @@ public final class OpenFoodFactsMapper {
         return s;
     }
 
-    /** 判斷是否像 1,234 / 12,345 / 1.234 / 12.345 這種千分位格式 */
     private static boolean looksLikeThousandsSeparated(String s, char sep) {
         if (s == null || s.isBlank()) return false;
 
@@ -434,11 +484,9 @@ public final class OpenFoodFactsMapper {
             return null;
         }
 
-        // 先找精確欄位：例如 sodium_100g_unit / salt_serving_unit
         String exact = lowerTrimOrNull(nutr.get(nutrientKeyWithSuffix + "_unit"));
         if (!isBlank(exact)) return exact;
 
-        // 再找 base 欄位：例如 sodium_unit / salt_unit
         int idx = nutrientKeyWithSuffix.indexOf('_');
         String base = (idx > 0) ? nutrientKeyWithSuffix.substring(0, idx) : nutrientKeyWithSuffix;
         return lowerTrimOrNull(nutr.get(base + "_unit"));
@@ -455,10 +503,6 @@ public final class OpenFoodFactsMapper {
         String s = u.trim().toLowerCase(Locale.ROOT);
         return s.equals("g") || s.equals("gr") || s.startsWith("gram");
     }
-
-    // =========================
-    // Utilities
-    // =========================
 
     private static String lowerTrimOrNull(JsonNode node) {
         if (node == null || node.isNull() || node.isMissingNode()) return null;

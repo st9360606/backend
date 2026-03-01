@@ -153,6 +153,10 @@ app:
       positive-ttl: "P30D"          # found: 7–30天（你可調）
       negative-ttl: "PT12H"         # not found: 6–24小時（你可調）
       purge-delay: "PT1H"
+    name-search:
+      page-size: 8
+      accept-min-score: 0.82
+      low-confidence-score: 0.93
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000

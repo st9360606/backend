@@ -18,20 +18,35 @@ class FoodLogEnvelopeJsonTest {
                 "id-1",
                 "DRAFT",
                 "DG-0",
-                "MODEL_TIER_HIGH", // ✅ tierUsed（新欄位）
-                false,             // ✅ fromCache（新欄位）
+                "MODEL_TIER_HIGH",
+                false,
                 new FoodLogEnvelope.NutritionResult(
                         "Unknown food",
                         new FoodLogEnvelope.Quantity(1.0, "SERVING"),
-                        new FoodLogEnvelope.Nutrients(120.0, 5.0, 4.0, 16.0, 2.0, 6.0, 180.0),
-                        6,                 // healthScore
-                        0.2,               // confidence
-                        List.of("UNKNOWN_FOOD", "LOW_CONFIDENCE"), // ✅ warnings
-                        "UNKNOWN_FOOD",    // ✅ degradedReason
-                        new FoodLogEnvelope.Source("ALBUM", "STUB")
+                        new FoodLogEnvelope.Nutrients(
+                                120.0,
+                                5.0,
+                                4.0,
+                                16.0,
+                                2.0,
+                                6.0,
+                                180.0
+                        ),
+                        6,
+                        0.2,
+                        List.of("UNKNOWN_FOOD", "LOW_CONFIDENCE"),
+                        "UNKNOWN_FOOD",
+                        null, // foodCategory
+                        null, // foodSubCategory
+                        new FoodLogEnvelope.Source(
+                                "ALBUM",
+                                "GEMINI",
+                                "GEMINI"
+                        )
                 ),
-                null,
-                null,
+                null, // task
+                null, // error
+                null, // hints
                 new FoodLogEnvelope.Trace("rid-1")
         );
 
@@ -42,12 +57,14 @@ class FoodLogEnvelopeJsonTest {
         assertThat(json).contains("\"nutritionResult\"");
         assertThat(json).contains("\"trace\"");
 
-        // ✅ v1.2：新欄位硬驗收（避免未來有人改壞）
+        // v1.2 / v1.3 契約欄位
         assertThat(json).contains("\"tierUsed\"");
         assertThat(json).contains("\"fromCache\"");
-
-        // ✅ 既有欄位也硬驗收
         assertThat(json).contains("\"warnings\"");
         assertThat(json).contains("\"degradedReason\"");
+
+        // Source 新欄位驗收
+        assertThat(json).contains("\"source\"");
+        assertThat(json).contains("\"resolvedBy\"");
     }
 }
