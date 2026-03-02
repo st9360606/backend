@@ -15,15 +15,44 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
 
 class FoodLogTaskWorkerTest {
+
+    // ✅ 固定時間，避免測試結果漂移
+    private final Clock clock = Clock.fixed(
+            Instant.parse("2026-03-03T00:00:00Z"),
+            ZoneOffset.UTC
+    );
+
+    /**
+     * ✅ 不依賴 ResourcelessTransactionManager
+     * 直接 mock 一個可讓 TransactionTemplate 正常執行的 txManager
+     */
+    private PlatformTransactionManager newTxManager() {
+        PlatformTransactionManager txManager = Mockito.mock(PlatformTransactionManager.class);
+
+        Mockito.when(txManager.getTransaction(any()))
+                .thenReturn(new SimpleTransactionStatus());
+
+        Mockito.doNothing().when(txManager).commit(any(TransactionStatus.class));
+        Mockito.doNothing().when(txManager).rollback(any(TransactionStatus.class));
+
+        return txManager;
+    }
 
     @Test
     void deleted_log_should_cancel_without_calling_provider() {
@@ -32,11 +61,14 @@ class FoodLogTaskWorkerTest {
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         StorageService storage = Mockito.mock(StorageService.class);
         EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t1");
         task.setFoodLogId("log1");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+        task.setCreatedAtUtc(clock.instant());
+        task.setUpdatedAtUtc(clock.instant());
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log1");
@@ -44,10 +76,14 @@ class FoodLogTaskWorkerTest {
 
         Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
                 .thenReturn(List.of(task));
+        Mockito.when(taskRepo.findByIdForUpdate("t1"))
+                .thenReturn(Optional.of(task));
         Mockito.when(logRepo.findByIdForUpdate("log1"))
-                .thenReturn(log);
+                .thenReturn(Optional.of(log));
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(
+                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+        );
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
@@ -65,22 +101,28 @@ class FoodLogTaskWorkerTest {
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
         EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t2");
         task.setFoodLogId("log2");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+        task.setAttempts(0);
+        task.setCreatedAtUtc(clock.instant());
+        task.setUpdatedAtUtc(clock.instant());
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
         log.setStatus(FoodLogStatus.PENDING);
-        log.setMethod("PHOTO"); // ✅ 讓 worker 的 method-aware 流程一致
+        log.setMethod("PHOTO");
         log.setImageObjectKey("user-1/food-log/log2/original.jpg");
 
         Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
                 .thenReturn(List.of(task));
+        Mockito.when(taskRepo.findByIdForUpdate("t2"))
+                .thenReturn(Optional.of(task));
         Mockito.when(logRepo.findByIdForUpdate("log2"))
-                .thenReturn(log);
+                .thenReturn(Optional.of(log));
 
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
@@ -88,7 +130,9 @@ class FoodLogTaskWorkerTest {
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("boom"));
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(
+                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+        );
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.FAILED, task.getTaskStatus());
@@ -107,23 +151,28 @@ class FoodLogTaskWorkerTest {
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
         EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t3");
         task.setFoodLogId("log3");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
         task.setAttempts(TaskRetryPolicy.MAX_ATTEMPTS - 1);
+        task.setCreatedAtUtc(clock.instant());
+        task.setUpdatedAtUtc(clock.instant());
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log3");
         log.setStatus(FoodLogStatus.PENDING);
-        log.setMethod("PHOTO"); // ✅ 一致性
+        log.setMethod("PHOTO");
         log.setImageObjectKey("user-1/food-log/log3/original.jpg");
 
         Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
                 .thenReturn(List.of(task));
+        Mockito.when(taskRepo.findByIdForUpdate("t3"))
+                .thenReturn(Optional.of(task));
         Mockito.when(logRepo.findByIdForUpdate("log3"))
-                .thenReturn(log);
+                .thenReturn(Optional.of(log));
 
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
@@ -131,7 +180,9 @@ class FoodLogTaskWorkerTest {
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenThrow(new RuntimeException("always fail"));
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(
+                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+        );
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
@@ -151,44 +202,51 @@ class FoodLogTaskWorkerTest {
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
         EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("t4");
         task.setFoodLogId("log4");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+        task.setAttempts(0);
+        task.setCreatedAtUtc(clock.instant());
+        task.setUpdatedAtUtc(clock.instant());
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log4");
         log.setStatus(FoodLogStatus.PENDING);
-        log.setMethod("PHOTO"); // ✅ 很重要：worker 會把 method 傳進 postProcessor.apply(..., method)
+        log.setMethod("PHOTO");
         log.setImageObjectKey("user-1/food-log/log4/original.jpg");
 
         Mockito.when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
                 .thenReturn(List.of(task));
+        Mockito.when(taskRepo.findByIdForUpdate("t4"))
+                .thenReturn(Optional.of(task));
         Mockito.when(logRepo.findByIdForUpdate("log4"))
-                .thenReturn(log);
+                .thenReturn(Optional.of(log));
 
         Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
 
         ObjectMapper om = new ObjectMapper();
         ObjectNode eff = (ObjectNode) om.readTree("""
-          {
-            "foodName":"White Bread",
-            "quantity":{"value":1,"unit":"SERVING"},
-            "nutrients":{"kcal":75,"protein":2.5,"fat":1,"carbs":14,"fiber":0.8,"sugar":1.5,"sodium":140},
-            "confidence":0.9
-          }
-        """);
+            {
+              "foodName":"White Bread",
+              "quantity":{"value":1,"unit":"SERVING"},
+              "nutrients":{"kcal":75,"protein":2.5,"fat":1,"carbs":14,"fiber":0.8,"sugar":1.5,"sodium":140},
+              "confidence":0.9
+            }
+            """);
 
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenReturn(new ProviderClient.ProviderResult(eff, "GEMINI"));
 
-        // ✅ 關鍵修正：stub 三參數版本（worker 用的是 apply(eff, provider, method)）
         Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO")))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(
+                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+        );
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.SUCCEEDED, task.getTaskStatus());

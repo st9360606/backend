@@ -20,7 +20,6 @@ import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.calai.backend.foodlog.task.ProviderClient;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +27,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Clock;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -51,17 +51,19 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock AbuseGuardService abuseGuard;
     @Mock EntitlementService entitlementService;
     @Mock TransactionTemplate txTemplate;
+    @Mock Clock clock;
 
     private FoodLogService service;
 
     @BeforeEach
     void setUp() {
+        when(clock.instant()).thenReturn(java.time.Instant.parse("2026-03-03T00:00:00Z"));
+
         service = new FoodLogService(
                 providerClient,
                 repo,
                 taskRepo,
                 storage,
-                new ObjectMapper(),
                 aiQuota,
                 idem,
                 imageBlobService,
@@ -69,6 +71,7 @@ class FoodLogServiceTaskVisibilityTest {
                 rateLimiter,
                 postProcessor,
                 clientActionMapper,
+                clock,
                 abuseGuard,
                 entitlementService,
                 barcodeLookupService,

@@ -25,3 +25,8 @@ CREATE TABLE user_ai_quota_state
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci;
+
+
+ALTER TABLE user_ai_quota_state
+    MODIFY COLUMN daily_key VARCHAR(64) NOT NULL,
+    MODIFY COLUMN monthly_key VARCHAR(64) NOT NULL;

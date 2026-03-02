@@ -45,7 +45,8 @@ import java.util.Optional;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import com.calai.backend.foodlog.web.RateLimitedException;
+import com.calai.backend.foodlog.web.TooManyInFlightException;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
@@ -112,7 +113,7 @@ public class FoodLogService {
     ) throws Exception {
 
         ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = parseTzOrUtc(clientTz);
+        ZoneId quotaTz = resolveQuotaTz();
         Instant serverNow = clock.instant();
         validateUploadBasics(file);
 
@@ -253,7 +254,7 @@ public class FoodLogService {
     public FoodLogEnvelope createPhoto(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = parseTzOrUtc(clientTz);
+        ZoneId quotaTz = resolveQuotaTz();
         Instant serverNow = clock.instant();
         validateUploadBasics(file);
 
@@ -412,7 +413,7 @@ public class FoodLogService {
     public FoodLogEnvelope createLabel(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = parseTzOrUtc(clientTz);
+        ZoneId quotaTz = resolveQuotaTz();
         Instant serverNow = clock.instant();
         validateUploadBasics(file);
 
@@ -584,7 +585,7 @@ public class FoodLogService {
 
         try {
             ZoneId captureTz = parseTzOrUtc(clientTz);
-            ZoneId quotaTz = parseTzOrUtc(clientTz);
+            ZoneId quotaTz = resolveQuotaTz();
             LocalDate localDate = ZonedDateTime.ofInstant(now, captureTz).toLocalDate();
 
             // ✅ 2) deviceId normalize
@@ -676,6 +677,15 @@ public class FoodLogService {
                     userId, bcRaw, bcNorm, requestId, now, captureTz, localDate, r, langKey
             );
 
+        } catch (RateLimitedException ex) {
+            idem.failAndReleaseIfNeeded(
+                    userId,
+                    requestId,
+                    ex.getMessage(),
+                    safeMsg(ex),
+                    true
+            );
+            throw ex;
         } catch (RuntimeException ex) {
             idem.failAndReleaseIfNeeded(
                     userId,
@@ -1122,7 +1132,7 @@ public class FoodLogService {
             throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
         }
 
-        ZoneId quotaTz = parseTzOrUtc(clientTz);
+        ZoneId quotaTz = resolveQuotaTz();
 
         // retry 也要擋一下，不然狂點 retry 一樣會打爆
         EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
@@ -1172,6 +1182,15 @@ public class FoodLogService {
             EntitlementService.Tier tier = entitlementService.resolveTier(userId, nowUtc);
             rateLimiter.checkOrThrow(userId, tier, nowUtc);
             return tier;
+        } catch (RateLimitedException ex) {
+            idem.failAndReleaseIfNeeded(
+                    userId,
+                    requestId,
+                    ex.getMessage(),
+                    safeMsg(ex),
+                    true
+            );
+            throw ex;
         } catch (RuntimeException ex) {
             idem.failAndReleaseIfNeeded(
                     userId,
@@ -1233,11 +1252,20 @@ public class FoodLogService {
     private void acquireInFlightOrRelease(Long userId, String requestId) {
         try {
             inFlight.acquireOrThrow(userId);
+        } catch (TooManyInFlightException ex) {
+            idem.failAndReleaseIfNeeded(
+                    userId,
+                    requestId,
+                    ex.getMessage(),
+                    safeMsg(ex),
+                    true
+            );
+            throw ex;
         } catch (RuntimeException ex) {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    safeMsg(ex),
+                    "INFLIGHT_ACQUIRE_FAILED",
                     safeMsg(ex),
                     true
             );
@@ -1297,6 +1325,12 @@ public class FoodLogService {
     private static ZoneId parseTzOrUtc(String tz) {
         try { return (tz == null || tz.isBlank()) ? ZoneOffset.UTC : ZoneId.of(tz); }
         catch (Exception ignored) { return ZoneOffset.UTC; }
+    }
+
+    private static ZoneId resolveQuotaTz() {
+        // quota / cooldown / abuse guard 不信任 client 傳入時區，
+        // 避免使用者透過切換時區重置 daily / monthly bucket
+        return ZoneOffset.UTC;
     }
 
     private static String textOrNull(JsonNode node, String field) {

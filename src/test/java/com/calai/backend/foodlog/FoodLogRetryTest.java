@@ -19,10 +19,10 @@ import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.calai.backend.foodlog.task.ProviderClient;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -40,7 +40,6 @@ class FoodLogRetryTest {
         FoodLogRepository repo = mock(FoodLogRepository.class);
         FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
         StorageService storage = mock(StorageService.class);
-        ObjectMapper om = new ObjectMapper();
 
         QuotaService quota = mock(QuotaService.class);
         IdempotencyService idem = mock(IdempotencyService.class);
@@ -52,15 +51,17 @@ class FoodLogRetryTest {
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
 
         AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
-        doNothing().when(abuseGuard)
-                .onOperationAttempt(anyLong(), anyString(), anyBoolean(), any(Instant.class), eq(ZoneOffset.UTC));
-
         EntitlementService entitlementService = mock(EntitlementService.class);
+        BarcodeLookupService barcodeLookupService = mock(BarcodeLookupService.class);
+        TransactionTemplate txTemplate = mock(TransactionTemplate.class);
+
+        Clock clock = Clock.fixed(Instant.parse("2026-03-03T00:00:00Z"), ZoneOffset.UTC);
+
         when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
                 .thenReturn(EntitlementService.Tier.TRIAL);
 
-        BarcodeLookupService barcodeLookupService = mock(BarcodeLookupService.class);
-        TransactionTemplate txTemplate = mock(TransactionTemplate.class);
+        doNothing().when(abuseGuard)
+                .onOperationAttempt(anyLong(), anyString(), anyBoolean(), any(Instant.class), eq(ZoneOffset.UTC));
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log1");
@@ -77,11 +78,11 @@ class FoodLogRetryTest {
         task.setId("t1");
         task.setFoodLogId("log1");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.FAILED);
-        task.setNextRetryAtUtc(Instant.now().plusSeconds(999));
+        task.setNextRetryAtUtc(Instant.parse("2026-03-03T00:20:00Z"));
         task.setAttempts(3);
         task.setPollAfterSec(2);
 
-        when(repo.findByIdForUpdate("log1")).thenReturn(log);
+        when(repo.findByIdForUpdate("log1")).thenReturn(Optional.of(log));
         when(taskRepo.findByFoodLogIdForUpdate("log1")).thenReturn(Optional.of(task));
 
         // retry() 最後會呼叫 getOne()
@@ -100,7 +101,6 @@ class FoodLogRetryTest {
                 repo,
                 taskRepo,
                 storage,
-                om,
                 quota,
                 idem,
                 blobService,
@@ -108,6 +108,7 @@ class FoodLogRetryTest {
                 rateLimiter,
                 postProcessor,
                 clientActionMapper,
+                clock,
                 abuseGuard,
                 entitlementService,
                 barcodeLookupService,
@@ -115,7 +116,7 @@ class FoodLogRetryTest {
         );
 
         // ===== act =====
-        svc.retry(1L, "log1", "device-1", "rid-1");
+        svc.retry(1L, "log1", null, "device-1", "rid-1");
 
         // ===== assert =====
         assertEquals(FoodLogStatus.PENDING, log.getStatus());
@@ -154,7 +155,6 @@ class FoodLogRetryTest {
         FoodLogRepository repo = mock(FoodLogRepository.class);
         FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
         StorageService storage = mock(StorageService.class);
-        ObjectMapper om = new ObjectMapper();
 
         QuotaService quota = mock(QuotaService.class);
         IdempotencyService idem = mock(IdempotencyService.class);
@@ -166,27 +166,27 @@ class FoodLogRetryTest {
         ClientActionMapper clientActionMapper = mock(ClientActionMapper.class);
 
         AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
-
         EntitlementService entitlementService = mock(EntitlementService.class);
-        when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
-                .thenReturn(EntitlementService.Tier.TRIAL);
-
         BarcodeLookupService barcodeLookupService = mock(BarcodeLookupService.class);
         TransactionTemplate txTemplate = mock(TransactionTemplate.class);
+
+        Clock clock = Clock.fixed(Instant.parse("2026-03-03T00:00:00Z"), ZoneOffset.UTC);
+
+        when(entitlementService.resolveTier(anyLong(), any(Instant.class)))
+                .thenReturn(EntitlementService.Tier.TRIAL);
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log2");
         log.setUserId(1L);
         log.setStatus(FoodLogStatus.DRAFT);
 
-        when(repo.findByIdForUpdate("log2")).thenReturn(log);
+        when(repo.findByIdForUpdate("log2")).thenReturn(Optional.of(log));
 
         FoodLogService svc = new FoodLogService(
                 providerClient,
                 repo,
                 taskRepo,
                 storage,
-                om,
                 quota,
                 idem,
                 blobService,
@@ -194,6 +194,7 @@ class FoodLogRetryTest {
                 rateLimiter,
                 postProcessor,
                 clientActionMapper,
+                clock,
                 abuseGuard,
                 entitlementService,
                 barcodeLookupService,
@@ -203,7 +204,7 @@ class FoodLogRetryTest {
         // ===== act / assert =====
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class,
-                () -> svc.retry(1L, "log2", "device-1", "rid-2")
+                () -> svc.retry(1L, "log2", null, "device-1", "rid-2")
         );
 
         assertEquals("FOOD_LOG_NOT_RETRYABLE", ex.getMessage());

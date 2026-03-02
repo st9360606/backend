@@ -1,11 +1,13 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.service.FoodLogHistoryService;
 import com.calai.backend.foodlog.service.FoodLogService;
 import org.junit.jupiter.api.Test;
+
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -22,7 +24,7 @@ class FoodLogHistoryServiceTest {
         e.setUserId(10L);
         e.setStatus(FoodLogStatus.DRAFT);
 
-        when(repo.findByIdForUpdate("L1")).thenReturn(e);
+        when(repo.findByIdForUpdate("L1")).thenReturn(Optional.of(e));
 
         FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService);
         svc.save(10L, "L1", "RID");
@@ -42,7 +44,7 @@ class FoodLogHistoryServiceTest {
         e.setUserId(10L);
         e.setStatus(FoodLogStatus.PENDING);
 
-        when(repo.findByIdForUpdate("L1")).thenReturn(e);
+        when(repo.findByIdForUpdate("L1")).thenReturn(Optional.of(e));
 
         FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService);
 
@@ -62,7 +64,7 @@ class FoodLogHistoryServiceTest {
         e.setUserId(10L);
         e.setStatus(FoodLogStatus.SAVED);
 
-        when(repo.findByIdForUpdate("L1")).thenReturn(e);
+        when(repo.findByIdForUpdate("L1")).thenReturn(Optional.of(e));
 
         FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService);
         svc.save(10L, "L1", "RID");

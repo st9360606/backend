@@ -8,6 +8,7 @@ import com.calai.backend.foodlog.quota.repo.UserAiQuotaStateRepository;
 import com.calai.backend.foodlog.quota.web.CooldownActiveException;
 import com.calai.backend.foodlog.web.SubscriptionRequiredException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -68,19 +69,7 @@ public class QuotaService {
         int premiumLimit = isTrial ? trialPremiumLimit : paidPremiumLimit;
         int totalLimit = isTrial ? trialTotalLimit : paidTotalLimit;
 
-        UserAiQuotaStateEntity s = repo.findForUpdate(userId).orElseGet(() -> {
-            UserAiQuotaStateEntity n = new UserAiQuotaStateEntity();
-            n.setUserId(userId);
-            n.setDailyKey(dayKey(nowUtc, userTz));
-            n.setMonthlyKey(monthKey(nowUtc, userTz));
-            n.setDailyCount(0);
-            n.setMonthlyCount(0);
-            n.setCooldownStrikes(0);
-            n.setNextAllowedAtUtc(null);
-            n.setForceLowUntilUtc(null);
-            n.setCooldownReason(null);
-            return n;
-        });
+        UserAiQuotaStateEntity s = getOrCreateStateForUpdate(userId, userTz, nowUtc);
 
         CooldownReason reason = parseReason(s.getCooldownReason());
         boolean cooldownJustExpired = false;
@@ -196,6 +185,37 @@ public class QuotaService {
     public Decision consumeOperationOrThrow(Long userId, ZoneId userTz, Instant nowUtc) {
         EntitlementService.Tier tier = entitlementService.resolveTier(userId, nowUtc);
         return consumeOperationOrThrow(userId, tier, userTz, nowUtc);
+    }
+
+    private UserAiQuotaStateEntity getOrCreateStateForUpdate(Long userId, ZoneId userTz, Instant nowUtc) {
+        for (int i = 0; i < 3; i++) {
+            var existing = repo.findForUpdate(userId);
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+
+            try {
+                repo.saveAndFlush(newQuotaState(userId, userTz, nowUtc));
+            } catch (DataIntegrityViolationException ignored) {
+                // 另一個並發請求剛好先建立成功，下一輪重抓即可
+            }
+        }
+        return repo.findForUpdate(userId)
+                .orElseThrow(() -> new IllegalStateException("QUOTA_STATE_CREATE_RACE"));
+    }
+
+    private UserAiQuotaStateEntity newQuotaState(Long userId, ZoneId userTz, Instant nowUtc) {
+        UserAiQuotaStateEntity n = new UserAiQuotaStateEntity();
+        n.setUserId(userId);
+        n.setDailyKey(dayKey(nowUtc, userTz));
+        n.setMonthlyKey(monthKey(nowUtc, userTz));
+        n.setDailyCount(0);
+        n.setMonthlyCount(0);
+        n.setCooldownStrikes(0);
+        n.setNextAllowedAtUtc(null);
+        n.setForceLowUntilUtc(null);
+        n.setCooldownReason(null);
+        return n;
     }
 
     private static CooldownReason parseReason(String s) {

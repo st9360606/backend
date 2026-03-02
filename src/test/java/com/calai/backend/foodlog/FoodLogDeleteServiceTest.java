@@ -1,8 +1,8 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
@@ -10,8 +10,12 @@ import com.calai.backend.foodlog.service.FoodLogDeleteService;
 import com.calai.backend.foodlog.service.FoodLogService;
 import com.calai.backend.foodlog.service.ImageBlobService;
 import org.junit.jupiter.api.Test;
+
 import java.util.Optional;
-import static org.junit.jupiter.api.Assertions.*;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class FoodLogDeleteServiceTest {
@@ -36,12 +40,15 @@ class FoodLogDeleteServiceTest {
         task.setFoodLogId("L1");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.RUNNING);
 
-        when(logRepo.findByIdForUpdate("L1")).thenReturn(log);
+        // ✅ 這裡要回 Optional
+        when(logRepo.findByIdForUpdate("L1")).thenReturn(Optional.of(log));
         when(taskRepo.findByFoodLogIdForUpdate("L1")).thenReturn(Optional.of(task));
         when(blobService.findExtOrNull(10L, "sha")).thenReturn(".jpg");
         when(foodLogService.getOne(10L, "L1", "RID")).thenReturn(null);
 
-        FoodLogDeleteService svc = new FoodLogDeleteService(logRepo, taskRepo, deletionRepo, blobService, foodLogService);
+        FoodLogDeleteService svc =
+                new FoodLogDeleteService(logRepo, taskRepo, deletionRepo, blobService, foodLogService);
+
         svc.deleteOne(10L, "L1", "RID");
 
         assertEquals(FoodLogStatus.DELETED, log.getStatus());

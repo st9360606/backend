@@ -1,24 +1,29 @@
 package com.calai.backend.foodlog.task;
 
-import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.web.client.HttpClientErrorException;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -31,30 +36,43 @@ class FoodLogTaskWorkerRateLimitedTest {
     @Mock StorageService storage;
     @Mock EffectivePostProcessor postProcessor;
     @Mock ProviderClient providerClient;
+    @Mock PlatformTransactionManager txManager;
 
     @Test
     void when_429_then_task_cancelled_and_log_failed_and_message_contains_suggestedRetryAfterSec() throws Exception {
-        // Arrange: one QUEUED task
+        // Arrange
+        Instant now = Instant.parse("2026-03-03T00:00:00Z");
+        Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+
+        // ✅ TransactionTemplate 需要 getTransaction 有回傳即可
+        // commit / rollback 對 mock 預設就是 no-op，不要多 stub，避免 UnnecessaryStubbingException
+        SimpleTransactionStatus txStatus = new SimpleTransactionStatus();
+        when(txManager.getTransaction(any())).thenReturn(txStatus);
+
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setId("task-1");
         task.setFoodLogId("log-1");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-        task.setCreatedAtUtc(Instant.now());
-        task.setUpdatedAtUtc(Instant.now());
+        task.setCreatedAtUtc(now);
+        task.setUpdatedAtUtc(now);
+        task.setAttempts(0);
 
         when(taskRepo.claimRunnableForUpdate(any(Instant.class), anyInt()))
                 .thenReturn(List.of(task));
+        when(taskRepo.findByIdForUpdate("task-1"))
+                .thenReturn(Optional.of(task));
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log-1");
         log.setStatus(FoodLogStatus.PENDING);
+        log.setMethod("PHOTO");
         log.setImageObjectKey("user-1/blobs/sha256/xxx.jpg");
 
-        when(logRepo.findByIdForUpdate("log-1")).thenReturn(log);
+        when(logRepo.findByIdForUpdate("log-1"))
+                .thenReturn(Optional.of(log));
 
-        when(router.pickStrict(log)).thenReturn(providerClient);
+        when(router.pickStrict(any(FoodLogEntity.class))).thenReturn(providerClient);
 
-        // Simulate 429 body contains retryDelay: "34s"
         String body = """
                 {
                   "error": {
@@ -79,23 +97,23 @@ class FoodLogTaskWorkerRateLimitedTest {
         when(providerClient.process(any(FoodLogEntity.class), any(StorageService.class)))
                 .thenThrow(ex);
 
-        FoodLogTaskWorker worker = new FoodLogTaskWorker(taskRepo, logRepo, router, storage, postProcessor);
+        FoodLogTaskWorker worker = new FoodLogTaskWorker(
+                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+        );
 
         // Act
         worker.runOnce();
 
-        // Assert: task cancelled
+        // Assert
         assertThat(task.getTaskStatus()).isEqualTo(FoodLogTaskEntity.TaskStatus.CANCELLED);
         assertThat(task.getLastErrorCode()).isEqualTo("PROVIDER_RATE_LIMITED");
         assertThat(task.getLastErrorMessage()).contains("suggestedRetryAfterSec=34");
         assertThat(task.getNextRetryAtUtc()).isNull();
 
-        // Assert: log failed
         assertThat(log.getStatus()).isEqualTo(FoodLogStatus.FAILED);
         assertThat(log.getLastErrorCode()).isEqualTo("PROVIDER_RATE_LIMITED");
         assertThat(log.getLastErrorMessage()).contains("suggestedRetryAfterSec=34");
 
-        // 並且 postProcessor 不應被呼叫（因為失敗）
-        verify(postProcessor, never()).apply(any(), anyString());
+        verify(postProcessor, never()).apply(any(), anyString(), anyString());
     }
 }

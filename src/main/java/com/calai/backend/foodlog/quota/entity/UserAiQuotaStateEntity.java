@@ -16,13 +16,13 @@ public class UserAiQuotaStateEntity {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "daily_key", length = 32, nullable = false)
+    @Column(name = "daily_key", length = 64, nullable = false)
     private String dailyKey;
 
     @Column(name = "daily_count", nullable = false)
     private int dailyCount;
 
-    @Column(name = "monthly_key", length = 32, nullable = false)
+    @Column(name = "monthly_key", length = 64, nullable = false)
     private String monthlyKey;
 
     @Column(name = "monthly_count", nullable = false)
