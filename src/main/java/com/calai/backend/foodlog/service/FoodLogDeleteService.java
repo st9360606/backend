@@ -28,7 +28,8 @@ public class FoodLogDeleteService {
     public FoodLogEnvelope deleteOne(Long userId, String foodLogId, String requestId) {
         Instant now = Instant.now();
 
-        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId);
+        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
+                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
 
         // ✅ 冪等刪除：已 DELETED 直接回

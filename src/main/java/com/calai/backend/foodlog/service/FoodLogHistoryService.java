@@ -24,7 +24,8 @@ public class FoodLogHistoryService {
 
     @Transactional
     public FoodLogEnvelope save(Long userId, String foodLogId, String requestId) {
-        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId);
+        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
+                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
 
         if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");

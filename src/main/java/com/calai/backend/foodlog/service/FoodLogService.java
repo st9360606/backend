@@ -28,7 +28,6 @@ import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
 import com.calai.backend.foodlog.web.ModelRefusedException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -85,7 +84,6 @@ public class FoodLogService {
     private final FoodLogRepository repo;
     private final FoodLogTaskRepository taskRepo;
     private final StorageService storage;
-    private final ObjectMapper om;
     private final QuotaService quota;
     private final IdempotencyService idem;
     private final ImageBlobService blobService;
@@ -93,12 +91,13 @@ public class FoodLogService {
     private final UserRateLimiter rateLimiter;
     private final EffectivePostProcessor postProcessor;
     private final ClientActionMapper clientActionMapper;
+    private final Clock clock;
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
     public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
     private final AbuseGuardService abuseGuard;
     private final EntitlementService entitlementService;
     private final BarcodeLookupService barcodeLookupService;
-    private final TransactionTemplate txTemplate; // ✅ 短交易用
+    private final TransactionTemplate txTemplate;
 
     // =========================
     // S4-05：ALBUM
@@ -113,22 +112,25 @@ public class FoodLogService {
     ) throws Exception {
 
         ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = ZoneOffset.UTC; // hotfix：正式版建議改成 user profile timezone
-        Instant serverNow = Instant.now();
+        ZoneId quotaTz = parseTzOrUtc(clientTz);
+        Instant serverNow = clock.instant();
         validateUploadBasics(file);
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, serverNow);
-        rateLimiter.checkOrThrow(userId, tier, serverNow);
+        EntitlementService.Tier tier = resolveTierAndCheckRateOrRelease(
+                userId,
+                requestId,
+                serverNow
+        );
 
         boolean acquired = false;
         String tempKey = null;
         ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
-            inFlight.acquireOrThrow(userId);
+            acquireInFlightOrRelease(userId, requestId);
             acquired = true;
 
             ImageSniffer.Detection det;
@@ -251,22 +253,25 @@ public class FoodLogService {
     public FoodLogEnvelope createPhoto(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = ZoneOffset.UTC; // hotfix
-        Instant serverNow = Instant.now();
+        ZoneId quotaTz = parseTzOrUtc(clientTz);
+        Instant serverNow = clock.instant();
         validateUploadBasics(file);
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, serverNow);
-        rateLimiter.checkOrThrow(userId, tier, serverNow);
+        EntitlementService.Tier tier = resolveTierAndCheckRateOrRelease(
+                userId,
+                requestId,
+                serverNow
+        );
 
         boolean acquired = false;
         String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
         ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
-            inFlight.acquireOrThrow(userId);
+            acquireInFlightOrRelease(userId, requestId);
             acquired = true;
 
             ImageSniffer.Detection det;
@@ -407,23 +412,26 @@ public class FoodLogService {
     public FoodLogEnvelope createLabel(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
         ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = ZoneOffset.UTC; // hotfix
-        Instant serverNow = Instant.now();
+        ZoneId quotaTz = parseTzOrUtc(clientTz);
+        Instant serverNow = clock.instant();
         validateUploadBasics(file);
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
         // ✅ 仍要限流，避免被打爆（雖然是 AI 才更需要，但 label 也會走 AI）
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, serverNow);
-        rateLimiter.checkOrThrow(userId, tier, serverNow);
+        EntitlementService.Tier tier = resolveTierAndCheckRateOrRelease(
+                userId,
+                requestId,
+                serverNow
+        );
 
         boolean acquired = false;
         String tempKey = null;
         ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
-            inFlight.acquireOrThrow(userId);
+            acquireInFlightOrRelease(userId, requestId);
             acquired = true;
 
             ImageSniffer.Detection det;
@@ -558,7 +566,7 @@ public class FoodLogService {
             String preferredLangTag,
             String requestId
     ) {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         if (barcode == null || barcode.isBlank()) {
             throw new IllegalArgumentException("BARCODE_REQUIRED");
@@ -576,7 +584,7 @@ public class FoodLogService {
 
         try {
             ZoneId captureTz = parseTzOrUtc(clientTz);
-            ZoneId quotaTz = ZoneOffset.UTC;
+            ZoneId quotaTz = parseTzOrUtc(clientTz);
             LocalDate localDate = ZonedDateTime.ofInstant(now, captureTz).toLocalDate();
 
             // ✅ 2) deviceId normalize
@@ -863,7 +871,7 @@ public class FoodLogService {
     // 1) task 只回 meaningful（QUEUED/RUNNING/FAILED）
     // 2) FAILED 時 error 一定回；retryAfterSec 優先 nextRetryAt，其次從 lastErrorMessage 解析 =====
     private FoodLogEnvelope toEnvelope(FoodLogEntity e, FoodLogTaskEntity t, String requestId) {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         JsonNode eff = e.getEffective();
 
@@ -1091,17 +1099,18 @@ public class FoodLogService {
     }
 
     @Transactional
-    public FoodLogEnvelope retry(Long userId, String foodLogId, String deviceId, String requestId) {
-        Instant now = Instant.now();
+    public FoodLogEnvelope retry(
+            Long userId,
+            String foodLogId,
+            String clientTz,
+            String deviceId,
+            String requestId
+    ) {
+        Instant now = clock.instant();
 
-        // ✅ retry 也要擋一下，不然狂點 retry 一樣會打爆
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
-        rateLimiter.checkOrThrow(userId, tier, now);
-
-        FoodLogEntity log = repo.findByIdForUpdate(foodLogId);
-        if (log == null) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
+        FoodLogEntity log = repo.findByIdForUpdate(foodLogId)
+                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
-
         if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
         if (log.getStatus() == FoodLogStatus.DRAFT || log.getStatus() == FoodLogStatus.SAVED) {
             throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
@@ -1113,19 +1122,19 @@ public class FoodLogService {
             throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
         }
 
-        ZoneId quotaTz = ZoneOffset.UTC;
+        ZoneId quotaTz = parseTzOrUtc(clientTz);
 
-        // ✅ retry 也算操作，給 abuseGuard（cacheHit=false）
+        // retry 也要擋一下，不然狂點 retry 一樣會打爆
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
+        rateLimiter.checkOrThrow(userId, tier, now);
+
         String did = normalizeDeviceId(userId, deviceId);
         abuseGuard.onOperationAttempt(userId, did, false, now, quotaTz);
 
-        // ✅ Step 1：retry 也算一次 Operation（會再打模型）
         QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, now);
 
-        // ✅ 先用 degradeLevel 反映 tier，方便你觀測
         log.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
 
-        // ✅ 重排 task
         Optional<FoodLogTaskEntity> opt = taskRepo.findByFoodLogIdForUpdate(foodLogId);
         FoodLogTaskEntity task = opt.orElseGet(() -> {
             FoodLogTaskEntity t = new FoodLogTaskEntity();
@@ -1144,7 +1153,6 @@ public class FoodLogService {
         task.setLastErrorMessage(null);
         taskRepo.save(task);
 
-        // ✅ reset log
         resetForRetry(log);
         repo.save(log);
 
@@ -1154,6 +1162,27 @@ public class FoodLogService {
     // =========================
     // helpers
     // =========================
+
+    private EntitlementService.Tier resolveTierAndCheckRateOrRelease(
+            Long userId,
+            String requestId,
+            Instant nowUtc
+    ) {
+        try {
+            EntitlementService.Tier tier = entitlementService.resolveTier(userId, nowUtc);
+            rateLimiter.checkOrThrow(userId, tier, nowUtc);
+            return tier;
+        } catch (RuntimeException ex) {
+            idem.failAndReleaseIfNeeded(
+                    userId,
+                    requestId,
+                    "PRECHECK_FAILED",
+                    safeMsg(ex),
+                    true
+            );
+            throw ex;
+        }
+    }
 
     static void resetForRetry(FoodLogEntity log) {
         log.setStatus(FoodLogStatus.PENDING);
@@ -1198,6 +1227,21 @@ public class FoodLogService {
         StorageCleanup.safeDeleteQuietly(storage, tempKey);
         if (tempKey == null) {
             StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
+        }
+    }
+
+    private void acquireInFlightOrRelease(Long userId, String requestId) {
+        try {
+            inFlight.acquireOrThrow(userId);
+        } catch (RuntimeException ex) {
+            idem.failAndReleaseIfNeeded(
+                    userId,
+                    requestId,
+                    safeMsg(ex),
+                    safeMsg(ex),
+                    true
+            );
+            throw ex;
         }
     }
 

@@ -1,7 +1,9 @@
 package com.calai.backend.foodlog.repo;
 
 import com.calai.backend.foodlog.entity.ImageBlobEntity;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -79,4 +81,11 @@ public interface ImageBlobRepository extends JpaRepository<ImageBlobEntity, Long
             nativeQuery = true
     )
     int deleteIfZero(@Param("userId") Long userId, @Param("sha256") String sha256);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select b from ImageBlobEntity b where b.userId = :userId and b.sha256 = :sha256")
+    Optional<ImageBlobEntity> findByUserIdAndSha256ForUpdate(
+            @Param("userId") Long userId,
+            @Param("sha256") String sha256
+    );
 }

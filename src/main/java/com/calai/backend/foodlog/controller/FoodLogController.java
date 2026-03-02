@@ -121,12 +121,13 @@ public class FoodLogController {
     @PostMapping("/{id}/retry")
     public FoodLogEnvelope retry(
             @PathVariable String id,
-            @RequestHeader(value = "X-Device-Id", required = false) String deviceId, // ✅ NEW
+            @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId,
             HttpServletRequest req
     ) {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
-        return service.retry(uid, id, deviceId, requestId);
+        return service.retry(uid, id, clientTz, deviceId, requestId);
     }
 
     @DeleteMapping("/{id}")

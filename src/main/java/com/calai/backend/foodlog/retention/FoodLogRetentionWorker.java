@@ -21,7 +21,12 @@ import java.util.List;
 @Slf4j
 @RequiredArgsConstructor
 @Component
-@ConditionalOnProperty(prefix = "app.retention.foodlog", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(
+        prefix = "app.retention.foodlog",
+        name = "enabled",
+        havingValue = "true",
+        matchIfMissing = true
+)
 public class FoodLogRetentionWorker {
 
     private final FoodLogRetentionProperties props;
@@ -30,20 +35,22 @@ public class FoodLogRetentionWorker {
     private final DeletionJobRepository deletionRepo;
     private final ImageBlobService blobService;
 
-    /** ✅ 用 Clock 方便測試（Testcontainers + fixed clock） */
-    private final Clock clock = Clock.systemUTC();
+    /** 由 Spring 注入，方便測試時改成 fixed clock */
+    private final Clock clock;
 
     // 每天凌晨 05:30 跑（你可改）
     @Scheduled(cron = "0 30 5 * * *")
     @Transactional
     public void runDaily() {
-        if (!props.isEnabled()) return;
+        if (!props.isEnabled()) {
+            return;
+        }
 
         Instant now = Instant.now(clock);
 
-        // 1) 短期：DRAFT/PENDING/FAILED
+        // 1) 短期：DRAFT / PENDING / FAILED
         Instant cutoffDraft = now.minus(props.getKeepDraft());
-        int n1 = processExpired(now, cutoffDraft, List.of("DRAFT","PENDING","FAILED"), props.getBatchSize());
+        int n1 = processExpired(now, cutoffDraft, List.of("DRAFT", "PENDING", "FAILED"), props.getBatchSize());
 
         // 2) 長期：SAVED
         Instant cutoffSaved = now.minus(props.getKeepSaved());
@@ -57,19 +64,21 @@ public class FoodLogRetentionWorker {
     private int processExpired(Instant now, Instant cutoff, List<String> statuses, int limit) {
         int processed = 0;
 
-        // 批次領（避免一次太大）
+        // 批次領取（避免一次太大）
         List<com.calai.backend.foodlog.entity.FoodLogEntity> logs =
                 logRepo.claimExpiredForUpdate(statuses, cutoff, limit);
 
         for (var logEntity : logs) {
             // 已刪就跳過（保守）
-            if (logEntity.getStatus() == FoodLogStatus.DELETED) continue;
+            if (logEntity.getStatus() == FoodLogStatus.DELETED) {
+                continue;
+            }
 
             // 取消 task（避免 worker 競態）
             taskRepo.findByFoodLogIdForUpdate(logEntity.getId()).ifPresent(t -> {
                 if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.QUEUED
-                    || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING
-                    || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.FAILED) {
+                        || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING
+                        || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.FAILED) {
                     t.markCancelled(now, "RETENTION_DELETED", "cancelled by retention");
                     taskRepo.save(t);
                 }
@@ -80,8 +89,7 @@ public class FoodLogRetentionWorker {
             logEntity.setDeletedBy("RETENTION");
             logEntity.setDeletedAtUtc(now);
 
-            // ✅ 依你的要求「結果/歷史也要刪」：先做脫敏（MVP）
-            // 先清空 effective，避免保留營養結果與 warnings
+            // 依你的要求：結果 / 歷史也要刪（MVP 先做脫敏）
             logEntity.setEffective(null);
 
             logRepo.save(logEntity);

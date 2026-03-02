@@ -90,9 +90,12 @@ public class GeminiProviderClient implements ProviderClient {
                 throw new IllegalStateException("EMPTY_IMAGE");
             }
 
-            String mime = (entity.getImageContentType() == null || entity.getImageContentType().isBlank())
-                    ? "image/jpeg"
-                    : entity.getImageContentType();
+            String mime = ImageMimeResolver.resolveOrDefault(entity.getImageContentType(), bytes);
+
+            if (entity.getImageContentType() == null || entity.getImageContentType().isBlank()) {
+                log.warn("image_content_type_missing_resolved foodLogId={} resolvedMime={}",
+                        entity.getId(), mime);
+            }
 
             final boolean isLabel = "LABEL".equalsIgnoreCase(entity.getMethod());
             modelId = resolveModelIdVision(entity);

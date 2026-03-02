@@ -7,8 +7,13 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 決策順序：EXIF > DEVICE_CLOCK > SERVER_RECEIVED
- * 若與 serverReceivedUtc 差距 > 30 天：降級 SERVER_RECEIVED，並 suspect=true
+ * 決策順序：
+ * 1. EXIF
+ * 2. DEVICE_CLOCK
+ * 3. SERVER_RECEIVED
+ * 若候選時間與 serverReceivedUtc 差距 > 30 天，視為不可信。
+ * - 若 EXIF 不可信，但 DEVICE_CLOCK 可信，應改用 DEVICE_CLOCK
+ * - 若兩者都不可信，才退回 SERVER_RECEIVED，並 suspect=true
  */
 public final class CapturedTimeResolver {
 
@@ -19,13 +24,20 @@ public final class CapturedTimeResolver {
     public Result resolve(Instant exifUtc, Instant deviceUtc, Instant serverReceivedUtc) {
         Objects.requireNonNull(serverReceivedUtc, "serverReceivedUtc");
 
-        Candidate c1 = candidate(exifUtc, TimeSource.EXIF, serverReceivedUtc);
-        if (c1 != null) return new Result(c1.instant, c1.source, c1.suspect);
+        Candidate exif = candidate(exifUtc, TimeSource.EXIF, serverReceivedUtc);
+        if (exif != null && exif.accepted()) {
+            return new Result(exif.instant(), exif.source(), false);
+        }
 
-        Candidate c2 = candidate(deviceUtc, TimeSource.DEVICE_CLOCK, serverReceivedUtc);
-        if (c2 != null) return new Result(c2.instant, c2.source, c2.suspect);
+        Candidate device = candidate(deviceUtc, TimeSource.DEVICE_CLOCK, serverReceivedUtc);
+        if (device != null && device.accepted()) {
+            // EXIF 壞掉但 device 正常，仍視為可接受；suspect 可保留 true 代表上游時間來源有異常
+            boolean suspect = exif != null && exif.suspect();
+            return new Result(device.instant(), device.source(), suspect);
+        }
 
-        return new Result(serverReceivedUtc, TimeSource.SERVER_RECEIVED, false);
+        boolean suspect = (exif != null && exif.suspect()) || (device != null && device.suspect());
+        return new Result(serverReceivedUtc, TimeSource.SERVER_RECEIVED, suspect);
     }
 
     private Candidate candidate(Instant utc, TimeSource src, Instant serverReceivedUtc) {
@@ -33,10 +45,16 @@ public final class CapturedTimeResolver {
 
         Duration skew = Duration.between(serverReceivedUtc, utc).abs();
         if (skew.compareTo(MAX_SKEW) > 0) {
-            return new Candidate(serverReceivedUtc, TimeSource.SERVER_RECEIVED, true);
+            return new Candidate(serverReceivedUtc, src, false, true);
         }
-        return new Candidate(utc, src, false);
+
+        return new Candidate(utc, src, true, false);
     }
 
-    private record Candidate(Instant instant, TimeSource source, boolean suspect) {}
+    private record Candidate(
+            Instant instant,
+            TimeSource source,
+            boolean accepted,
+            boolean suspect
+    ) {}
 }

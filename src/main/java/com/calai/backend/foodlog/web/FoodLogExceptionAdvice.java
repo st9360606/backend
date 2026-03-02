@@ -36,17 +36,22 @@ public class FoodLogExceptionAdvice {
             case "FOOD_LOG_NOT_READY",
                  "FOOD_LOG_FAILED",
                  "FOOD_LOG_NOT_SAVABLE",
+                 "FOOD_LOG_NOT_EDITABLE",
+                 "FOOD_LOG_NOT_RETRYABLE",
                  "DATE_RANGE_REQUIRED",
                  "DATE_RANGE_INVALID",
-                 "FOOD_LOG_NOT_EDITABLE",
                  "FIELD_KEY_INVALID",
                  "OVERRIDE_VALUE_INVALID",
                  "PAGE_SIZE_TOO_LARGE" -> HttpStatus.CONFLICT;
 
             case "FILE_REQUIRED",
-                 "FILE_TOO_LARGE",
                  "UNSUPPORTED_IMAGE_FORMAT",
-                 "UNSUPPORTED_CONTENT_TYPE" -> HttpStatus.BAD_REQUEST;
+                 "UNSUPPORTED_CONTENT_TYPE",
+                 "BARCODE_REQUIRED",
+                 "BARCODE_INVALID" -> HttpStatus.BAD_REQUEST;
+
+            case "FILE_TOO_LARGE",
+                 "IMAGE_TOO_LARGE" -> HttpStatus.PAYLOAD_TOO_LARGE;
 
             default -> HttpStatus.BAD_REQUEST;
         };

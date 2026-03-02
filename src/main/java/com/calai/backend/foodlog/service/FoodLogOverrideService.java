@@ -31,7 +31,8 @@ public class FoodLogOverrideService {
         FoodLogFieldKey key = FoodLogFieldKey.parse(req.fieldKey());
         if (key == null) throw new IllegalArgumentException("FIELD_KEY_INVALID");
 
-        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId);
+        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
+                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
         if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
 
         if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
@@ -100,7 +101,8 @@ public class FoodLogOverrideService {
             case NUTRIENTS -> {
                 if (!v.isObject()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
                 // ✅ 允許 partial，但每個有提供的欄位都必須 >= 0
-                for (Map.Entry<String, JsonNode> e : v.properties()) {
+                for (var it = v.fields(); it.hasNext(); ) {
+                    Map.Entry<String, JsonNode> e = it.next();
                     JsonNode nv = e.getValue();
                     if (nv == null || !nv.isNumber() || nv.asDouble() < 0d) {
                         throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");

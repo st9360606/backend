@@ -54,5 +54,8 @@ public interface DeletionJobRepository extends JpaRepository<DeletionJobEntity, 
             """, nativeQuery = true)
     int deleteAllByUserId(@Param("userId") Long userId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select j from DeletionJobEntity j where j.id = :id")
+    Optional<DeletionJobEntity> findByIdForUpdate(@Param("id") String id);
 
 }

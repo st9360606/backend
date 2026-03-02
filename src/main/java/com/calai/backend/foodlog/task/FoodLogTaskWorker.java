@@ -1,24 +1,25 @@
 package com.calai.backend.foodlog.task;
 
-import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 
 @Slf4j
-@RequiredArgsConstructor
 @Component
 public class FoodLogTaskWorker {
 
@@ -29,195 +30,340 @@ public class FoodLogTaskWorker {
     private final ProviderRouter router;
     private final StorageService storage;
     private final EffectivePostProcessor postProcessor;
+    private final TransactionTemplate txTemplate;
+    private final Clock clock;
+
+    public FoodLogTaskWorker(
+            FoodLogTaskRepository taskRepo,
+            FoodLogRepository logRepo,
+            ProviderRouter router,
+            StorageService storage,
+            EffectivePostProcessor postProcessor,
+            PlatformTransactionManager txManager,
+            Clock clock
+    ) {
+        this.taskRepo = taskRepo;
+        this.logRepo = logRepo;
+        this.router = router;
+        this.storage = storage;
+        this.postProcessor = postProcessor;
+        this.txTemplate = new TransactionTemplate(txManager);
+        this.clock = clock;
+    }
 
     @Scheduled(fixedDelay = 2000)
-    @Transactional
     public void runOnce() {
-        // ✅ 僅用於「claim 任務」；不要拿這個時間當作 retry/狀態的時間點
-        Instant claimAt = Instant.now();
-        List<FoodLogTaskEntity> tasks = taskRepo.claimRunnableForUpdate(claimAt, BATCH_SIZE);
+        Instant claimAt = clock.instant();
 
-        for (FoodLogTaskEntity task : tasks) {
-            var logEntity = logRepo.findByIdForUpdate(task.getFoodLogId());
+        List<String> taskIds = txTemplate.execute(status ->
+                taskRepo.claimRunnableForUpdate(claimAt, BATCH_SIZE).stream()
+                        .map(FoodLogTaskEntity::getId)
+                        .toList()
+        );
 
-            // ===== early exit =====
-            if (logEntity.getStatus() == FoodLogStatus.DELETED) {
-                task.markCancelled(Instant.now(), "LOG_DELETED", "food_log already deleted");
-                taskRepo.save(task);
-                continue;
-            }
-
-            if (logEntity.getStatus() == FoodLogStatus.DRAFT || logEntity.getStatus() == FoodLogStatus.SAVED) {
-                task.markCancelled(Instant.now(), "ALREADY_DONE", "food_log already processed");
-                taskRepo.save(task);
-                continue;
-            }
-
-            if (logEntity.getImageObjectKey() == null || logEntity.getImageObjectKey().isBlank()) {
-                Instant failAt = Instant.now();
-                task.markCancelled(failAt, "IMAGE_OBJECT_KEY_MISSING", "missing imageObjectKey");
-                taskRepo.save(task);
-
-                logEntity.setStatus(FoodLogStatus.FAILED);
-                logEntity.setLastErrorCode("IMAGE_OBJECT_KEY_MISSING");
-                logEntity.setLastErrorMessage("missing imageObjectKey");
-                logRepo.save(logEntity);
-                continue;
-            }
-
-            int maxAttempts = maxAttemptsForMethod(logEntity.getMethod());
-
-            if (task.getAttempts() >= maxAttempts) {
-                Instant failAt = Instant.now();
-                task.markCancelled(failAt, "MAX_ATTEMPTS_EXCEEDED", "cancelled after max attempts");
-                taskRepo.save(task);
-
-                logEntity.setStatus(FoodLogStatus.FAILED);
-                logEntity.setLastErrorCode("MAX_ATTEMPTS_EXCEEDED");
-                logEntity.setLastErrorMessage("cancelled after max attempts");
-                logRepo.save(logEntity);
-                continue;
-            }
-
-            try {
-                // ✅ RUNNING：用「當下」最準（attempts 會 +1）
-                Instant startAt = Instant.now();
-                task.markRunning(startAt);
-                taskRepo.save(task);
-
-                ProviderClient client = router.pickStrict(logEntity);
-                var result = client.process(logEntity, storage);
-
-                if (result == null || result.effective() == null) {
-                    throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
-                }
-
-                ObjectNode eff = (result.effective().isObject())
-                        ? ((ObjectNode) result.effective()).deepCopy()
-                        : null;
-
-                if (eff == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
-
-                Instant doneAt = Instant.now();
-
-                ObjectNode finalEff = postProcessor.apply(eff, result.provider(), logEntity.getMethod());
-                logEntity.setEffective(finalEff);
-                logEntity.setProvider(result.provider());
-                logEntity.setStatus(FoodLogStatus.DRAFT);
-                logEntity.setLastErrorCode(null);
-                logEntity.setLastErrorMessage(null);
-
-                task.markSucceeded(doneAt);
-
-                logRepo.save(logEntity);
-                taskRepo.save(task);
-
-            } catch (Exception e) {
-                log.warn("task failed: {}", task.getId(), e);
-
-                ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(e);
-                String mappedCode = mapped.code();
-                String mappedMsg = mapped.message();
-                Integer retryAfter = mapped.retryAfterSec();
-
-                // ✅ failAt 一定用「當下」(避免 latency 吃掉 retryAfter)
-                Instant failAt = Instant.now();
-
-                // ✅ 429：一律不自動重試（避免上線羊群效應）
-                if ("PROVIDER_RATE_LIMITED".equals(mappedCode)) {
-                    String msg = buildRateLimitedMsg(mappedMsg, retryAfter, task.getAttempts());
-
-                    task.markCancelled(failAt, "PROVIDER_RATE_LIMITED", msg);
-                    taskRepo.save(task);
-
-                    logEntity.setStatus(FoodLogStatus.FAILED);
-                    logEntity.setLastErrorCode("PROVIDER_RATE_LIMITED");
-                    logEntity.setLastErrorMessage(msg);
-                    logRepo.save(logEntity);
-                    continue;
-                }
-
-                // ✅ LABEL：最後一次仍 PROVIDER_BAD_RESPONSE → 不要留 FAILED，直接降級成 DRAFT + NO_LABEL_DETECTED
-                if ("LABEL".equalsIgnoreCase(logEntity.getMethod())
-                    && "PROVIDER_BAD_RESPONSE".equals(mappedCode)
-                    && task.getAttempts() >= maxAttempts) {
-
-                    ObjectNode fb = fallbackNoLabelDetectedEffective();
-                    ObjectNode finalEff = postProcessor.apply(fb, "GEMINI", "LABEL");
-
-                    logEntity.setEffective(finalEff);
-                    logEntity.setProvider("GEMINI");
-                    logEntity.setStatus(FoodLogStatus.DRAFT);
-                    logEntity.setLastErrorCode(null);
-                    logEntity.setLastErrorMessage(null);
-
-                    Instant doneAt = Instant.now();
-                    task.markSucceeded(doneAt);
-
-                    logRepo.save(logEntity);
-                    taskRepo.save(task);
-                    continue;
-                }
-
-
-                // ✅ BAD_RESPONSE：最多重試 1 次（attempts>=2 直接停）
-                if ("PROVIDER_BAD_RESPONSE".equals(mappedCode) && task.getAttempts() >= 2) {
-                    String msg = "bad json from provider (give up) attempts=" + task.getAttempts();
-
-                    task.markCancelled(failAt, "PROVIDER_BAD_RESPONSE", msg);
-                    taskRepo.save(task);
-
-                    logEntity.setStatus(FoodLogStatus.FAILED);
-                    logEntity.setLastErrorCode("PROVIDER_BAD_RESPONSE");
-                    logEntity.setLastErrorMessage(msg);
-                    logRepo.save(logEntity);
-                    continue;
-                }
-
-                // ✅ 不可重試：直接取消
-                if (isNonRetryable(mappedCode)) {
-                    task.markCancelled(failAt, mappedCode, mappedMsg);
-                    taskRepo.save(task);
-
-                    logEntity.setStatus(FoodLogStatus.FAILED);
-                    logEntity.setLastErrorCode(mappedCode);
-                    logEntity.setLastErrorMessage(mappedMsg);
-                    logRepo.save(logEntity);
-                    continue;
-                }
-
-                // ✅ 達到上限：give up
-                if (task.getAttempts() >= maxAttempts) {
-                    String giveUpMsg = ("[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg)).trim();
-
-                    task.markCancelled(failAt, "PROVIDER_GIVE_UP", giveUpMsg);
-                    taskRepo.save(task);
-
-                    logEntity.setStatus(FoodLogStatus.FAILED);
-                    logEntity.setLastErrorCode("PROVIDER_GIVE_UP");
-                    logEntity.setLastErrorMessage(giveUpMsg);
-                    logRepo.save(logEntity);
-                    continue;
-                }
-
-                // ✅ 可重試：用 failAt 計算 nextRetryAt
-                int delaySec = TaskRetryPolicy.nextDelaySec(task.getAttempts());
-                if (retryAfter != null) delaySec = Math.max(delaySec, retryAfter);
-
-                task.markFailed(failAt, mappedCode, mappedMsg, delaySec);
-                taskRepo.save(task);
-
-                logEntity.setStatus(FoodLogStatus.FAILED);
-                logEntity.setLastErrorCode(mappedCode);
-                logEntity.setLastErrorMessage(mappedMsg);
-                logRepo.save(logEntity);
-            }
+        if (taskIds == null || taskIds.isEmpty()) {
+            return;
         }
+
+        for (String taskId : taskIds) {
+            processOne(taskId);
+        }
+    }
+
+    private void processOne(String taskId) {
+        TaskExecution execution = txTemplate.execute(status -> prepareExecution(taskId));
+        if (execution == null) {
+            return;
+        }
+
+        try {
+            // 外部 I/O：交易外執行
+            ProviderClient client = router.pickStrict(execution.logEntity());
+            var result = client.process(execution.logEntity(), storage);
+
+            if (result == null || result.effective() == null) {
+                throw new IllegalStateException("PROVIDER_RETURNED_EMPTY");
+            }
+
+            ObjectNode eff = result.effective().isObject()
+                    ? ((ObjectNode) result.effective()).deepCopy()
+                    : null;
+
+            if (eff == null) {
+                throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
+            }
+
+            ObjectNode finalEff = postProcessor.apply(eff, result.provider(), execution.method());
+
+            txTemplate.executeWithoutResult(status ->
+                    applySuccess(execution.taskId(), execution.foodLogId(), result.provider(), finalEff)
+            );
+
+        } catch (Exception e) {
+            log.warn("task failed: {}", execution.taskId(), e);
+
+            ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(e);
+
+            txTemplate.executeWithoutResult(status ->
+                    applyFailure(
+                            execution.taskId(),
+                            execution.foodLogId(),
+                            execution.method(),
+                            execution.attemptsAfterStart(),
+                            mapped
+                    )
+            );
+        }
+    }
+
+    /**
+     * 短交易：
+     * 1. 取 task/log
+     * 2. 做 early-exit 檢查
+     * 3. markRunning
+     * 4. 回傳 detached logEntity 給交易外 process 使用
+     */
+    private TaskExecution prepareExecution(String taskId) {
+        FoodLogTaskEntity task = taskRepo.findByIdForUpdate(taskId).orElse(null);
+        if (task == null) {
+            return null;
+        }
+
+        Instant now = clock.instant();
+
+        // claim 與真正執行之間，重新確認仍是 runnable
+        if (task.getTaskStatus() != FoodLogTaskEntity.TaskStatus.QUEUED
+                && task.getTaskStatus() != FoodLogTaskEntity.TaskStatus.FAILED) {
+            return null;
+        }
+
+        if (task.getNextRetryAtUtc() != null && task.getNextRetryAtUtc().isAfter(now)) {
+            return null;
+        }
+
+        FoodLogEntity logEntity = logRepo.findByIdForUpdate(task.getFoodLogId()).orElse(null);
+        if (logEntity == null) {
+            task.markCancelled(now, "FOOD_LOG_NOT_FOUND", "food_log missing");
+            taskRepo.save(task);
+            return null;
+        }
+
+        // ===== early exit =====
+        if (logEntity.getStatus() == FoodLogStatus.DELETED) {
+            task.markCancelled(now, "LOG_DELETED", "food_log already deleted");
+            taskRepo.save(task);
+            return null;
+        }
+
+        if (logEntity.getStatus() == FoodLogStatus.DRAFT || logEntity.getStatus() == FoodLogStatus.SAVED) {
+            task.markCancelled(now, "ALREADY_DONE", "food_log already processed");
+            taskRepo.save(task);
+            return null;
+        }
+
+        if (logEntity.getImageObjectKey() == null || logEntity.getImageObjectKey().isBlank()) {
+            task.markCancelled(now, "IMAGE_OBJECT_KEY_MISSING", "missing imageObjectKey");
+            taskRepo.save(task);
+
+            logEntity.setStatus(FoodLogStatus.FAILED);
+            logEntity.setLastErrorCode("IMAGE_OBJECT_KEY_MISSING");
+            logEntity.setLastErrorMessage("missing imageObjectKey");
+            logRepo.save(logEntity);
+            return null;
+        }
+
+        int maxAttempts = maxAttemptsForMethod(logEntity.getMethod());
+        if (task.getAttempts() >= maxAttempts) {
+            task.markCancelled(now, "MAX_ATTEMPTS_EXCEEDED", "cancelled after max attempts");
+            taskRepo.save(task);
+
+            logEntity.setStatus(FoodLogStatus.FAILED);
+            logEntity.setLastErrorCode("MAX_ATTEMPTS_EXCEEDED");
+            logEntity.setLastErrorMessage("cancelled after max attempts");
+            logRepo.save(logEntity);
+            return null;
+        }
+
+        task.markRunning(now);
+        taskRepo.save(task);
+
+        return new TaskExecution(
+                task.getId(),
+                logEntity.getId(),
+                logEntity.getMethod(),
+                task.getAttempts(), // markRunning 後的 attempts
+                logEntity
+        );
+    }
+
+    /**
+     * 短交易：成功結果回寫
+     */
+    private void applySuccess(String taskId, String foodLogId, String provider, ObjectNode finalEff) {
+        FoodLogTaskEntity task = taskRepo.findByIdForUpdate(taskId).orElse(null);
+        if (task == null) {
+            return;
+        }
+
+        FoodLogEntity logEntity = logRepo.findByIdForUpdate(foodLogId).orElse(null);
+        if (logEntity == null) {
+            task.markCancelled(clock.instant(), "FOOD_LOG_NOT_FOUND", "food_log missing");
+            taskRepo.save(task);
+            return;
+        }
+
+        if (logEntity.getStatus() == FoodLogStatus.DELETED) {
+            task.markCancelled(clock.instant(), "LOG_DELETED", "food_log already deleted");
+            taskRepo.save(task);
+            return;
+        }
+
+        if (logEntity.getStatus() == FoodLogStatus.DRAFT || logEntity.getStatus() == FoodLogStatus.SAVED) {
+            task.markCancelled(clock.instant(), "ALREADY_DONE", "food_log already processed");
+            taskRepo.save(task);
+            return;
+        }
+
+        Instant doneAt = clock.instant();
+
+        logEntity.setEffective(finalEff);
+        logEntity.setProvider(provider);
+        logEntity.setStatus(FoodLogStatus.DRAFT);
+        logEntity.setLastErrorCode(null);
+        logEntity.setLastErrorMessage(null);
+
+        task.markSucceeded(doneAt);
+
+        logRepo.save(logEntity);
+        taskRepo.save(task);
+    }
+
+    /**
+     * 短交易：失敗結果回寫
+     */
+    private void applyFailure(
+            String taskId,
+            String foodLogId,
+            String method,
+            int attemptsAfterStart,
+            ProviderErrorMapper.Mapped mapped
+    ) {
+        FoodLogTaskEntity task = taskRepo.findByIdForUpdate(taskId).orElse(null);
+        if (task == null) {
+            return;
+        }
+
+        FoodLogEntity logEntity = logRepo.findByIdForUpdate(foodLogId).orElse(null);
+        if (logEntity == null) {
+            task.markCancelled(clock.instant(), "FOOD_LOG_NOT_FOUND", "food_log missing");
+            taskRepo.save(task);
+            return;
+        }
+
+        if (logEntity.getStatus() == FoodLogStatus.DELETED) {
+            task.markCancelled(clock.instant(), "LOG_DELETED", "food_log already deleted");
+            taskRepo.save(task);
+            return;
+        }
+
+        String mappedCode = mapped.code();
+        String mappedMsg = mapped.message();
+        Integer retryAfter = mapped.retryAfterSec();
+        Instant failAt = clock.instant();
+
+        // 429：一律不自動重試
+        if ("PROVIDER_RATE_LIMITED".equals(mappedCode)) {
+            String msg = buildRateLimitedMsg(mappedMsg, retryAfter, attemptsAfterStart);
+
+            task.markCancelled(failAt, "PROVIDER_RATE_LIMITED", msg);
+            taskRepo.save(task);
+
+            logEntity.setStatus(FoodLogStatus.FAILED);
+            logEntity.setLastErrorCode("PROVIDER_RATE_LIMITED");
+            logEntity.setLastErrorMessage(msg);
+            logRepo.save(logEntity);
+            return;
+        }
+
+        // LABEL：最後一次仍 PROVIDER_BAD_RESPONSE → 降級成 DRAFT + NO_LABEL_DETECTED
+        if ("LABEL".equalsIgnoreCase(method)
+                && "PROVIDER_BAD_RESPONSE".equals(mappedCode)
+                && attemptsAfterStart >= maxAttemptsForMethod(method)) {
+
+            ObjectNode fb = fallbackNoLabelDetectedEffective();
+            ObjectNode finalEff = postProcessor.apply(fb, "GEMINI", "LABEL");
+
+            logEntity.setEffective(finalEff);
+            logEntity.setProvider("GEMINI");
+            logEntity.setStatus(FoodLogStatus.DRAFT);
+            logEntity.setLastErrorCode(null);
+            logEntity.setLastErrorMessage(null);
+
+            task.markSucceeded(clock.instant());
+
+            logRepo.save(logEntity);
+            taskRepo.save(task);
+            return;
+        }
+
+        // BAD_RESPONSE：最多重試 1 次（attempts>=2 直接停）
+        if ("PROVIDER_BAD_RESPONSE".equals(mappedCode) && attemptsAfterStart >= 2) {
+            String msg = "bad json from provider (give up) attempts=" + attemptsAfterStart;
+
+            task.markCancelled(failAt, "PROVIDER_BAD_RESPONSE", msg);
+            taskRepo.save(task);
+
+            logEntity.setStatus(FoodLogStatus.FAILED);
+            logEntity.setLastErrorCode("PROVIDER_BAD_RESPONSE");
+            logEntity.setLastErrorMessage(msg);
+            logRepo.save(logEntity);
+            return;
+        }
+
+        // 不可重試：直接取消
+        if (isNonRetryable(mappedCode)) {
+            task.markCancelled(failAt, mappedCode, mappedMsg);
+            taskRepo.save(task);
+
+            logEntity.setStatus(FoodLogStatus.FAILED);
+            logEntity.setLastErrorCode(mappedCode);
+            logEntity.setLastErrorMessage(mappedMsg);
+            logRepo.save(logEntity);
+            return;
+        }
+
+        // 達到上限：give up
+        if (attemptsAfterStart >= maxAttemptsForMethod(method)) {
+            String giveUpMsg = ("[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg)).trim();
+
+            task.markCancelled(failAt, "PROVIDER_GIVE_UP", giveUpMsg);
+            taskRepo.save(task);
+
+            logEntity.setStatus(FoodLogStatus.FAILED);
+            logEntity.setLastErrorCode("PROVIDER_GIVE_UP");
+            logEntity.setLastErrorMessage(giveUpMsg);
+            logRepo.save(logEntity);
+            return;
+        }
+
+        // 可重試
+        int delaySec = TaskRetryPolicy.nextDelaySec(attemptsAfterStart);
+        if (retryAfter != null) {
+            delaySec = Math.max(delaySec, retryAfter);
+        }
+
+        task.markFailed(failAt, mappedCode, mappedMsg, delaySec);
+        taskRepo.save(task);
+
+        logEntity.setStatus(FoodLogStatus.FAILED);
+        logEntity.setLastErrorCode(mappedCode);
+        logEntity.setLastErrorMessage(mappedMsg);
+        logRepo.save(logEntity);
     }
 
     private static int maxAttemptsForMethod(String method) {
         if (method == null) return TaskRetryPolicy.MAX_ATTEMPTS;
-        if ("LABEL".equalsIgnoreCase(method)) return 2; // ✅ 最多重試一次
+        if ("LABEL".equalsIgnoreCase(method)) return 2; // 最多重試一次
         return TaskRetryPolicy.MAX_ATTEMPTS;
     }
 
@@ -244,7 +390,7 @@ public class FoodLogTaskWorker {
     }
 
     /**
-     * ✅ 讓 FoodLogService.parseRetryAfterFromMessageOrNull 抽得到 suggestedRetryAfterSec=xx
+     * 讓 FoodLogService.parseRetryAfterFromMessageOrNull 抽得到 suggestedRetryAfterSec=xx
      */
     private static String buildRateLimitedMsg(String mappedMsg, Integer retryAfterSec, int attempts) {
         String base = (mappedMsg == null || mappedMsg.isBlank()) ? "rate limited" : mappedMsg.trim();
@@ -254,8 +400,10 @@ public class FoodLogTaskWorker {
 
     private static boolean isNonRetryable(String code) {
         if (code == null || code.isBlank()) return false;
+
         // SAFETY / RECITATION / HARM_CATEGORY 一律不重試
         if (code.startsWith("PROVIDER_REFUSED_")) return true;
+
         return switch (code) {
             case "PROVIDER_NOT_CONFIGURED",
                  "PROVIDER_NOT_AVAILABLE",
@@ -266,4 +414,12 @@ public class FoodLogTaskWorker {
             default -> false;
         };
     }
+
+    private record TaskExecution(
+            String taskId,
+            String foodLogId,
+            String method,
+            int attemptsAfterStart,
+            FoodLogEntity logEntity
+    ) {}
 }
