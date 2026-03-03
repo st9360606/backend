@@ -67,7 +67,7 @@ public class FoodLogService {
         return code.trim().toUpperCase(Locale.ROOT);
     }
 
-    private static final long MAX_IMAGE_BYTES = 8L * 1024 * 1024; // 8MB（先保守）
+    private static final long MAX_IMAGE_BYTES = 15L * 1024 * 1024;
     private static final List<String> DEDUPE_METHODS_PHOTO_ALBUM = List.of("PHOTO", "ALBUM");
     private static final List<String> DEDUPE_METHODS_LABEL = List.of("LABEL");
 
@@ -115,10 +115,11 @@ public class FoodLogService {
         ZoneId captureTz = parseTzOrUtc(clientTz);
         ZoneId quotaTz = resolveQuotaTz();
         Instant serverNow = clock.instant();
-        validateUploadBasics(file);
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
+
+        validateUploadBasicsOrRelease(userId, requestId, file);
 
         EntitlementService.Tier tier = resolveTierAndCheckRateOrRelease(
                 userId,
@@ -126,13 +127,11 @@ public class FoodLogService {
                 serverNow
         );
 
-        boolean acquired = false;
+        UserInFlightLimiter.Lease lease = null;
         String tempKey = null;
-        ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
-            acquireInFlightOrRelease(userId, requestId);
-            acquired = true;
+            lease = acquireInFlightOrRelease(userId, requestId);
 
             ImageSniffer.Detection det;
             StorageService.SaveResult saved;
@@ -208,7 +207,7 @@ public class FoodLogService {
                 idem.attach(userId, requestId, e.getId(), serverNow);
 
                 // 3) temp -> blob + refCount
-                retained = blobService.retainFromTemp(
+                ImageBlobService.RetainResult retained = blobService.retainFromTemp(
                         userId,
                         tempKey,
                         saved.sha256(),
@@ -237,13 +236,13 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey, retained);
+                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
                 idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_ALBUM_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 
         } finally {
-            if (acquired) inFlight.release(userId);
+            if (lease != null) inFlight.release(lease);
         }
     }
 
@@ -256,10 +255,11 @@ public class FoodLogService {
         ZoneId captureTz = parseTzOrUtc(clientTz);
         ZoneId quotaTz = resolveQuotaTz();
         Instant serverNow = clock.instant();
-        validateUploadBasics(file);
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
+
+        validateUploadBasicsOrRelease(userId, requestId, file);
 
         EntitlementService.Tier tier = resolveTierAndCheckRateOrRelease(
                 userId,
@@ -267,13 +267,11 @@ public class FoodLogService {
                 serverNow
         );
 
-        boolean acquired = false;
+        UserInFlightLimiter.Lease lease = null;
         String tempKey = null; // ✅ 讓所有 catch 都能刪到正確 key（含副檔名）
-        ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
-            acquireInFlightOrRelease(userId, requestId);
-            acquired = true;
+            lease = acquireInFlightOrRelease(userId, requestId);
 
             ImageSniffer.Detection det;
             StorageService.SaveResult saved;
@@ -364,7 +362,7 @@ public class FoodLogService {
                 idem.attach(userId, requestId, e.getId(), serverNow);
 
                 // 7) temp -> blob + refCount
-                retained = blobService.retainFromTemp(
+                ImageBlobService.RetainResult retained = blobService.retainFromTemp(
                         userId,
                         tempKey,
                         saved.sha256(),
@@ -395,14 +393,14 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                // ✅ 若 retain 後失敗：新建 blob 要刪 blobKey；重用 blob 不可誤刪
-                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey, retained);
+                // ✅ retain 後若後續失敗，只清 tempKey；blob orphan 留給背景 cleaner
+                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
                 idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_PHOTO_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 
         } finally {
-            if (acquired) inFlight.release(userId);
+            if (lease != null) inFlight.release(lease);
         }
     }
 
@@ -415,10 +413,11 @@ public class FoodLogService {
         ZoneId captureTz = parseTzOrUtc(clientTz);
         ZoneId quotaTz = resolveQuotaTz();
         Instant serverNow = clock.instant();
-        validateUploadBasics(file);
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
+
+        validateUploadBasicsOrRelease(userId, requestId, file);
 
         // ✅ 仍要限流，避免被打爆（雖然是 AI 才更需要，但 label 也會走 AI）
         EntitlementService.Tier tier = resolveTierAndCheckRateOrRelease(
@@ -427,13 +426,11 @@ public class FoodLogService {
                 serverNow
         );
 
-        boolean acquired = false;
+        UserInFlightLimiter.Lease lease = null;
         String tempKey = null;
-        ImageBlobService.RetainResult retained = null; // ✅ retain 後補償用
 
         try {
-            acquireInFlightOrRelease(userId, requestId);
-            acquired = true;
+            lease = acquireInFlightOrRelease(userId, requestId);
 
             ImageSniffer.Detection det;
             StorageService.SaveResult saved;
@@ -518,7 +515,7 @@ public class FoodLogService {
                 idem.attach(userId, requestId, e.getId(), serverNow);
 
                 // 4) temp -> blob + refCount
-                retained = blobService.retainFromTemp(
+                ImageBlobService.RetainResult retained = blobService.retainFromTemp(
                         userId,
                         tempKey,
                         saved.sha256(),
@@ -549,13 +546,13 @@ public class FoodLogService {
                 return toEnvelope(e, t, requestId);
 
             } catch (Exception ex) {
-                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey, retained);
+                cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
                 idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_LABEL_FAILED", safeMsg(ex), true);
                 throw ex;
             }
 
         } finally {
-            if (acquired) inFlight.release(userId);
+            if (lease != null) inFlight.release(lease);
         }
     }
 
@@ -579,7 +576,8 @@ public class FoodLogService {
         String bcRaw = bn.rawInput();
         String bcNorm = bn.normalized();
 
-        // ✅ 1) Idempotency 最早（這裡會自己開短 tx）
+        // ✅ 1) 先做 cheap validation / normalize，再做 idempotency reserve
+        // invalid barcode 不佔 requestId；真正要進 lookup / 寫 DB 的請求才占位
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, now);
         if (existingLogId != null) return getOne(userId, existingLogId, requestId);
 
@@ -1112,7 +1110,6 @@ public class FoodLogService {
     public FoodLogEnvelope retry(
             Long userId,
             String foodLogId,
-            String clientTz,
             String deviceId,
             String requestId
     ) {
@@ -1173,6 +1170,21 @@ public class FoodLogService {
     // helpers
     // =========================
 
+    private void validateUploadBasicsOrRelease(Long userId, String requestId, MultipartFile file) {
+        try {
+            validateUploadBasics(file);
+        } catch (RuntimeException ex) {
+            idem.failAndReleaseIfNeeded(
+                    userId,
+                    requestId,
+                    ex.getMessage(),
+                    safeMsg(ex),
+                    true
+            );
+            throw ex;
+        }
+    }
+
     private EntitlementService.Tier resolveTierAndCheckRateOrRelease(
             Long userId,
             String requestId,
@@ -1230,28 +1242,27 @@ public class FoodLogService {
             StorageService storage,
             Long userId,
             String requestId,
-            String tempKey,
-            ImageBlobService.RetainResult retained
+            String tempKey
     ) {
-        // ✅ retain 後若這次是新建 blob，失敗時要刪 blobKey，避免孤兒檔
-        if (retained != null && retained.newlyCreated()) {
-            String blobKey = retained.objectKey();
-            if (blobKey != null && !blobKey.isBlank()) {
-                StorageCleanup.safeDeleteQuietly(storage, blobKey);
-                return;
-            }
-        }
-
-        // ✅ 尚未 retain 或是重用既有 blob：清 temp 即可（刪不到也沒關係）
+        // ⚠️ 絕對不要在這裡直接刪 blobKey
+        //
+        // 原因：
+        // 本次請求即使剛建立 blob，也不代表 cleanup 執行時沒有其他請求已經開始共用。
+        // 若直接刪 blobKey，併發下可能把其他成功請求正在引用的共享檔刪掉。
+        //
+        // 安全策略：
+        // - 只清 tempKey（best effort）
+        // - sha256/blob orphan 留給背景 orphan cleaner 處理
         StorageCleanup.safeDeleteQuietly(storage, tempKey);
+
         if (tempKey == null) {
             StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
         }
     }
 
-    private void acquireInFlightOrRelease(Long userId, String requestId) {
+    private UserInFlightLimiter.Lease acquireInFlightOrRelease(Long userId, String requestId) {
         try {
-            inFlight.acquireOrThrow(userId);
+            return inFlight.acquireOrThrow(userId);
         } catch (TooManyInFlightException ex) {
             idem.failAndReleaseIfNeeded(
                     userId,

@@ -35,6 +35,11 @@ public class EntitlementService {
         for (var e : list) {
             Tier t = parseTier(e.getEntitlementType());
 
+            if (t == Tier.NONE && e.getEntitlementType() != null && !e.getEntitlementType().isBlank()) {
+                log.warn("unknown_entitlement_type userId={} entitlementId={} rawType={}",
+                        userId, e.getId(), e.getEntitlementType());
+            }
+
             if (log.isDebugEnabled()) {
                 log.debug(
                         "entitlement id={} type={} status={} validFrom={} validTo={} parsedTier={}",

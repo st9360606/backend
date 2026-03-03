@@ -113,10 +113,11 @@ app:
     rate:
       free-per-minute: 6
       paid-per-minute: 20
-      idle-evict-seconds: 3600
+      redis-prefix: "bitecal-prod"
     inflight:
       max: 2
-      idle-evict-seconds: 3600
+      redis-prefix: "bitecal-prod"
+      lease-ttl: "PT5M"
   actuator:
     user: "${APP_ACTUATOR_USER:actuator}"
     pass: "${APP_ACTUATOR_PASS:change-me}"

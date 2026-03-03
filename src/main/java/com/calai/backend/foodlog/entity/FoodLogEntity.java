@@ -13,7 +13,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 
@@ -148,12 +147,14 @@ public class FoodLogEntity {
                     if (!newValue.isObject()) {
                         throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
                     }
-                    // ✅ 相容寫法：用 ObjectNode#fields()（跨 Jackson 版本較穩）
+
                     ObjectNode patch = (ObjectNode) newValue;
-                    for (Iterator<Map.Entry<String, JsonNode>> it = patch.fields(); it.hasNext(); ) {
-                        Map.Entry<String, JsonNode> en = it.next();
+
+                    // ✅ 用 properties() 取代已 deprecated 的 fields()
+                    for (Map.Entry<String, JsonNode> en : patch.properties()) {
                         merged.set(en.getKey(), en.getValue());
                     }
+
                     root.set("nutrients", merged);
                 }
             }

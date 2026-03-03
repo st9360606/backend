@@ -1,11 +1,11 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.model.FoodLogFieldKey;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
-import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogOverrideEntity;
+import com.calai.backend.foodlog.model.FoodLogFieldKey;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogOverrideRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -37,7 +37,6 @@ public class FoodLogOverrideService {
 
         if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
         if (log.getStatus() != FoodLogStatus.DRAFT) {
-            // ✅ MVP：只允許 DRAFT 編輯
             throw new IllegalArgumentException("FOOD_LOG_NOT_EDITABLE");
         }
 
@@ -56,7 +55,6 @@ public class FoodLogOverrideService {
         );
         overrideRepo.save(ov);
 
-        // ✅ patch effective
         log.applyEffectivePatch(key.name(), req.newValue());
         logRepo.save(log);
 
@@ -100,9 +98,9 @@ public class FoodLogOverrideService {
             }
             case NUTRIENTS -> {
                 if (!v.isObject()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
-                // ✅ 允許 partial，但每個有提供的欄位都必須 >= 0
-                for (var it = v.fields(); it.hasNext(); ) {
-                    Map.Entry<String, JsonNode> e = it.next();
+
+                // Jackson 2.19+ 建議使用 properties()，避免 fields() deprecated
+                for (Map.Entry<String, JsonNode> e : v.properties()) {
                     JsonNode nv = e.getValue();
                     if (nv == null || !nv.isNumber() || nv.asDouble() < 0d) {
                         throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");

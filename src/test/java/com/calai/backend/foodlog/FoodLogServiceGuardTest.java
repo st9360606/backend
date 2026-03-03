@@ -18,6 +18,7 @@ import com.calai.backend.foodlog.task.ProviderClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
@@ -29,6 +30,7 @@ import java.time.Instant;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceGuardTest {
@@ -80,6 +82,8 @@ class FoodLogServiceGuardTest {
     @Test
     void createPhoto_releaseInFlight_whenUnsupportedFormat() throws Exception {
         Instant fixedNow = Instant.parse("2026-03-03T00:00:00Z");
+        UserInFlightLimiter.Lease lease =
+                new UserInFlightLimiter.Lease(1L, "lease-1");
 
         when(clock.instant()).thenReturn(fixedNow);
 
@@ -95,7 +99,8 @@ class FoodLogServiceGuardTest {
                 any(Instant.class)
         );
 
-        doNothing().when(inFlight).acquireOrThrow(anyLong());
+        // ✅ acquireOrThrow 現在是有回傳值的方法
+        when(inFlight.acquireOrThrow(anyLong())).thenReturn(lease);
 
         doNothing().when(idem).failAndReleaseIfNeeded(
                 anyLong(),
@@ -123,7 +128,15 @@ class FoodLogServiceGuardTest {
                 .checkOrThrow(eq(1L), eq(EntitlementService.Tier.TRIAL), eq(fixedNow));
 
         verify(inFlight, times(1)).acquireOrThrow(1L);
-        verify(inFlight, times(1)).release(1L);
+
+        // ✅ 驗證 release 的是 Lease，不是 Long
+        ArgumentCaptor<UserInFlightLimiter.Lease> captor =
+                ArgumentCaptor.forClass(UserInFlightLimiter.Lease.class);
+
+        verify(inFlight, times(1)).release(captor.capture());
+
+        assertThat(captor.getValue().userId()).isEqualTo(1L);
+        assertThat(captor.getValue().token()).isEqualTo("lease-1");
 
         verify(idem, atLeastOnce()).failAndReleaseIfNeeded(
                 eq(1L),
