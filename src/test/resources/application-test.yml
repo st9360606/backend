@@ -39,7 +39,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 0
+      port: 6379
 
 server:
   port: 0
