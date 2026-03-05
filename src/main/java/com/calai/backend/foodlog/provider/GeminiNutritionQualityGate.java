@@ -79,29 +79,30 @@ public final class GeminiNutritionQualityGate {
         boolean relaxedByTextAndNutrients =
                 isRelaxedLowCalProfile(textProfile, kcal, p, f, c, unit, qty);
 
-        // 6) 低熱量門檻
+        // ✅ 修正點：
+        // 不再用 "< 80 kcal / serving" 一刀切
+        // 只擋明顯極端異常值
         if (!looksLikeZero && kcal != null) {
             boolean relaxedLowCal = relaxedByCategoryAndNutrients || relaxedByTextAndNutrients;
 
-            if (!relaxedLowCal) {
-                if ("SERVING".equals(unit) && qty >= 1.0 && kcal < 80.0) {
+            if (!relaxedLowCal && "SERVING".equals(unit) && qty >= 1.0) {
+                double est = estimateCalories(p, f, c);
+
+                // 只有在「標示熱量極低，但 macros 明顯撐不起來 / 對不上」時才 reject
+                if (kcal < 8.0 && est > 25.0) {
                     return false;
                 }
             }
         }
 
-        // 7) 能量一致性（至少 2 個 macro 才檢查）
+        // 6) 能量一致性（至少 2 個 macro 才檢查）
         int macroCount = 0;
         if (p != null) macroCount++;
         if (f != null) macroCount++;
         if (c != null) macroCount++;
 
         if (kcal != null && macroCount >= 2) {
-            double est = 0.0;
-            if (p != null) est += 4.0 * p;
-            if (c != null) est += 4.0 * c;
-            if (f != null) est += 9.0 * f;
-
+            double est = estimateCalories(p, f, c);
             double diff = Math.abs(est - kcal);
             double tol = Math.max(120.0, kcal * 0.40);
             if (diff > tol) {
@@ -110,6 +111,14 @@ public final class GeminiNutritionQualityGate {
         }
 
         return true;
+    }
+
+    private static double estimateCalories(Double protein, Double fat, Double carbs) {
+        double est = 0.0;
+        if (protein != null) est += 4.0 * protein;
+        if (carbs != null) est += 4.0 * carbs;
+        if (fat != null) est += 9.0 * fat;
+        return est;
     }
 
     private static RelaxedLowCalProfile resolveCategoryProfile(JsonNode effectiveOrRaw) {

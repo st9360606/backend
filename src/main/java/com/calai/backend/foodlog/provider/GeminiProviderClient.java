@@ -19,7 +19,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.client.RestClient;
-
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -159,28 +160,47 @@ public class GeminiProviderClient implements ProviderClient {
                 return okAndReturn(modelId, entity, t0, tok, true, partial, effective);
             }
 
+            // =========================
+            // ✅ 非 LABEL：修正版流程
+            // =========================
             if (!isLabel) {
-                if (hasAnyNutrientValue(parsed1)) {
+                boolean noFoodDetected = isNoFoodDetected(parsed1, r1.text);
+                boolean mainHasNutrition = hasAnyNutrientValue(parsed1);
+
+                log.info("photo_main_result foodLogId={} mainHasNutrition={} noFoodDetected={} preview={}",
+                        entity.getId(),
+                        mainHasNutrition,
+                        noFoodDetected,
+                        safeOneLine200(r1.text));
+
+                if (mainHasNutrition) {
                     ObjectNode effective = normalizeToEffective(parsed1);
 
                     if (GeminiNutritionQualityGate.isAcceptablePhoto(effective)) {
                         return okAndReturn(modelId, entity, t0, tok, false, parsed1, effective);
                     }
 
-                    log.warn("nutrition_implausible_will_repair foodLogId={} preview={}",
+                    log.warn("nutrition_rejected_by_quality_gate foodLogId={} preview={}",
                             entity.getId(), safeOneLine200(r1.text));
                 }
 
-                if (!hasAnyNutrientValue(parsed1) && !isNoFoodDetected(parsed1, r1.text)) {
+                // ✅ 只要不是明確 no-food，就仍然嘗試 packaged-food rescue
+                if (shouldTryPackagedFoodRescueForPhoto(parsed1, r1.text)) {
+                    log.info("packaged_food_rescue_try foodLogId={} mainHasNutrition={}",
+                            entity.getId(), mainHasNutrition);
+
                     Optional<ProviderResult> packageResolved =
                             tryResolvePackagedFoodByNameSearch(entity, bytes, mime, modelId, t0);
 
                     if (packageResolved.isPresent()) {
                         return packageResolved.get();
                     }
+
+                    log.info("packaged_food_rescue_miss foodLogId={} mainHasNutrition={} preview={}",
+                            entity.getId(), mainHasNutrition, safeOneLine200(r1.text));
                 }
 
-                if (isNoFoodDetected(parsed1, r1.text)) {
+                if (noFoodDetected) {
                     ObjectNode fb = fallbackNoFoodDetected();
                     ObjectNode effective = normalizeToEffective(fb);
                     return okAndReturn(modelId, entity, t0, tok, false, fb, effective);
@@ -227,7 +247,7 @@ public class GeminiProviderClient implements ProviderClient {
 
             final boolean allowTextRepair =
                     (!isLabel) ||
-                    (!baseRepairInput.isBlank() && (parsed1 == null || isLabelIncomplete(parsed1) || !hasAnyNutrientValue(parsed1)));
+                            (!baseRepairInput.isBlank() && (parsed1 == null || isLabelIncomplete(parsed1) || !hasAnyNutrientValue(parsed1)));
 
             final List<String> repairModelIds = new ArrayList<>();
 
@@ -314,6 +334,60 @@ public class GeminiProviderClient implements ProviderClient {
                 ObjectNode effective = normalizeToEffective(fb);
                 return okAndReturn(modelId, entity, t0, tok, true, fb, effective);
             }
+
+            if (shouldTryPackagedPartialSalvage(parsed1, lastText)) {
+                log.info("photo_partial_packaged_salvage_try foodLogId={}", entity.getId());
+
+                String salvageModelId = resolveModelIdText(entity);
+                String salvagePrompt = promptFactory.buildPackagedFoodPartialSalvagePrompt(lastText);
+
+                CallResult rnSalvage = callAndExtractTextOnly(salvagePrompt, salvageModelId, entity.getId());
+                tok = tok.plus(rnSalvage.tok);
+
+                JsonNode parsedSalvage = tryParseJson(rnSalvage.text);
+                parsedSalvage = unwrapRootObjectOrNull(parsedSalvage);
+
+                if (parsedSalvage != null && hasAnyNutrientValue(parsedSalvage)) {
+                    ObjectNode effective = normalizeToEffective(parsedSalvage);
+                    return okAndReturn(salvageModelId, entity, t0, tok, false, parsedSalvage, effective);
+                }
+
+                log.warn("photo_partial_packaged_salvage_failed foodLogId={} preview={}",
+                        entity.getId(), safeOneLine200(rnSalvage.text));
+            }
+
+            // =========================
+            // ✅ 非 LABEL：新增 foodName-only fallback
+            // =========================
+            String foodNameHint = extractFoodNameHint(parsed1, baseRepairInput, lastText);
+
+            if (foodNameHint != null && !foodNameHint.isBlank()) {
+                log.info("photo_name_only_estimate_try foodLogId={} foodNameHint={}",
+                        entity.getId(), foodNameHint);
+
+                String modelIdText = resolveModelIdText(entity);
+                String prompt = promptFactory.buildFoodNameOnlyEstimatePrompt(foodNameHint, lastText);
+
+                CallResult rnName = callAndExtractTextOnly(prompt, modelIdText, entity.getId());
+                tok = tok.plus(rnName.tok);
+
+                JsonNode parsedByName = tryParseJson(rnName.text);
+                parsedByName = unwrapRootObjectOrNull(parsedByName);
+
+                ObjectNode fixedByName = ensureFoodNameIfMissing(parsedByName, foodNameHint, om);
+
+                if (fixedByName != null && hasAnyNutrientValue(fixedByName)) {
+                    ObjectNode effective = normalizeToEffective(fixedByName);
+                    effective.withArray("warnings").add("ESTIMATED_FROM_PRODUCT_NAME");
+                    return okAndReturn(modelIdText, entity, t0, tok, false, fixedByName, effective);
+                }
+
+                log.warn("photo_name_only_estimate_failed foodLogId={} foodNameHint={} preview={}",
+                        entity.getId(), foodNameHint, safeOneLine200(rnName.text));
+            }
+
+            log.warn("photo_final_fallback_unknown foodLogId={} preview={}",
+                    entity.getId(), safeOneLine200(lastText));
 
             ObjectNode fbUnknown = fallbackUnknownFoodFromBrokenText(lastText);
             ObjectNode effective = normalizeToEffective(fbUnknown);
@@ -467,6 +541,10 @@ public class GeminiProviderClient implements ProviderClient {
             return true;
         }
         return isNoFoodTextSignal(rawText);
+    }
+
+    static boolean shouldTryPackagedFoodRescueForPhoto(JsonNode parsed, String rawText) {
+        return !isNoFoodDetected(parsed, rawText);
     }
 
     private static boolean isNoFoodTextSignal(String rawText) {
@@ -660,5 +738,88 @@ public class GeminiProviderClient implements ProviderClient {
             if (b == null) return a;
             return a + b;
         }
+    }
+
+    private static final Pattern P_FOOD_NAME_JSON =
+            Pattern.compile("\"foodName\"\\s*:\\s*\"([^\"]{1,160})\"");
+
+    private static String extractFoodNameHint(JsonNode parsed, String... rawTexts) {
+        if (parsed != null && parsed.isObject()) {
+            JsonNode fn = parsed.get("foodName");
+            if (fn != null && !fn.isNull()) {
+                String s = fn.asText(null);
+                if (s != null && !s.isBlank()) {
+                    return s.trim();
+                }
+            }
+        }
+
+        if (rawTexts != null) {
+            for (String raw : rawTexts) {
+                String found = extractFoodNameFromJsonLikeText(raw);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static String extractFoodNameFromJsonLikeText(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+
+        Matcher m = P_FOOD_NAME_JSON.matcher(raw);
+        if (!m.find()) {
+            return null;
+        }
+
+        String s = m.group(1);
+        if (s == null) {
+            return null;
+        }
+
+        s = s.trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    private static ObjectNode ensureFoodNameIfMissing(JsonNode parsed, String foodName, ObjectMapper om) {
+        if (parsed == null || !parsed.isObject()) {
+            return null;
+        }
+
+        ObjectNode obj = ((ObjectNode) parsed).deepCopy();
+        JsonNode fn = obj.get("foodName");
+        if ((fn == null || fn.isNull() || fn.asText("").isBlank()) && foodName != null && !foodName.isBlank()) {
+            obj.put("foodName", foodName);
+        }
+        return obj;
+    }
+
+    private static boolean shouldTryPackagedPartialSalvage(JsonNode parsed, String rawText) {
+        String foodNameHint = extractFoodNameHint(parsed, rawText);
+        if (foodNameHint == null || foodNameHint.isBlank()) {
+            return false;
+        }
+
+        if (parsed != null && parsed.isObject()) {
+            JsonNode quantity = parsed.get("quantity");
+            JsonNode labelMeta = parsed.get("labelMeta");
+
+            boolean hasQuantityObj = quantity != null && quantity.isObject();
+            boolean hasLabelMetaObj = labelMeta != null && labelMeta.isObject();
+
+            if (hasQuantityObj || hasLabelMetaObj) {
+                return true;
+            }
+        }
+
+        String lower = rawText == null ? "" : rawText.toLowerCase(Locale.ROOT);
+        return lower.contains("\"labelmeta\"")
+                || lower.contains("\"quantity\"")
+                || lower.contains("servingspercontainer")
+                || lower.contains("\"basis\"");
     }
 }

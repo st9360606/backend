@@ -85,13 +85,17 @@ public final class GeminiEffectiveJsonSupport {
     }
 
     public static void finalizeEffective(boolean isLabel, JsonNode rawForFinalize, ObjectNode effective) {
-        if (effective == null) return;
+        if (effective == null) {
+            return;
+        }
 
         JsonNode raw = (rawForFinalize != null) ? rawForFinalize : effective;
 
-        if (isLabel) {
-            applyWholePackageScalingIfNeeded(raw, effective);
-        }
+        // ✅ 關鍵修正：
+        // 以前只有 LABEL 會乘 servingsPerContainer
+        // 現在 PHOTO / LABEL 只要 raw.labelMeta 顯示是 PER_SERVING 且 servingsPerContainer > 1，
+        // 一律轉成 WHOLE_PACKAGE。
+        applyWholePackageScalingIfNeeded(raw, effective);
 
         roundNutrients1dp(effective);
     }
@@ -163,18 +167,18 @@ public final class GeminiEffectiveJsonSupport {
 
         if (u.equals("G") || u.equals("GRAM") || u.equals("GRAMS")) return "GRAM";
         if (u.equals("ML")
-            || u.equals("MILLILITER")
-            || u.equals("MILLILITERS")
-            || u.equals("MILLILITRE")
-            || u.equals("MILLILITRES")) {
+                || u.equals("MILLILITER")
+                || u.equals("MILLILITERS")
+                || u.equals("MILLILITRE")
+                || u.equals("MILLILITRES")) {
             return "ML";
         }
         if (u.equals("SERVING")
-            || u.equals("SERVINGS")
-            || u.equals("PORTION")
-            || u.equals("PORTIONS")
-            || u.equals("PCS")
-            || u.equals("PC")) {
+                || u.equals("SERVINGS")
+                || u.equals("PORTION")
+                || u.equals("PORTIONS")
+                || u.equals("PCS")
+                || u.equals("PC")) {
             return "SERVING";
         }
         if (u.equals("GRAM") || u.equals("ML") || u.equals("SERVING")) return u;
@@ -255,10 +259,10 @@ public final class GeminiEffectiveJsonSupport {
         boolean isMg = u.contains("mg") || u.contains("毫克");
         boolean isGram = !isMg && (
                 u.equals("g")
-                || u.endsWith(" g")
-                || u.endsWith("g")
-                || u.contains("公克")
-                || u.equals("克")
+                        || u.endsWith(" g")
+                        || u.endsWith("g")
+                        || u.contains("公克")
+                        || u.equals("克")
         );
 
         boolean isKj = u.contains("kj") || u.contains("千焦");

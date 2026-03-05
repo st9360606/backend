@@ -105,9 +105,20 @@ public class GeminiPackagedFoodResolver {
     ) {
         try {
             PackageProductCandidate candidate = extractPackageCandidate(imageBytes, mimeType, modelId, entity.getId());
-            if (candidate == null || !candidate.packagedFood()) {
+
+            if (candidate == null) {
+                log.info("package_candidate_unusable foodLogId={}", entity.getId());
                 return Optional.empty();
             }
+
+            if (!candidate.packagedFood()) {
+                log.info("package_candidate_not_packaged foodLogId={} candidate={}",
+                        entity.getId(), candidate.debugLabel());
+                return Optional.empty();
+            }
+
+            log.info("package_candidate_ok foodLogId={} candidate={}",
+                    entity.getId(), candidate.debugLabel());
 
             String visibleBarcode = candidate.normalizedVisibleBarcode();
             if (visibleBarcode != null) {
@@ -141,7 +152,8 @@ public class GeminiPackagedFoodResolver {
 
             Optional<OpenFoodFactsSearchService.SearchHit> bestOpt = offSearchService.searchBest(candidate, "en");
             if (bestOpt.isEmpty()) {
-                log.info("package_name_search_no_hit foodLogId={} candidate={}", entity.getId(), candidate.debugLabel());
+                log.info("package_name_search_no_hit foodLogId={} candidate={}",
+                        entity.getId(), candidate.debugLabel());
                 return Optional.empty();
             }
 
@@ -248,8 +260,18 @@ public class GeminiPackagedFoodResolver {
 
         var parts = c0.putArray("parts");
         parts.addObject().put("text", """
-                Decide whether this image is primarily a packaged food product.
-
+                Decide whether the MAIN subject is a packaged food product.
+                
+                Important:
+                - The image may be a direct photo of the product package.
+                - Or it may be a screenshot / a photo of a screen / a viewer window showing the product package.
+                - Even if there are UI overlays, app toolbars, screen borders, glare, hands, fingers, background people, or shelves,
+                  treat those as NON-PRODUCT context.
+                
+                The visible package text may be in ANY language or script, including:
+                English, Japanese, Korean, Traditional Chinese, Simplified Chinese,
+                Arabic, Cyrillic, Thai, Vietnamese, Malay, French, German, Spanish, Latin, Hebrew, Devanagari, etc.
+                
                 Return JSON with exactly these keys:
                 - packagedFood: boolean
                 - brand: string|null
@@ -257,10 +279,13 @@ public class GeminiPackagedFoodResolver {
                 - variant: string|null
                 - sizeText: string|null
                 - visibleBarcode: string|null
-
+                
                 Rules:
-                - packagedFood=true only if this is clearly a packaged food / snack / drink / retail food product.
-                - Extract the most likely brand and product name from the package front.
+                - packagedFood=true if the main visible subject is clearly a packaged food / snack / drink / retail food product,
+                  even when shown on a screen.
+                - Extract the most likely brand and product name from the package front, from any visible script.
+                - If Latin text is visible, prefer it for brand/productName.
+                - If only native script is visible, keep it as-is and do not translate.
                 - If barcode digits are visible, return digits only in visibleBarcode.
                 - If not visible / unsure, visibleBarcode=null.
                 - Do not output nutrition values here.
