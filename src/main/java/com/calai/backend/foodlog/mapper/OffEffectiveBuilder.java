@@ -67,7 +67,7 @@ public final class OffEffectiveBuilder {
                || off.carbsPerServing() != null;
     }
 
-    public static String applyPortion(ObjectNode eff, OffResult off) {
+    public static String applyPortion(ObjectNode eff, OffResult off, boolean allowWholePackageScale) {
         if (eff == null) {
             throw new IllegalArgumentException("effective object is required");
         }
@@ -88,14 +88,14 @@ public final class OffEffectiveBuilder {
                                || off.sugarPer100g() != null
                                || off.sodiumMgPer100g() != null;
 
-        if (hasPkg && hasAnyPer100) {
-            String unitRaw = off.packageSizeUnit().trim().toLowerCase(Locale.ROOT);
-            String qtyUnit = unitRaw.contains("ml") ? "ML" : "GRAM";
+        // ✅ 只有在呼叫端明確允許時，才把 per100 乘成 whole package
+        // 避免 NAME_SEARCH 命中同名不同包裝時，把數值算錯成整包
+        if (allowWholePackageScale && hasPkg && hasAnyPer100) {
             double pkg = off.packageSizeValue();
 
             ObjectNode qty = eff.putObject("quantity");
-            qty.put("value", pkg);
-            qty.put("unit", qtyUnit);
+            qty.put("value", 1.0);
+            qty.put("unit", "SERVING");
 
             double factor = pkg / 100.0;
 

@@ -6,6 +6,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Locale;
 
+/**
+ * PHOTO / ALBUM 結果的品質門檻。
+ *
+ * 重點：
+ * 1. 先判斷核心四大是否完整
+ * 2. 支援 zero-like drink 放行
+ * 3. packaged 不再只靠 aiMeta.foodCategory
+ * 4. 若看起來是 packaged success，則必須是 WHOLE_PACKAGE
+ */
 public final class GeminiNutritionQualityGate {
 
     private GeminiNutritionQualityGate() {
@@ -33,12 +42,10 @@ public final class GeminiNutritionQualityGate {
         Double f = numOrNull(n.get("fat"));
         Double c = numOrNull(n.get("carbs"));
 
-        // 1) kcal + 三大營養素全都沒有 => 不可
         if (kcal == null && p == null && f == null && c == null) {
             return false;
         }
 
-        // 2) foodName 有值時，核心四大要完整
         String name = effectiveOrRaw.path("foodName").isNull()
                 ? ""
                 : effectiveOrRaw.path("foodName").asText("");
@@ -52,7 +59,69 @@ public final class GeminiNutritionQualityGate {
             return false;
         }
 
-        // 3) quantity
+        JsonNode labelMeta = effectiveOrRaw.path("labelMeta");
+        String basis = labelMeta.path("basis").asText("");
+        Double servingsPerContainer = numOrNull(labelMeta.get("servingsPerContainer"));
+
+        boolean packagedByAiMeta =
+                effectiveOrRaw.path("aiMeta").path("foodCategory").asText("").equalsIgnoreCase("PACKAGED_FOOD");
+
+        boolean packagedByLabelMeta =
+                !basis.isBlank() || servingsPerContainer != null;
+
+        boolean packagedFood = packagedByAiMeta || packagedByLabelMeta;
+
+        boolean zeroLikeDrink =
+                containsAny(lname,
+                        "0 kcal", "zero sugar", "zero calorie", "zero calories",
+                        "無糖", "无糖", "零卡", "零糖", "0糖",
+                        "sparkling water", "soda water", "carbonated water",
+                        "mineral water", "drinking water", "purified water", "spring water",
+                        "black coffee", "americano", "espresso", "cold brew",
+                        "green tea", "black tea", "oolong tea", "jasmine tea", "iced tea",
+                        "氣泡水", "气泡水", "礦泉水", "矿泉水", "純水", "纯水", "飲用水", "饮用水",
+                        "黑咖啡", "美式咖啡", "濃縮咖啡", "浓缩咖啡",
+                        "綠茶", "绿茶", "紅茶", "红茶", "烏龍茶", "乌龙茶"
+                );
+
+        // packaged 成功結果必須已經 canonicalize 成 WHOLE_PACKAGE
+        if (packagedFood && hasCompleteCoreQuartet) {
+            if (!"WHOLE_PACKAGE".equalsIgnoreCase(basis)) {
+                return false;
+            }
+
+            int nonNull = 0;
+            for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
+                JsonNode v = n.get(k);
+                if (v != null && !v.isNull()) {
+                    nonNull++;
+                }
+            }
+
+            if (zeroLikeDrink) {
+                double kk = (kcal == null) ? 0.0 : kcal;
+                double pp = (p == null) ? 0.0 : p;
+                double ff = (f == null) ? 0.0 : f;
+                double cc = (c == null) ? 0.0 : c;
+
+                if (kk <= 20.0 && pp <= 2.0 && ff <= 2.0 && cc <= 5.0) {
+                    return true;
+                }
+            }
+
+            Double conf = numOrNull(effectiveOrRaw.get("confidence"));
+
+            // 一般 packaged：核心四大完整 + WHOLE_PACKAGE + (欄位夠多 或 confidence 足夠)
+            if (nonNull >= 6) {
+                return true;
+            }
+            if (conf != null && conf >= 0.55) {
+                return true;
+            }
+
+            return false;
+        }
+
         JsonNode q = effectiveOrRaw.path("quantity");
         String unit = normalizeUnit(q.path("unit").asText("SERVING"));
         Double qty = numOrNull(q.get("value"));
@@ -60,13 +129,11 @@ public final class GeminiNutritionQualityGate {
             qty = 1.0;
         }
 
-        // 4) zero / zero-like 文字符號
         boolean looksLikeZero = containsAny(lname,
                 "0 kcal", "zero sugar", "zero calorie", "zero calories",
                 "無糖", "无糖", "零卡", "零糖", "0糖"
         );
 
-        // 5) category / text profile
         RelaxedLowCalProfile categoryProfile = resolveCategoryProfile(effectiveOrRaw);
         RelaxedLowCalProfile textProfile =
                 (categoryProfile == RelaxedLowCalProfile.NONE)
@@ -79,23 +146,18 @@ public final class GeminiNutritionQualityGate {
         boolean relaxedByTextAndNutrients =
                 isRelaxedLowCalProfile(textProfile, kcal, p, f, c, unit, qty);
 
-        // ✅ 修正點：
-        // 不再用 "< 80 kcal / serving" 一刀切
-        // 只擋明顯極端異常值
         if (!looksLikeZero && kcal != null) {
             boolean relaxedLowCal = relaxedByCategoryAndNutrients || relaxedByTextAndNutrients;
 
             if (!relaxedLowCal && "SERVING".equals(unit) && qty >= 1.0) {
                 double est = estimateCalories(p, f, c);
 
-                // 只有在「標示熱量極低，但 macros 明顯撐不起來 / 對不上」時才 reject
                 if (kcal < 8.0 && est > 25.0) {
                     return false;
                 }
             }
         }
 
-        // 6) 能量一致性（至少 2 個 macro 才檢查）
         int macroCount = 0;
         if (p != null) macroCount++;
         if (f != null) macroCount++;
@@ -143,9 +205,6 @@ public final class GeminiNutritionQualityGate {
         return RelaxedLowCalProfile.NONE;
     }
 
-    /**
-     * 只保留強訊號詞，避免 generic tea/coffee/water/soup 誤判。
-     */
     private static RelaxedLowCalProfile resolveStrongTextProfile(String lname) {
         if (lname == null || lname.isBlank()) {
             return RelaxedLowCalProfile.NONE;
@@ -226,7 +285,6 @@ public final class GeminiNutritionQualityGate {
             };
         }
 
-        // SERVING / fallback
         return switch (profile) {
             case WATER -> within(kcal, 12.0)
                           && within(protein, 1.0)

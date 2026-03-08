@@ -21,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -101,13 +102,24 @@ public class GeminiPackagedFoodResolver {
             byte[] imageBytes,
             String mimeType,
             String modelId,
-            long t0
+            long t0,
+            String foodNameHint
     ) {
         try {
-            PackageProductCandidate candidate = extractPackageCandidate(imageBytes, mimeType, modelId, entity.getId());
+            PackageProductCandidate extracted = null;
+
+            // ✅ 先嘗試只用前面主流程已拿到的 foodNameHint 建 candidate，
+            // 這樣 OFF fallback 不會再額外打第 3 次 Gemini。
+            PackageProductCandidate candidate = buildSearchCandidate(null, foodNameHint);
+
+            if (candidate == null || !candidate.packagedFood() || !candidate.hasUsefulName()) {
+                extracted = extractPackageCandidate(imageBytes, mimeType, modelId, entity.getId());
+                candidate = buildSearchCandidate(extracted, foodNameHint);
+            }
 
             if (candidate == null) {
-                log.info("package_candidate_unusable foodLogId={}", entity.getId());
+                log.info("package_candidate_unusable foodLogId={} foodNameHint={}",
+                        entity.getId(), safe(foodNameHint));
                 return Optional.empty();
             }
 
@@ -117,8 +129,16 @@ public class GeminiPackagedFoodResolver {
                 return Optional.empty();
             }
 
-            log.info("package_candidate_ok foodLogId={} candidate={}",
-                    entity.getId(), candidate.debugLabel());
+            if (!candidate.hasUsefulName()) {
+                log.info("package_candidate_missing_name foodLogId={} candidate={}",
+                        entity.getId(), candidate.debugLabel());
+                return Optional.empty();
+            }
+
+            log.info("package_candidate_ok foodLogId={} fromHintOnly={} candidate={}",
+                    entity.getId(),
+                    extracted == null,
+                    candidate.debugLabel());
 
             String visibleBarcode = candidate.normalizedVisibleBarcode();
             if (visibleBarcode != null) {
@@ -198,6 +218,124 @@ public class GeminiPackagedFoodResolver {
         }
     }
 
+    private static PackageProductCandidate buildSearchCandidate(
+            PackageProductCandidate extracted,
+            String foodNameHint
+    ) {
+        String hint = cleanHint(foodNameHint);
+
+        String rawBrand = extracted == null ? null : cleanHint(extracted.brand());
+        String rawProductName = firstNonBlank(
+                extracted == null ? null : extracted.productName(),
+                hint
+        );
+        String rawVariant = extracted == null ? null : cleanHint(extracted.variant());
+        String rawSizeText = extracted == null ? null : cleanHint(extracted.sizeText());
+        String rawVisibleBarcode = extracted == null ? null : cleanHint(extracted.visibleBarcode());
+
+        boolean packaged = (extracted != null && extracted.packagedFood()) || rawProductName != null;
+        if (!packaged || rawProductName == null) {
+            return null;
+        }
+
+        NameSplit split = splitBrandAndProduct(rawBrand, rawProductName);
+
+        List<String> aliases = mergeAliases(
+                extracted == null ? null : extracted.searchAliases(),
+                rawProductName,
+                hint,
+                split.productName()
+        );
+
+        return new PackageProductCandidate(
+                true,
+                split.brand(),
+                split.productName(),
+                rawVariant,
+                rawSizeText,
+                rawVisibleBarcode,
+                aliases
+        );
+    }
+
+    private static NameSplit splitBrandAndProduct(String brand, String mergedName) {
+        String b = cleanHint(brand);
+        String name = cleanHint(mergedName);
+
+        if (name == null) {
+            return new NameSplit(b, null);
+        }
+
+        // 已有 brand：直接用
+        if (b != null) {
+            return new NameSplit(b, name);
+        }
+
+        String[] tokens = name.split("\\s+");
+
+        // 保守：只在 2~4 個 token 時做 first-token brand split
+        if (tokens.length < 2 || tokens.length > 4) {
+            return new NameSplit(null, name);
+        }
+
+        String first = cleanHint(tokens[0]);
+        String rest = joinTokens(tokens, 1, tokens.length);
+
+        if (!looksLikeBrandToken(first) || rest == null) {
+            return new NameSplit(null, name);
+        }
+
+        return new NameSplit(first, rest);
+    }
+
+    private static boolean looksLikeBrandToken(String token) {
+        if (token == null || token.isBlank()) return false;
+        if (token.length() < 4) return false;
+
+        boolean hasLetter = token.chars().anyMatch(Character::isLetter);
+        if (!hasLetter) return false;
+
+        String lower = token.toLowerCase(java.util.Locale.ROOT);
+
+        // generic stop words，不是 descriptor list，只是避免把 "the/of/with" 這種切成 brand
+        return !lower.equals("the")
+               && !lower.equals("of")
+               && !lower.equals("with")
+               && !lower.equals("and");
+    }
+
+    private static String joinTokens(String[] tokens, int startInclusive, int endExclusive) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = startInclusive; i < endExclusive; i++) {
+            String t = cleanHint(tokens[i]);
+            if (t == null) continue;
+            if (!sb.isEmpty()) sb.append(' ');
+            sb.append(t);
+        }
+        return sb.isEmpty() ? null : sb.toString();
+    }
+
+    private record NameSplit(String brand, String productName) {
+    }
+
+    private static String cleanHint(String s) {
+        if (s == null) return null;
+        String t = s.trim().replaceAll("\\s+", " ");
+        return t.isBlank() ? null : t;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v.trim();
+        }
+        return null;
+    }
+
+    private static String safe(String s) {
+        return (s == null || s.isBlank()) ? null : s;
+    }
+
     private PackageProductCandidate extractPackageCandidate(
             byte[] imageBytes,
             String mimeType,
@@ -241,7 +379,8 @@ public class GeminiPackagedFoodResolver {
                 textOrNull(parsed, "productName"),
                 textOrNull(parsed, "variant"),
                 textOrNull(parsed, "sizeText"),
-                textOrNull(parsed, "visibleBarcode")
+                textOrNull(parsed, "visibleBarcode"),
+                textList(parsed, "searchAliases")
         );
     }
 
@@ -279,13 +418,20 @@ public class GeminiPackagedFoodResolver {
                 - variant: string|null
                 - sizeText: string|null
                 - visibleBarcode: string|null
+                - searchAliases: string[]
                 
                 Rules:
                 - packagedFood=true if the main visible subject is clearly a packaged food / snack / drink / retail food product,
                   even when shown on a screen.
-                - Extract the most likely brand and product name from the package front, from any visible script.
-                - If Latin text is visible, prefer it for brand/productName.
-                - If only native script is visible, keep it as-is and do not translate.
+                - brand: most likely brand name from visible package text.
+                - productName: most likely primary sellable product name.
+                - searchAliases: include other visible product-name strings / scripts exactly as printed on the package front.
+                  Examples:
+                  - native script product name
+                  - romanized / Latin banner text
+                  - alternate visible product-name wording
+                - Keep aliases exactly as seen. Do NOT translate. Do NOT invent.
+                - Exclude pure brand duplicates from searchAliases.
                 - If barcode digits are visible, return digits only in visibleBarcode.
                 - If not visible / unsure, visibleBarcode=null.
                 - Do not output nutrition values here.
@@ -299,7 +445,7 @@ public class GeminiPackagedFoodResolver {
         ObjectNode gen = root.putObject("generationConfig");
         gen.put("responseMimeType", "application/json");
         gen.set("responseJsonSchema", packageCandidateJsonSchema());
-        gen.put("maxOutputTokens", 256);
+        gen.put("maxOutputTokens", 320);
         gen.put("temperature", 0.0);
 
         return root;
@@ -319,13 +465,18 @@ public class GeminiPackagedFoodResolver {
         props.putObject("sizeText").putArray("type").add("string").add("null");
         props.putObject("visibleBarcode").putArray("type").add("string").add("null");
 
+        ObjectNode searchAliases = props.putObject("searchAliases");
+        searchAliases.put("type", "array");
+        searchAliases.putObject("items").put("type", "string");
+
         schema.putArray("required")
                 .add("packagedFood")
                 .add("brand")
                 .add("productName")
                 .add("variant")
                 .add("sizeText")
-                .add("visibleBarcode");
+                .add("visibleBarcode")
+                .add("searchAliases");
 
         return schema;
     }
@@ -345,7 +496,14 @@ public class GeminiPackagedFoodResolver {
                 : off.productName();
         eff.put("foodName", name);
 
-        String basis = OffEffectiveBuilder.applyPortion(eff, off);
+        // ✅ 關鍵修正：
+        // 只有「條碼直接命中」才允許 whole-package scale
+        // NAME_SEARCH 不允許，避免同名不同包裝被放大成整包
+        boolean allowWholePackageScale =
+                "AUTO_BARCODE".equals(source)
+                || "VISIBLE_BARCODE_OCR".equals(source);
+
+        String basis = OffEffectiveBuilder.applyPortion(eff, off, allowWholePackageScale);
         boolean hasCoreNutrition = OffEffectiveBuilder.hasCoreNutrition(off);
 
         double confidence;
@@ -364,6 +522,11 @@ public class GeminiPackagedFoodResolver {
             eff.withArray("warnings").add(FoodLogWarning.LOW_CONFIDENCE.name());
         }
 
+        // ✅ NAME_SEARCH 命中的 package size 不可信，補 warning 方便前端/trace 觀察
+        if ("NAME_SEARCH".equals(source)) {
+            eff.withArray("warnings").add("PACKAGE_SIZE_UNVERIFIED");
+        }
+
         OffCategoryResolver.Resolved resolved = OffCategoryResolver.resolve(off);
 
         ObjectNode aiMeta = eff.putObject("aiMeta");
@@ -371,6 +534,7 @@ public class GeminiPackagedFoodResolver {
         aiMeta.put("packageResolved", true);
         aiMeta.put("offFromCache", offFromCache);
         aiMeta.put("basis", basis);
+        aiMeta.put("allowWholePackageScale", allowWholePackageScale);
         aiMeta.put("hasCoreNutrition", hasCoreNutrition);
         aiMeta.put("foodCategory", resolved.category().name());
         aiMeta.put("foodSubCategory", resolved.subCategory().name());
@@ -449,5 +613,46 @@ public class GeminiPackagedFoodResolver {
         if (v == null || v.isNull()) return null;
         String s = v.asText(null);
         return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private static List<String> mergeAliases(List<String> existing, String... extras) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+
+        if (existing != null) {
+            for (String s : existing) {
+                addAlias(out, s);
+            }
+        }
+
+        if (extras != null) {
+            for (String s : extras) {
+                addAlias(out, s);
+            }
+        }
+
+        return new java.util.ArrayList<>(out);
+    }
+
+    private static void addAlias(java.util.Set<String> out, String raw) {
+        String s = cleanHint(raw);
+        if (s == null) return;
+        out.add(s);
+    }
+
+    private static List<String> textList(JsonNode node, String field) {
+        if (node == null || node.isNull()) return List.of();
+
+        JsonNode arr = node.get(field);
+        if (arr == null || !arr.isArray()) return List.of();
+
+        List<String> out = new java.util.ArrayList<>();
+        for (JsonNode it : arr) {
+            if (it == null || it.isNull()) continue;
+            String s = it.asText(null);
+            if (s != null && !s.isBlank()) {
+                out.add(s.trim());
+            }
+        }
+        return out;
     }
 }

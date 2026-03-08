@@ -1,73 +1,83 @@
-package com.calai.backend.foodlog;
+package com.calai.backend.foodlog.provider;
 
-import com.calai.backend.foodlog.provider.GeminiEffectiveJsonSupport;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GeminiEffectiveJsonSupportTest {
 
-    private static final ObjectMapper OM = new ObjectMapper();
+    private final ObjectMapper om = new ObjectMapper();
 
     @Test
-    void finalizeEffective_should_scale_nutrients_and_set_quantity_to_whole_package() {
-        // raw：labelMeta 指示 PER_SERVING + 10 份
-        ObjectNode raw = OM.createObjectNode();
-        ObjectNode lm = raw.putObject("labelMeta");
-        lm.put("servingsPerContainer", 10);
-        lm.put("basis", "PER_SERVING");
+    void finalizeEffective_should_scale_per_serving_to_whole_package_when_servings_gt_1() {
+        ObjectNode raw = om.createObjectNode();
+        raw.put("foodName", "Bourbon Chocoliere");
 
-        // effective：目前是每份 sodium=13，quantity=125ML
-        ObjectNode effective = OM.createObjectNode();
+        ObjectNode quantity = raw.putObject("quantity");
+        quantity.put("value", 1.0);
+        quantity.put("unit", "SERVING");
 
-        ObjectNode q = effective.putObject("quantity");
-        q.put("value", 125.0);
-        q.put("unit", "ML");
+        ObjectNode nutrients = raw.putObject("nutrients");
+        nutrients.put("kcal", 100.0);
+        nutrients.put("protein", 2.0);
+        nutrients.put("fat", 3.0);
+        nutrients.put("carbs", 10.0);
+        nutrients.putNull("fiber");
+        nutrients.putNull("sugar");
+        nutrients.putNull("sodium");
 
-        ObjectNode n = effective.putObject("nutrients");
-        n.put("sodium", 13.0);
-        n.put("kcal", 0.0);
-        n.putNull("protein");
-        n.putNull("fat");
-        n.putNull("carbs");
-        n.putNull("fiber");
-        n.putNull("sugar");
+        raw.put("confidence", 0.9);
+        raw.putArray("warnings");
 
-        // ✅ 不直接打 private helper，改測 public finalizeEffective
-        GeminiEffectiveJsonSupport.finalizeEffective(true, raw, effective);
+        ObjectNode labelMeta = raw.putObject("labelMeta");
+        labelMeta.put("servingsPerContainer", 5.0);
+        labelMeta.put("basis", "PER_SERVING");
 
-        assertThat(effective.get("nutrients").get("sodium").asDouble()).isEqualTo(130.0);
-        assertThat(effective.get("quantity").get("value").asDouble()).isEqualTo(1.0);
-        assertThat(effective.get("quantity").get("unit").asText()).isEqualTo("SERVING");
+        ObjectNode effective = GeminiEffectiveJsonSupport.normalizeToEffective(raw);
+        GeminiEffectiveJsonSupport.finalizeEffective(false, raw, effective);
+
+        assertThat(effective.path("nutrients").path("kcal").asDouble()).isEqualTo(500.0);
+        assertThat(effective.path("nutrients").path("protein").asDouble()).isEqualTo(10.0);
+        assertThat(effective.path("labelMeta").path("basis").asText()).isEqualTo("WHOLE_PACKAGE");
+        assertThat(effective.path("labelMeta").path("servingsPerContainer").asDouble()).isEqualTo(5.0);
+        assertThat(effective.path("quantity").path("value").asDouble()).isEqualTo(1.0);
+        assertThat(effective.path("quantity").path("unit").asText()).isEqualTo("SERVING");
     }
 
     @Test
-    void normalizeToEffective_should_keep_empty_warnings_array() {
-        ObjectNode raw = OM.createObjectNode();
-        raw.put("foodName", "御茶園 台灣四季春");
+    void finalizeEffective_should_canonicalize_single_serve_packaged_to_whole_package() {
+        ObjectNode raw = om.createObjectNode();
+        raw.put("foodName", "Coca-Cola Zero");
 
-        ObjectNode q = raw.putObject("quantity");
-        q.put("value", 1.0);
-        q.put("unit", "SERVING");
+        ObjectNode quantity = raw.putObject("quantity");
+        quantity.put("value", 1.0);
+        quantity.put("unit", "SERVING");
 
-        ObjectNode n = raw.putObject("nutrients");
-        n.put("kcal", 0.0);
-        n.put("protein", 0.0);
-        n.put("fat", 0.0);
-        n.put("carbs", 0.0);
-        n.put("fiber", 0.0);
-        n.put("sugar", 0.0);
-        n.put("sodium", 130.0);
+        ObjectNode nutrients = raw.putObject("nutrients");
+        nutrients.put("kcal", 0.0);
+        nutrients.put("protein", 0.0);
+        nutrients.put("fat", 0.0);
+        nutrients.put("carbs", 0.0);
+        nutrients.putNull("fiber");
+        nutrients.putNull("sugar");
+        nutrients.putNull("sodium");
 
-        raw.put("confidence", 0.25);
+        raw.put("confidence", 0.95);
         raw.putArray("warnings");
 
-        ObjectNode eff = GeminiEffectiveJsonSupport.normalizeToEffective(raw);
+        ObjectNode labelMeta = raw.putObject("labelMeta");
+        labelMeta.put("servingsPerContainer", 1.0);
+        labelMeta.put("basis", "PER_SERVING");
 
-        assertThat(eff.has("warnings")).isTrue();
-        assertThat(eff.get("warnings").isArray()).isTrue();
-        assertThat(eff.get("warnings").size()).isEqualTo(0);
+        ObjectNode effective = GeminiEffectiveJsonSupport.normalizeToEffective(raw);
+        GeminiEffectiveJsonSupport.finalizeEffective(false, raw, effective);
+
+        assertThat(effective.path("labelMeta").path("basis").asText()).isEqualTo("WHOLE_PACKAGE");
+        assertThat(effective.path("labelMeta").path("servingsPerContainer").asDouble()).isEqualTo(1.0);
+        assertThat(effective.path("quantity").path("value").asDouble()).isEqualTo(1.0);
+        assertThat(effective.path("quantity").path("unit").asText()).isEqualTo("SERVING");
+        assertThat(effective.path("nutrients").path("kcal").asDouble()).isEqualTo(0.0);
     }
 }

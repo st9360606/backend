@@ -45,9 +45,21 @@ final class GeminiTransportSupport {
             boolean isLabel,
             String foodLogIdForLog
     ) {
+        return callAndExtract(imageBytes, mimeType, userPrompt, modelId, isLabel, foodLogIdForLog, false);
+    }
+
+    CallResult callAndExtract(
+            byte[] imageBytes,
+            String mimeType,
+            String userPrompt,
+            String modelId,
+            boolean isLabel,
+            String foodLogIdForLog,
+            boolean requireCoreNutrition
+    ) {
         JsonNode resp;
         try {
-            resp = callGenerateContent(imageBytes, mimeType, userPrompt, modelId, isLabel);
+            resp = callGenerateContent(imageBytes, mimeType, userPrompt, modelId, isLabel, requireCoreNutrition);
         } catch (RestClientResponseException re) {
             ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(re);
             ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(mapped.code());
@@ -60,6 +72,10 @@ final class GeminiTransportSupport {
         }
 
         ProviderRefuseReason reason = GeminiRefusalDetector.detectOrNull(resp);
+
+        log.debug("gemini_response_summary foodLogId={} modelId={} {}",
+                foodLogIdForLog, modelId, responseDebugSummary(resp));
+
         if (reason != null) {
             String code = "PROVIDER_REFUSED_" + reason.name();
             log.warn("gemini_refused foodLogId={} modelId={} reason={} code={}",
@@ -89,21 +105,54 @@ final class GeminiTransportSupport {
     CallResult callAndExtractTextOnly(
             String userPrompt,
             String modelId,
-            String foodLogIdForLog
+            String foodLogIdForLog,
+            boolean requireCoreNutrition
     ) {
         String sys = "You are a JSON repair engine. Return ONLY ONE minified JSON object. No markdown. No extra text.";
-        return callAndExtractTextOnly(userPrompt, modelId, foodLogIdForLog, sys);
+        return callAndExtractTextOnly(
+                userPrompt,
+                modelId,
+                foodLogIdForLog,
+                sys,
+                requireCoreNutrition,
+                true
+        );
     }
 
     CallResult callAndExtractTextOnly(
             String userPrompt,
             String modelId,
             String foodLogIdForLog,
-            String systemInstruction
+            String systemInstruction,
+            boolean requireCoreNutrition
+    ) {
+        return callAndExtractTextOnly(
+                userPrompt,
+                modelId,
+                foodLogIdForLog,
+                systemInstruction,
+                requireCoreNutrition,
+                true
+        );
+    }
+
+    CallResult callAndExtractTextOnly(
+            String userPrompt,
+            String modelId,
+            String foodLogIdForLog,
+            String systemInstruction,
+            boolean requireCoreNutrition,
+            boolean useStrictJsonSchema
     ) {
         JsonNode resp;
         try {
-            resp = callGenerateContentTextOnly(systemInstruction, userPrompt, modelId);
+            resp = callGenerateContentTextOnly(
+                    systemInstruction,
+                    userPrompt,
+                    modelId,
+                    requireCoreNutrition,
+                    useStrictJsonSchema
+            );
         } catch (RestClientResponseException re) {
             ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(re);
             ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(mapped.code());
@@ -136,19 +185,25 @@ final class GeminiTransportSupport {
         return new CallResult(tok, text, null);
     }
 
+    /**
+     * ✅ 保留原本 image request 路徑
+     * PHOTO / ALBUM / LABEL 主流程都靠這個方法送圖給 Gemini。
+     */
     private JsonNode callGenerateContent(
             byte[] imageBytes,
             String mimeType,
             String userPrompt,
             String modelId,
-            boolean isLabel
+            boolean isLabel,
+            boolean requireCoreNutrition
     ) {
         ObjectNode req = requestBuilder.buildRequest(
                 imageBytes,
                 mimeType,
                 userPrompt,
                 isLabel,
-                FN_EMIT_NUTRITION
+                FN_EMIT_NUTRITION,
+                requireCoreNutrition
         );
 
         return http.post()
@@ -161,12 +216,22 @@ final class GeminiTransportSupport {
                 .body(JsonNode.class);
     }
 
+    /**
+     * ✅ text-only repair / salvage / name-only estimate 路徑
+     */
     private JsonNode callGenerateContentTextOnly(
             String systemInstruction,
             String userPrompt,
-            String modelId
+            String modelId,
+            boolean requireCoreNutrition,
+            boolean useStrictJsonSchema
     ) {
-        ObjectNode req = requestBuilder.buildTextOnlyRequest(systemInstruction, userPrompt);
+        ObjectNode req = requestBuilder.buildTextOnlyRequest(
+                systemInstruction,
+                userPrompt,
+                requireCoreNutrition,
+                useStrictJsonSchema
+        );
 
         return http.post()
                 .uri("/v1beta/models/{model}:generateContent", modelId)
@@ -191,25 +256,29 @@ final class GeminiTransportSupport {
             return null;
         }
 
-        JsonNode parts = resp.path("candidates").path(0).path("content").path("parts");
-        if (!parts.isArray()) {
+        JsonNode candidates = resp.path("candidates");
+        if (!candidates.isArray()) {
             return null;
         }
 
-        for (JsonNode p : parts) {
-            JsonNode fc = p.get("functionCall");
-            if (fc == null || !fc.isObject()) {
+        for (JsonNode cand : candidates) {
+            JsonNode parts = cand.path("content").path("parts");
+            if (!parts.isArray()) {
                 continue;
             }
-
-            String name = fc.path("name").asText(null);
-            if (name == null || name.isBlank()) {
-                continue;
-            }
-
-            JsonNode args = fc.get("args");
-            if (args != null && args.isObject()) {
-                return args;
+            for (JsonNode p : parts) {
+                JsonNode fc = p.get("functionCall");
+                if (fc == null || !fc.isObject()) {
+                    continue;
+                }
+                String name = fc.path("name").asText(null);
+                if (name == null || name.isBlank()) {
+                    continue;
+                }
+                JsonNode args = fc.get("args");
+                if (args != null && args.isObject()) {
+                    return args;
+                }
             }
         }
         return null;
@@ -219,23 +288,56 @@ final class GeminiTransportSupport {
         if (resp == null || resp.isNull()) {
             return null;
         }
-
-        JsonNode cand0 = resp.path("candidates").path(0);
-        JsonNode parts = cand0.path("content").path("parts");
-        if (!parts.isArray()) {
+        JsonNode candidates = resp.path("candidates");
+        if (!candidates.isArray()) {
             return null;
         }
-
-        StringBuilder sb = new StringBuilder(256);
-        for (JsonNode p : parts) {
-            String t = p.path("text").asText(null);
-            if (t != null) {
-                sb.append(t);
+        for (JsonNode cand : candidates) {
+            JsonNode parts = cand.path("content").path("parts");
+            if (!parts.isArray()) {
+                continue;
+            }
+            StringBuilder sb = new StringBuilder(256);
+            for (JsonNode p : parts) {
+                String t = p.path("text").asText(null);
+                if (t != null) {
+                    sb.append(t);
+                }
+            }
+            String joined = sb.toString().trim();
+            if (!joined.isEmpty()) {
+                return joined;
             }
         }
+        return null;
+    }
 
-        String joined = sb.toString().trim();
-        return joined.isEmpty() ? null : joined;
+    private static String responseDebugSummary(JsonNode resp) {
+        if (resp == null || resp.isNull()) {
+            return "resp=null";
+        }
+        JsonNode promptFeedback = resp.path("promptFeedback");
+        String blockReason = promptFeedback.path("blockReason").asText("");
+
+        JsonNode candidates = resp.path("candidates");
+        int candidateCount = candidates.isArray() ? candidates.size() : 0;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("candidateCount=").append(candidateCount);
+
+        if (!blockReason.isBlank()) {
+            sb.append(" blockReason=").append(blockReason);
+        }
+        if (candidates.isArray()) {
+            for (int i = 0; i < candidates.size(); i++) {
+                JsonNode cand = candidates.get(i);
+                String finishReason = cand.path("finishReason").asText("");
+                if (!finishReason.isBlank()) {
+                    sb.append(" c").append(i).append(".finishReason=").append(finishReason);
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private Tok extractUsage(JsonNode resp) {

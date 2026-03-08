@@ -23,23 +23,24 @@ final class GeminiRequestBuilder {
             String mimeType,
             String userPrompt,
             boolean isLabel,
-            String functionName
+            String functionName,
+            boolean requireCoreNutrition
     ) {
         String b64 = Base64.getEncoder().encodeToString(imageBytes);
         ObjectNode root = om.createObjectNode();
 
         ObjectNode sys = root.putObject("systemInstruction");
 
-        // LABEL：若不使用 function calling，則改走 JSON schema mode
+        // LABEL JSON mode 保留
         if (isLabel && !props.isLabelUseFunctionCalling()) {
             sys.putArray("parts")
                     .addObject()
                     .put("text", "Return ONLY ONE minified JSON object. No markdown. No extra text.");
         } else {
-            String sysText = isLabel
-                    ? ("You MUST call function " + functionName + " with arguments only. Do NOT output any text.")
-                    : "Return ONLY minified JSON. No markdown. No extra text.";
-            sys.putArray("parts").addObject().put("text", sysText);
+            // ✅ LABEL function calling + PHOTO/ALBUM function calling
+            sys.putArray("parts")
+                    .addObject()
+                    .put("text", "You MUST call function " + functionName + " with arguments only. Do NOT output any text.");
         }
 
         ArrayNode contents = root.putArray("contents");
@@ -65,36 +66,156 @@ final class GeminiRequestBuilder {
             return root;
         }
 
-        // LABEL + function calling mode
+        // ✅ LABEL / PHOTO / ALBUM 一律走 function calling
+        ArrayNode tools = root.putArray("tools");
+        ObjectNode tool0 = tools.addObject();
+        ArrayNode fns = tool0.putArray("functionDeclarations");
+
+        ObjectNode fn = fns.addObject();
+        fn.put("name", functionName);
+        fn.put("description", "Return nutrition JSON strictly matching the schema.");
+
         if (isLabel) {
-            ArrayNode tools = root.putArray("tools");
-            ObjectNode tool0 = tools.addObject();
-            ArrayNode fns = tool0.putArray("functionDeclarations");
-
-            ObjectNode fn = fns.addObject();
-            fn.put("name", functionName);
-            fn.put("description", "Return nutrition JSON strictly matching the schema.");
             fn.set("parameters", nutritionFnSchema(true));
-
-            ObjectNode toolConfig = root.putObject("toolConfig");
-            ObjectNode fcc = toolConfig.putObject("functionCallingConfig");
-            fcc.put("mode", "ANY");
-            fcc.putArray("allowedFunctionNames").add(functionName);
-
-            gen.put("maxOutputTokens", 2048);
-            gen.put("temperature", 0.0);
-            return root;
+        } else {
+            // PHOTO / ALBUM:
+            // 主流程：較寬鬆
+            // 第二次 finalize：較嚴格
+            fn.set("parameters", requireCoreNutrition
+                    ? nutritionFnSchemaPhotoStrict()
+                    : nutritionFnSchemaPhotoMain());
         }
 
-        // Photo / Album：維持原設定
-        gen.put("responseMimeType", "application/json");
-        gen.set("responseJsonSchema", nutritionJsonSchema());
-        gen.put("maxOutputTokens", props.getMaxOutputTokens());
-        gen.put("temperature", props.getTemperature());
+        ObjectNode toolConfig = root.putObject("toolConfig");
+        ObjectNode fcc = toolConfig.putObject("functionCallingConfig");
+        fcc.put("mode", "ANY");
+        fcc.putArray("allowedFunctionNames").add(functionName);
+
+        gen.put("maxOutputTokens", requireCoreNutrition ? 1024 : 1536);
+        gen.put("temperature", 0.0);
+
         return root;
     }
 
-    ObjectNode buildTextOnlyRequest(String systemInstruction, String userPrompt) {
+    private ObjectNode nutritionFnSchemaPhotoMain() {
+        ObjectNode root = om.createObjectNode();
+        root.put("type", "OBJECT");
+
+        ObjectNode propsNode = root.putObject("properties");
+
+        propsNode.set("foodName", sString(true));
+
+        ObjectNode quantity = sObject(false);
+        ObjectNode qProps = quantity.putObject("properties");
+        qProps.set("value", sNumber(true));
+        qProps.set("unit", sEnumString(true, List.of("SERVING", "GRAM", "ML")));
+        quantity.putArray("required").add("value").add("unit");
+        propsNode.set("quantity", quantity);
+
+        ObjectNode nutrients = sObject(false);
+        ObjectNode nProps = nutrients.putObject("properties");
+        ArrayNode nReq = nutrients.putArray("required");
+
+        for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
+            nProps.set(k, sNumber(true));
+            nReq.add(k);
+        }
+        propsNode.set("nutrients", nutrients);
+
+        propsNode.set("confidence", sNumber(true));
+
+        ObjectNode warnings = sArray(false, sString(false));
+        propsNode.set("warnings", warnings);
+
+        ObjectNode labelMeta = sObject(false);
+        ObjectNode lmProps = labelMeta.putObject("properties");
+        lmProps.set("servingsPerContainer", sNumber(true));
+        lmProps.set("basis", sEnumString(true, List.of("PER_SERVING", "WHOLE_PACKAGE")));
+        labelMeta.putArray("required").add("servingsPerContainer").add("basis");
+        propsNode.set("labelMeta", labelMeta);
+
+        ArrayNode req = root.putArray("required");
+        req.add("foodName");
+        req.add("quantity");
+        req.add("nutrients");
+        req.add("confidence");
+        req.add("warnings");
+        req.add("labelMeta");
+
+        return root;
+    }
+
+    private ObjectNode nutritionFnSchemaPhotoStrict() {
+        ObjectNode root = om.createObjectNode();
+        root.put("type", "OBJECT");
+
+        ObjectNode propsNode = root.putObject("properties");
+
+        propsNode.set("foodName", sString(false));
+
+        ObjectNode quantity = sObject(false);
+        ObjectNode qProps = quantity.putObject("properties");
+        qProps.set("value", sNumber(false));
+        qProps.set("unit", sEnumString(false, List.of("SERVING")));
+        quantity.putArray("required").add("value").add("unit");
+        propsNode.set("quantity", quantity);
+
+        ObjectNode nutrients = sObject(false);
+        ObjectNode nProps = nutrients.putObject("properties");
+        ArrayNode nReq = nutrients.putArray("required");
+
+        nProps.set("kcal", sNumber(false));
+        nReq.add("kcal");
+
+        nProps.set("protein", sNumber(false));
+        nReq.add("protein");
+
+        nProps.set("fat", sNumber(false));
+        nReq.add("fat");
+
+        nProps.set("carbs", sNumber(false));
+        nReq.add("carbs");
+
+        nProps.set("fiber", sNumber(true));
+        nReq.add("fiber");
+
+        nProps.set("sugar", sNumber(true));
+        nReq.add("sugar");
+
+        nProps.set("sodium", sNumber(true));
+        nReq.add("sodium");
+
+        propsNode.set("nutrients", nutrients);
+
+        propsNode.set("confidence", sNumber(false));
+
+        ObjectNode warnings = sArray(false, sString(false));
+        propsNode.set("warnings", warnings);
+
+        ObjectNode labelMeta = sObject(false);
+        ObjectNode lmProps = labelMeta.putObject("properties");
+        lmProps.set("servingsPerContainer", sNumber(true));
+        lmProps.set("basis", sEnumString(false, List.of("WHOLE_PACKAGE")));
+        labelMeta.putArray("required").add("servingsPerContainer").add("basis");
+        propsNode.set("labelMeta", labelMeta);
+
+        ArrayNode req = root.putArray("required");
+        req.add("foodName");
+        req.add("quantity");
+        req.add("nutrients");
+        req.add("confidence");
+        req.add("warnings");
+        req.add("labelMeta");
+
+        return root;
+    }
+
+    ObjectNode buildTextOnlyRequest(
+            String systemInstruction,
+            String userPrompt,
+            boolean requireCoreNutrition,
+            boolean useStrictJsonSchema
+    ) {
         ObjectNode root = om.createObjectNode();
 
         ObjectNode sys = root.putObject("systemInstruction");
@@ -107,10 +228,111 @@ final class GeminiRequestBuilder {
 
         ObjectNode gen = root.putObject("generationConfig");
         gen.put("responseMimeType", "application/json");
-        gen.put("maxOutputTokens", 768);
         gen.put("temperature", 0.0);
 
+        if (useStrictJsonSchema) {
+            if (requireCoreNutrition) {
+                gen.set("responseJsonSchema", nutritionJsonSchemaPhotoTextStrict());
+                gen.put("maxOutputTokens", 1024);
+            } else {
+                gen.set("responseJsonSchema", nutritionJsonSchemaLabelStrict());
+                gen.put("maxOutputTokens", 768);
+            }
+        } else {
+            // whole-package knowledge lookup：不要再走 strict schema
+            // 保留 application/json，但讓模型自由完成整包 JSON
+            gen.put("maxOutputTokens", requireCoreNutrition ? 1536 : 768);
+        }
         return root;
+    }
+
+
+
+    private ObjectNode nutritionJsonSchemaPhotoTextStrict() {
+        ObjectNode schema = om.createObjectNode();
+        schema.put("type", "object");
+        schema.put("additionalProperties", false);
+
+        ObjectNode propsNode = schema.putObject("properties");
+
+        // ✅ 把最重要的欄位順序提前：foodName -> quantity -> nutrients -> confidence -> warnings
+        ObjectNode foodName = propsNode.putObject("foodName");
+        foodName.putArray("type").add("string").add("null");
+        foodName.put("maxLength", 120);
+
+        ObjectNode quantity = propsNode.putObject("quantity");
+        quantity.put("type", "object");
+        quantity.put("additionalProperties", false);
+
+        ObjectNode qProps = quantity.putObject("properties");
+        qProps.putObject("value").putArray("type").add("number").add("null");
+
+        ObjectNode unit = qProps.putObject("unit");
+        unit.putArray("type").add("string").add("null");
+        unit.putArray("enum").add("SERVING").add("GRAM").add("ML");
+
+        quantity.putArray("required").add("value").add("unit");
+
+        ObjectNode nutrients = propsNode.putObject("nutrients");
+        nutrients.put("type", "object");
+        nutrients.put("additionalProperties", false);
+
+        ObjectNode nProps = nutrients.putObject("properties");
+        ArrayNode nReq = nutrients.putArray("required");
+
+        // ✅ 核心四大：一定要 number，不准 null
+        nProps.putObject("kcal").put("type", "number");
+        nReq.add("kcal");
+
+        nProps.putObject("protein").put("type", "number");
+        nReq.add("protein");
+
+        nProps.putObject("fat").put("type", "number");
+        nReq.add("fat");
+
+        nProps.putObject("carbs").put("type", "number");
+        nReq.add("carbs");
+
+        // ✅ 其他可為 null
+        nProps.putObject("fiber").putArray("type").add("number").add("null");
+        nReq.add("fiber");
+
+        nProps.putObject("sugar").putArray("type").add("number").add("null");
+        nReq.add("sugar");
+
+        nProps.putObject("sodium").putArray("type").add("number").add("null");
+        nReq.add("sodium");
+
+        propsNode.putObject("confidence").putArray("type").add("number").add("null");
+
+        ObjectNode warnings = propsNode.putObject("warnings");
+        warnings.put("type", "array");
+        warnings.putObject("items").put("type", "string");
+
+        // ✅ labelMeta 對 photo fallback 不是必填，只是附加資訊
+        ObjectNode labelMeta = propsNode.putObject("labelMeta");
+        labelMeta.putArray("type").add("object").add("null");
+        labelMeta.put("additionalProperties", false);
+
+        ObjectNode lmProps = labelMeta.putObject("properties");
+        lmProps.putObject("servingsPerContainer").putArray("type").add("number").add("null");
+
+        ObjectNode basis = lmProps.putObject("basis");
+        basis.putArray("type").add("string").add("null");
+        basis.putArray("enum").add("PER_SERVING").add("WHOLE_PACKAGE");
+
+        labelMeta.putArray("required")
+                .add("servingsPerContainer")
+                .add("basis");
+
+        schema.putArray("required")
+                .add("foodName")
+                .add("quantity")
+                .add("nutrients")
+                .add("confidence")
+                .add("warnings");
+
+        return schema;
     }
 
     private ObjectNode nutritionFnSchema(boolean isLabel) {

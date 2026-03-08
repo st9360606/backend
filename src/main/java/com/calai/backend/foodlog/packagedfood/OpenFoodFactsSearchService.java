@@ -35,7 +35,12 @@ public class OpenFoodFactsSearchService {
     }
 
     public Optional<SearchHit> searchBest(PackageProductCandidate candidate, String langKey) {
-        if (candidate == null || !candidate.packagedFood()) return Optional.empty();
+        if (candidate == null || !candidate.packagedFood()) {
+            return Optional.empty();
+        }
+        if (!candidate.hasUsefulName()) {
+            return Optional.empty();
+        }
 
         SearchHit best = null;
 
@@ -46,6 +51,13 @@ public class OpenFoodFactsSearchService {
 
         for (String query : queries) {
             List<SearchHit> hits = search(query, candidate, langKey);
+
+            if (!hits.isEmpty()) {
+                SearchHit top = hits.getFirst();
+                log.info("off_name_search_top query={} code={} score={} productName={}",
+                        query, top.code(), top.score(), top.productName());
+            }
+
             for (SearchHit h : hits) {
                 if (best == null || h.score() > best.score()) {
                     best = h;
@@ -53,14 +65,27 @@ public class OpenFoodFactsSearchService {
             }
         }
 
-        if (best == null || !searchPolicy.isAcceptableScore(best.score())) {
+        if (best == null) {
+            log.info("off_name_search_empty candidate={}", candidate.debugLabel());
             return Optional.empty();
         }
+
+        if (!searchPolicy.isAcceptableScore(best.score())) {
+            log.info("off_name_search_below_threshold candidate={} bestQuery={} bestCode={} bestScore={}",
+                    candidate.debugLabel(), best.query(), best.code(), best.score());
+            return Optional.empty();
+        }
+
+        log.info("off_name_search_queries candidate={} queries={}", candidate.debugLabel(), queries);
+
+        log.info("off_name_search_best candidate={} bestQuery={} bestCode={} bestScore={}",
+                candidate.debugLabel(), best.query(), best.code(), best.score());
+
         return Optional.of(best);
     }
 
     /**
-     * 給 provider 端判斷是否要補 LOW_CONFIDENCE warning。
+     * 給 provider 判斷是否要補 LOW_CONFIDENCE warning。
      */
     public boolean isLowConfidenceScore(double score) {
         return searchPolicy.isLowConfidenceScore(score);
@@ -85,6 +110,12 @@ public class OpenFoodFactsSearchService {
                                             "product_name",
                                             "product_name_" + safeLang,
                                             "product_name_en",
+                                            "product_name_ja",
+                                            "product_name_ko",
+                                            "product_name_zh",
+                                            "generic_name",
+                                            "generic_name_en",
+                                            "generic_name_ja",
                                             "brands",
                                             "quantity",
                                             "product_quantity",
@@ -102,7 +133,9 @@ public class OpenFoodFactsSearchService {
                     .body(JsonNode.class);
 
             JsonNode products = (root == null) ? null : root.get("products");
-            if (products == null || !products.isArray()) return List.of();
+            if (products == null || !products.isArray()) {
+                return List.of();
+            }
 
             List<SearchHit> out = new ArrayList<>();
 
@@ -113,7 +146,11 @@ public class OpenFoodFactsSearchService {
 
                 String productName = firstNonBlank(
                         text(p, "product_name_" + safeLang),
+                        text(p, "product_name_en"),
                         text(p, "product_name"),
+                        text(p, "product_name_ja"),
+                        text(p, "generic_name"),
+                        text(p, "generic_name_en"),
                         off.productName()
                 );
 
@@ -148,33 +185,65 @@ public class OpenFoodFactsSearchService {
         String candName = norm(candidate.productName());
         String candVariant = norm(candidate.variant());
         String candSize = candidate.sizeText();
+        String normQuery = norm(query);
 
-        String offName = norm(firstNonBlank(
-                text(productNode, "product_name_" + safeLang(langKey)),
-                text(productNode, "product_name"),
-                off.productName()
-        ));
         String offBrands = norm(text(productNode, "brands"));
         String offQuantity = text(productNode, "quantity");
-        String normQuery = norm(query);
+
+        String offNameCorpus = buildNameCorpus(productNode, off, langKey);
+        String offSearchCorpus = norm(joinNonBlank(offNameCorpus, offBrands));
 
         double score = 0.05;
 
-        if (offName != null && normQuery != null && offName.contains(normQuery)) {
-            score += 0.35;
+        // 1) query 整句命中
+        if (offSearchCorpus != null && normQuery != null && offSearchCorpus.contains(normQuery)) {
+            score += 0.25;
         }
 
-        score += tokenCoverageScore(candName, offName) * 0.35;
-        score += tokenCoverageScore(candVariant, offName) * 0.12;
-        score += tokenCoverageScore(candBrand, offBrands) * 0.20;
+        // 2) product name 對整體語料庫
+        score += tokenCoverageScore(candName, offSearchCorpus) * 0.30;
 
-        // ✅ P1-5：先 normalize unit 再比較 size
-        score += searchPolicy.sizeSimilarityScore(candSize, offQuantity) * 0.08;
+        // 3) variant
+        score += tokenCoverageScore(candVariant, offSearchCorpus) * 0.10;
 
-        if (OffEffectiveBuilder.hasCoreNutrition(off)) score += 0.15;
+        // 4) brand
+        score += tokenCoverageScore(candBrand, offSearchCorpus) * 0.20;
+
+        // 5) query token coverage：讓 "Bourbon + Chocoliere" 可分別命中
+        score += tokenCoverageScore(normQuery, offSearchCorpus) * 0.15;
+
+        // 6) brand + productName 同時命中時補分
+        if (candBrand != null
+            && candName != null
+            && offSearchCorpus != null
+            && offSearchCorpus.contains(candBrand)
+            && offSearchCorpus.contains(candName)) {
+            score += 0.08;
+        }
+
+        // 7) size
+        score += searchPolicy.sizeSimilarityScore(candSize, offQuantity) * 0.05;
+
+        // 8) nutrition / package bonus
+        if (OffEffectiveBuilder.hasCoreNutrition(off)) score += 0.10;
         if (hasServingOrPackageInfo(off)) score += 0.05;
 
         return Math.min(score, 0.99);
+    }
+
+    private static String buildNameCorpus(JsonNode productNode, OffResult off, String langKey) {
+        return norm(joinNonBlank(
+                text(productNode, "product_name_" + safeLang(langKey)),
+                text(productNode, "product_name_en"),
+                text(productNode, "product_name"),
+                text(productNode, "product_name_ja"),
+                text(productNode, "product_name_ko"),
+                text(productNode, "product_name_zh"),
+                text(productNode, "generic_name"),
+                text(productNode, "generic_name_en"),
+                text(productNode, "generic_name_ja"),
+                off == null ? null : off.productName()
+        ));
     }
 
     private static double tokenCoverageScore(String left, String right) {
@@ -206,6 +275,18 @@ public class OpenFoodFactsSearchService {
                 || off.sugarPerServing() != null
                 || off.sodiumMgPerServing() != null
         );
+    }
+
+    private static String joinNonBlank(String... values) {
+        if (values == null) return null;
+
+        StringBuilder sb = new StringBuilder();
+        for (String v : values) {
+            if (v == null || v.isBlank()) continue;
+            if (!sb.isEmpty()) sb.append(' ');
+            sb.append(v.trim());
+        }
+        return sb.isEmpty() ? null : sb.toString();
     }
 
     private static String text(JsonNode node, String field) {

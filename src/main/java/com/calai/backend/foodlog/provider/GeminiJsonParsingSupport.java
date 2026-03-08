@@ -22,28 +22,118 @@ public final class GeminiJsonParsingSupport {
         if (s.isBlank()) return null;
 
         s = stripBomAndNulls(s);
+
+        // 1) 先直接 parse 原文，避免過度修補反而把原本可 parse 的 JSON 搞壞
+        JsonNode direct = tryReadTree(s);
+        if (direct != null) {
+            return direct;
+        }
+
         s = escapeBadCharsInsideJsonStrings(s);
 
         String payload = extractFirstJsonPayload(s);
         if (payload == null || payload.isBlank()) return null;
 
-        payload = patchDanglingTail(payload);
-        payload = balanceJsonIfNeeded(payload);
-        payload = removeTrailingCommas(payload);
-        payload = patchDanglingTail(payload);
+        // 2) 先直接 parse 抽出的 payload
+        JsonNode payloadNode = tryReadTree(payload);
+        if (payloadNode != null) {
+            return payloadNode;
+        }
 
+        // 3) 基本修補
+        String repaired = patchDanglingTail(payload);
+        repaired = balanceJsonIfNeeded(repaired);
+        repaired = removeTrailingCommas(repaired);
+        repaired = patchDanglingTail(repaired);
+
+        JsonNode repairedNode = tryReadTree(repaired);
+        if (repairedNode != null) {
+            return repairedNode;
+        }
+
+        // 4) 關鍵修正：一路往前裁掉壞尾巴，直到能 parse
+        JsonNode dropTailNode = tryParseByDroppingBrokenTail(repaired);
+        if (dropTailNode != null) {
+            return dropTailNode;
+        }
+
+        return tryParseByDroppingBrokenTail(payload);
+    }
+
+    private JsonNode tryReadTree(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
         try {
-            return om.readTree(payload);
-        } catch (Exception first) {
-            String fixed = balanceJsonIfNeeded(payload);
-            fixed = removeTrailingCommas(fixed);
-            fixed = patchDanglingTail(fixed);
-            try {
-                return om.readTree(fixed);
-            } catch (Exception second) {
-                return null;
+            return om.readTree(s);
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    private JsonNode tryParseByDroppingBrokenTail(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+
+        String candidate = s;
+
+        // 最多往前裁 16 次，避免無限 loop
+        for (int i = 0; i < 16; i++) {
+            String repaired = patchDanglingTail(candidate);
+            repaired = balanceJsonIfNeeded(repaired);
+            repaired = removeTrailingCommas(repaired);
+            repaired = patchDanglingTail(repaired);
+
+            JsonNode node = tryReadTree(repaired);
+            if (node != null) {
+                return node;
+            }
+
+            int cut = findLastCommaOutsideString(candidate);
+            if (cut < 0) {
+                break;
+            }
+
+            candidate = rtrim(candidate.substring(0, cut));
+            if (candidate.isBlank()) {
+                break;
             }
         }
+
+        return null;
+    }
+
+    private static int findLastCommaOutsideString(String s) {
+        if (s == null || s.isBlank()) {
+            return -1;
+        }
+        boolean inString = false;
+        boolean escaped = false;
+        int lastComma = -1;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (inString) {
+                if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == ',') {
+                lastComma = i;
+            }
+        }
+        return lastComma;
     }
 
     public boolean isJsonTruncated(String text) {
@@ -202,8 +292,11 @@ public final class GeminiJsonParsingSupport {
             }
 
             if (inString) {
-                if (ch == '\\') escaped = true;
-                else if (ch == '"') inString = false;
+                if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
                 continue;
             }
 
@@ -224,13 +317,18 @@ public final class GeminiJsonParsingSupport {
             }
         }
 
-        if (stack.isEmpty()) return s;
-
         StringBuilder out = new StringBuilder(s);
+
+        // ✅ 新增：若 JSON 在字串中途被截斷，先補上結尾雙引號
+        if (inString) {
+            out.append('"');
+        }
+
         while (!stack.isEmpty()) {
             char open = stack.pop();
             out.append(open == '{' ? '}' : ']');
         }
+
         return out.toString();
     }
 

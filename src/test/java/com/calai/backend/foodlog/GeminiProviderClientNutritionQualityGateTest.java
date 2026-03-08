@@ -1,84 +1,68 @@
 package com.calai.backend.foodlog.provider;
 
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
-class GeminiProviderClientNutritionQualityGateTest {
+class GeminiNutritionQualityGateTest {
+
+    private final ObjectMapper om = new ObjectMapper();
 
     @Test
-    void low_kcal_tea_should_pass_when_category_is_beverage_tea() {
-        ObjectNode root = JsonNodeFactory.instance.objectNode();
-        root.put("foodName", "緑茶");
+    void isAcceptablePhoto_should_accept_zero_calorie_whole_package_drink() {
+        ObjectNode root = om.createObjectNode();
+        root.put("foodName", "Coca-Cola Zero");
 
         ObjectNode quantity = root.putObject("quantity");
         quantity.put("value", 1.0);
         quantity.put("unit", "SERVING");
 
         ObjectNode nutrients = root.putObject("nutrients");
-        nutrients.put("kcal", 12.0);
+        nutrients.put("kcal", 0.0);
         nutrients.put("protein", 0.0);
         nutrients.put("fat", 0.0);
-        nutrients.put("carbs", 2.5);
+        nutrients.put("carbs", 0.0);
         nutrients.putNull("fiber");
         nutrients.putNull("sugar");
         nutrients.putNull("sodium");
 
-        ObjectNode aiMeta = root.putObject("aiMeta");
-        aiMeta.put("foodCategory", "BEVERAGE");
-        aiMeta.put("foodSubCategory", "TEA");
+        root.put("confidence", 0.95);
+        root.putArray("warnings");
 
-        // ✅ 改成新的 top-level class
-        assertTrue(GeminiNutritionQualityGate.isAcceptablePhoto(root));
+        ObjectNode labelMeta = root.putObject("labelMeta");
+        labelMeta.put("servingsPerContainer", 1.0);
+        labelMeta.put("basis", "WHOLE_PACKAGE");
+
+        assertThat(GeminiNutritionQualityGate.isAcceptablePhoto(root)).isTrue();
     }
 
     @Test
-    void low_kcal_main_meal_should_fail_when_not_relaxed_category() {
-        ObjectNode root = JsonNodeFactory.instance.objectNode();
-        root.put("foodName", "Chicken Rice");
+    void isAcceptablePhoto_should_reject_packaged_result_if_not_whole_package() {
+        ObjectNode root = om.createObjectNode();
+        root.put("foodName", "Bourbon Chocoliere");
 
         ObjectNode quantity = root.putObject("quantity");
         quantity.put("value", 1.0);
         quantity.put("unit", "SERVING");
 
         ObjectNode nutrients = root.putObject("nutrients");
-        nutrients.put("kcal", 54.0);
-        nutrients.put("protein", 5.0);
-        nutrients.put("fat", 1.0);
-        nutrients.put("carbs", 8.0);
-        nutrients.putNull("fiber");
-        nutrients.putNull("sugar");
-        nutrients.putNull("sodium");
+        nutrients.put("kcal", 100.0);
+        nutrients.put("protein", 2.0);
+        nutrients.put("fat", 3.0);
+        nutrients.put("carbs", 10.0);
+        nutrients.put("fiber", 1.0);
+        nutrients.put("sugar", 5.0);
+        nutrients.put("sodium", 80.0);
 
-        ObjectNode aiMeta = root.putObject("aiMeta");
-        aiMeta.put("foodCategory", "MEAL");
-        aiMeta.put("foodSubCategory", "UNKNOWN");
+        root.put("confidence", 0.9);
+        root.putArray("warnings");
 
-        // ✅ 改成新的 top-level class
-        assertFalse(GeminiNutritionQualityGate.isAcceptablePhoto(root));
-    }
+        ObjectNode labelMeta = root.putObject("labelMeta");
+        labelMeta.put("servingsPerContainer", 5.0);
+        labelMeta.put("basis", "PER_SERVING");
 
-    @Test
-    void old_data_without_category_should_still_use_keyword_fallback() {
-        ObjectNode root = JsonNodeFactory.instance.objectNode();
-        root.put("foodName", "Black Tea");
-
-        ObjectNode quantity = root.putObject("quantity");
-        quantity.put("value", 1.0);
-        quantity.put("unit", "SERVING");
-
-        ObjectNode nutrients = root.putObject("nutrients");
-        nutrients.put("kcal", 10.0);
-        nutrients.put("protein", 0.0);
-        nutrients.put("fat", 0.0);
-        nutrients.put("carbs", 2.0);
-        nutrients.putNull("fiber");
-        nutrients.putNull("sugar");
-        nutrients.putNull("sodium");
-
-        // ✅ 改成新的 top-level class
-        assertTrue(GeminiNutritionQualityGate.isAcceptablePhoto(root));
+        assertThat(GeminiNutritionQualityGate.isAcceptablePhoto(root)).isFalse();
     }
 }

@@ -759,7 +759,7 @@ public class FoodLogService {
                     : off.productName();
             eff.put("foodName", name);
 
-            String basis = OffEffectiveBuilder.applyPortion(eff, off);
+            String basis = OffEffectiveBuilder.applyPortion(eff, off, true);
             eff.putArray("warnings");
 
             boolean hasCoreNutrition = OffEffectiveBuilder.hasCoreNutrition(off);

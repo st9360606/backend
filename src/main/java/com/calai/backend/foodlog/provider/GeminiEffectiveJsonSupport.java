@@ -10,6 +10,15 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Locale;
 
+/**
+ * 將模型輸出正規化成後端可接受的 nutrition payload。
+ *
+ * 這版重點：
+ * 1. 固定輸出 foodName / quantity / nutrients / confidence / warnings / labelMeta
+ * 2. packaged product 在 finalize 時做 whole-package canonicalization
+ * 3. PER_SERVING + servings=1 也會轉成 WHOLE_PACKAGE
+ * 4. 保留 servingsPerContainer，不再清空
+ */
 public final class GeminiEffectiveJsonSupport {
 
     private GeminiEffectiveJsonSupport() {}
@@ -22,19 +31,27 @@ public final class GeminiEffectiveJsonSupport {
 
         ObjectNode out = JsonNodeFactory.instance.objectNode();
 
+        // 1) foodName：固定輸出
         JsonNode foodNameNode = raw.get("foodName");
         if (foodNameNode != null && !foodNameNode.isNull()) {
             String foodName = foodNameNode.asText(null);
             if (foodName != null && !foodName.isBlank()) {
-                out.put("foodName", foodName);
+                out.put("foodName", foodName.trim());
+            } else {
+                out.putNull("foodName");
             }
+        } else {
+            out.putNull("foodName");
         }
 
+        // 2) quantity：固定輸出
         ObjectNode oq = out.putObject("quantity");
         JsonNode q = raw.get("quantity");
         if (q != null && q.isObject()) {
             Double value = parseNumberNodeOrText(q.get("value"));
-            if (value == null || value < 0) value = 1d;
+            if (value == null || value <= 0) {
+                value = 1d;
+            }
             oq.put("value", value);
 
             String unit = (q.get("unit") == null || q.get("unit").isNull())
@@ -46,6 +63,7 @@ public final class GeminiEffectiveJsonSupport {
             oq.put("unit", "SERVING");
         }
 
+        // 3) nutrients：固定輸出
         JsonNode n = raw.get("nutrients");
         if (n == null || !n.isObject()) {
             throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
@@ -60,24 +78,55 @@ public final class GeminiEffectiveJsonSupport {
         copyNonNegativeNumberOrNull(n, on, "sugar");
         copyNonNegativeNumberOrNull(n, on, "sodium");
 
+        // 4) confidence：固定輸出
         Double conf = parseNumberNodeOrText(raw.get("confidence"));
         conf = normalizeConfidence(conf);
-        if (conf == null) out.putNull("confidence");
-        else out.put("confidence", conf);
+        if (conf == null) {
+            out.putNull("confidence");
+        } else {
+            out.put("confidence", conf);
+        }
 
+        // 5) warnings：固定輸出
         ArrayNode outW = JsonNodeFactory.instance.arrayNode();
         JsonNode w = raw.get("warnings");
         if (w != null && w.isArray()) {
             for (JsonNode it : w) {
                 if (it == null || it.isNull()) continue;
                 FoodLogWarning ww = FoodLogWarning.parseOrNull(it.asText());
-                if (ww != null) outW.add(ww.name());
+                if (ww != null) {
+                    outW.add(ww.name());
+                }
             }
         }
         out.set("warnings", outW);
 
-        if (raw.has("labelMeta")) {
-            out.set("labelMeta", raw.get("labelMeta"));
+        // 6) labelMeta：固定輸出 + 正規化
+        ObjectNode outLm = out.putObject("labelMeta");
+        JsonNode rawLm = raw.get("labelMeta");
+
+        Double servingsPerContainer = null;
+        String basis = null;
+
+        if (rawLm != null && rawLm.isObject()) {
+            servingsPerContainer = parseNumberNodeOrText(rawLm.get("servingsPerContainer"));
+
+            JsonNode basisNode = rawLm.get("basis");
+            if (basisNode != null && !basisNode.isNull()) {
+                basis = normalizeBasisOrNull(basisNode.asText(null));
+            }
+        }
+
+        if (servingsPerContainer == null || servingsPerContainer <= 0) {
+            outLm.putNull("servingsPerContainer");
+        } else {
+            outLm.put("servingsPerContainer", servingsPerContainer);
+        }
+
+        if (basis == null) {
+            outLm.putNull("basis");
+        } else {
+            outLm.put("basis", basis);
         }
 
         copyCanonicalCategoryAiMetaIfPresent(raw, out);
@@ -91,10 +140,7 @@ public final class GeminiEffectiveJsonSupport {
 
         JsonNode raw = (rawForFinalize != null) ? rawForFinalize : effective;
 
-        // ✅ 關鍵修正：
-        // 以前只有 LABEL 會乘 servingsPerContainer
-        // 現在 PHOTO / LABEL 只要 raw.labelMeta 顯示是 PER_SERVING 且 servingsPerContainer > 1，
-        // 一律轉成 WHOLE_PACKAGE。
+        // 這裡不區分 PHOTO / LABEL，統一做 canonicalization
         applyWholePackageScalingIfNeeded(raw, effective);
 
         roundNutrients1dp(effective);
@@ -167,21 +213,20 @@ public final class GeminiEffectiveJsonSupport {
 
         if (u.equals("G") || u.equals("GRAM") || u.equals("GRAMS")) return "GRAM";
         if (u.equals("ML")
-                || u.equals("MILLILITER")
-                || u.equals("MILLILITERS")
-                || u.equals("MILLILITRE")
-                || u.equals("MILLILITRES")) {
+            || u.equals("MILLILITER")
+            || u.equals("MILLILITERS")
+            || u.equals("MILLILITRE")
+            || u.equals("MILLILITRES")) {
             return "ML";
         }
         if (u.equals("SERVING")
-                || u.equals("SERVINGS")
-                || u.equals("PORTION")
-                || u.equals("PORTIONS")
-                || u.equals("PCS")
-                || u.equals("PC")) {
+            || u.equals("SERVINGS")
+            || u.equals("PORTION")
+            || u.equals("PORTIONS")
+            || u.equals("PCS")
+            || u.equals("PC")) {
             return "SERVING";
         }
-        if (u.equals("GRAM") || u.equals("ML") || u.equals("SERVING")) return u;
         return "SERVING";
     }
 
@@ -202,7 +247,11 @@ public final class GeminiEffectiveJsonSupport {
             if (v == null || v.isNull()) continue;
 
             if (v.isNumber()) {
-                n.put(k, round1(v.asDouble()));
+                double d = v.asDouble();
+                if (Math.abs(d) < 0.05d) {
+                    d = 0.0d;
+                }
+                n.put(k, round1(d));
             } else if (v.isTextual()) {
                 String s = v.asText("").trim();
                 if (!s.isEmpty()) {
@@ -210,7 +259,7 @@ public final class GeminiEffectiveJsonSupport {
                         double d = Double.parseDouble(s.replace(',', '.').replaceAll("[^0-9.\\-]", ""));
                         n.put(k, round1(d));
                     } catch (Exception ignore) {
-                        // keep original text
+                        // keep original
                     }
                 }
             }
@@ -259,10 +308,10 @@ public final class GeminiEffectiveJsonSupport {
         boolean isMg = u.contains("mg") || u.contains("毫克");
         boolean isGram = !isMg && (
                 u.equals("g")
-                        || u.endsWith(" g")
-                        || u.endsWith("g")
-                        || u.contains("公克")
-                        || u.equals("克")
+                || u.endsWith(" g")
+                || u.endsWith("g")
+                || u.contains("公克")
+                || u.equals("克")
         );
 
         boolean isKj = u.contains("kj") || u.contains("千焦");
@@ -312,24 +361,48 @@ public final class GeminiEffectiveJsonSupport {
         }
     }
 
+    /**
+     * 整包 canonicalization：
+     * 1. WHOLE_PACKAGE -> quantity=1 SERVING
+     * 2. PER_SERVING + servings>1 -> 乘成整包
+     * 3. PER_SERVING + servings=1 -> 不乘，但改成 WHOLE_PACKAGE
+     * 4. 保留 servingsPerContainer
+     */
     private static void applyWholePackageScalingIfNeeded(JsonNode raw, ObjectNode effective) {
-        if (raw == null || effective == null) return;
+        if (effective == null) return;
 
         Double servings = null;
         String basis = null;
 
-        JsonNode lm = raw.get("labelMeta");
+        JsonNode lm = (raw == null) ? null : raw.get("labelMeta");
         if (lm != null && lm.isObject()) {
             servings = parseNumberNodeOrText(lm.get("servingsPerContainer"));
-            basis = (lm.get("basis") == null || lm.get("basis").isNull()) ? null : lm.get("basis").asText(null);
+            basis = (lm.get("basis") == null || lm.get("basis").isNull())
+                    ? null
+                    : normalizeBasisOrNull(lm.get("basis").asText(null));
         }
 
-        boolean doScale = (servings != null && servings > 1.0) && "PER_SERVING".equalsIgnoreCase(basis);
-        if (!doScale) return;
-
+        ObjectNode outLm = effective.with("labelMeta");
+        ObjectNode q = effective.with("quantity");
         JsonNode nNode = effective.get("nutrients");
-        if (nNode != null && nNode.isObject()) {
-            ObjectNode n = (ObjectNode) nNode;
+        ObjectNode n = (nNode instanceof ObjectNode obj) ? obj : null;
+
+        if ("WHOLE_PACKAGE".equalsIgnoreCase(basis)) {
+            q.put("value", 1d);
+            q.put("unit", "SERVING");
+
+            if (servings == null || servings <= 0) outLm.putNull("servingsPerContainer");
+            else outLm.put("servingsPerContainer", servings);
+
+            outLm.put("basis", "WHOLE_PACKAGE");
+            return;
+        }
+
+        if (!"PER_SERVING".equalsIgnoreCase(basis)) {
+            return;
+        }
+
+        if (servings != null && servings > 1.0 && n != null) {
             for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
                 JsonNode v = n.get(k);
                 if (v != null && v.isNumber()) {
@@ -338,17 +411,27 @@ public final class GeminiEffectiveJsonSupport {
             }
         }
 
-        JsonNode qNode = effective.get("quantity");
-        if (qNode instanceof ObjectNode q) {
+        // 單份包裝也改成 WHOLE_PACKAGE 語意
+        if (servings != null && servings >= 1.0) {
             q.put("value", 1d);
             q.put("unit", "SERVING");
-        }
-
-        if (effective.has("labelMeta") && effective.get("labelMeta").isObject()) {
-            ObjectNode outLm = (ObjectNode) effective.get("labelMeta");
-            outLm.putNull("servingsPerContainer");
+            outLm.put("servingsPerContainer", servings);
             outLm.put("basis", "WHOLE_PACKAGE");
         }
+    }
+
+    private static String normalizeBasisOrNull(String basis) {
+        if (basis == null || basis.isBlank()) {
+            return null;
+        }
+        String v = basis.trim().toUpperCase(Locale.ROOT);
+        if (v.contains("WHOLE_PACKAGE")) {
+            return "WHOLE_PACKAGE";
+        }
+        if (v.contains("PER_SERVING")) {
+            return "PER_SERVING";
+        }
+        return null;
     }
 
     private static Double parseFirstNumber(String raw) {
