@@ -1,12 +1,14 @@
-package com.calai.backend.foodlog.provider;
+package com.calai.backend.foodlog.provider.transport;
 
 import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
+import com.calai.backend.foodlog.provider.config.GeminiEnabledComponent;
 import com.calai.backend.foodlog.provider.config.GeminiProperties;
 import com.calai.backend.foodlog.web.ModelRefusedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -18,7 +20,8 @@ import org.springframework.web.client.RestClientResponseException;
  * 3. 解析 functionCall.args / text / usageMetadata
  */
 @Slf4j
-final class GeminiTransportSupport {
+@GeminiEnabledComponent
+public final class GeminiTransportSupport {
 
     private static final int PREVIEW_LEN = 200;
     private static final String FN_EMIT_NUTRITION = "emitNutrition";
@@ -27,8 +30,8 @@ final class GeminiTransportSupport {
     private final GeminiProperties props;
     private final GeminiRequestBuilder requestBuilder;
 
-    GeminiTransportSupport(
-            RestClient http,
+    public GeminiTransportSupport(
+            @Qualifier("geminiRestClient") RestClient http,
             GeminiProperties props,
             GeminiRequestBuilder requestBuilder
     ) {
@@ -37,18 +40,7 @@ final class GeminiTransportSupport {
         this.requestBuilder = requestBuilder;
     }
 
-    CallResult callAndExtract(
-            byte[] imageBytes,
-            String mimeType,
-            String userPrompt,
-            String modelId,
-            boolean isLabel,
-            String foodLogIdForLog
-    ) {
-        return callAndExtract(imageBytes, mimeType, userPrompt, modelId, isLabel, foodLogIdForLog, false);
-    }
-
-    CallResult callAndExtract(
+    public CallResult callAndExtract(
             byte[] imageBytes,
             String mimeType,
             String userPrompt,
@@ -102,89 +94,6 @@ final class GeminiTransportSupport {
         return new CallResult(tok, text, fnArgs);
     }
 
-    CallResult callAndExtractTextOnly(
-            String userPrompt,
-            String modelId,
-            String foodLogIdForLog,
-            boolean requireCoreNutrition
-    ) {
-        String sys = "You are a JSON repair engine. Return ONLY ONE minified JSON object. No markdown. No extra text.";
-        return callAndExtractTextOnly(
-                userPrompt,
-                modelId,
-                foodLogIdForLog,
-                sys,
-                requireCoreNutrition,
-                true
-        );
-    }
-
-    CallResult callAndExtractTextOnly(
-            String userPrompt,
-            String modelId,
-            String foodLogIdForLog,
-            String systemInstruction,
-            boolean requireCoreNutrition
-    ) {
-        return callAndExtractTextOnly(
-                userPrompt,
-                modelId,
-                foodLogIdForLog,
-                systemInstruction,
-                requireCoreNutrition,
-                true
-        );
-    }
-
-    CallResult callAndExtractTextOnly(
-            String userPrompt,
-            String modelId,
-            String foodLogIdForLog,
-            String systemInstruction,
-            boolean requireCoreNutrition,
-            boolean useStrictJsonSchema
-    ) {
-        JsonNode resp;
-        try {
-            resp = callGenerateContentTextOnly(
-                    systemInstruction,
-                    userPrompt,
-                    modelId,
-                    requireCoreNutrition,
-                    useStrictJsonSchema
-            );
-        } catch (RestClientResponseException re) {
-            ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(re);
-            ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(mapped.code());
-            if (reason != null) {
-                log.warn("gemini_refused_http(textOnly) foodLogId={} modelId={} reason={} code={}",
-                        foodLogIdForLog, modelId, reason, mapped.code());
-                throw new ModelRefusedException(reason, mapped.code());
-            }
-            throw re;
-        }
-
-        ProviderRefuseReason reason = GeminiRefusalDetector.detectOrNull(resp);
-        if (reason != null) {
-            String code = "PROVIDER_REFUSED_" + reason.name();
-            log.warn("gemini_refused(textOnly) foodLogId={} modelId={} reason={} code={}",
-                    foodLogIdForLog, modelId, reason, code);
-            throw new ModelRefusedException(reason, code);
-        }
-
-        Tok tok = extractUsage(resp);
-
-        String text = extractJoinedTextOrNull(resp);
-        if (text == null) {
-            text = "";
-        }
-
-        log.debug("geminiTextOnlyPreview foodLogId={} modelId={} preview={}",
-                foodLogIdForLog, modelId, safeOneLine200(text));
-
-        return new CallResult(tok, text, null);
-    }
-
     /**
      * ✅ 保留原本 image request 路徑
      * PHOTO / ALBUM / LABEL 主流程都靠這個方法送圖給 Gemini。
@@ -204,33 +113,6 @@ final class GeminiTransportSupport {
                 isLabel,
                 FN_EMIT_NUTRITION,
                 requireCoreNutrition
-        );
-
-        return http.post()
-                .uri("/v1beta/models/{model}:generateContent", modelId)
-                .header("x-goog-api-key", requireApiKey())
-                .contentType(MediaType.APPLICATION_JSON)
-                .accept(MediaType.APPLICATION_JSON)
-                .body(req)
-                .retrieve()
-                .body(JsonNode.class);
-    }
-
-    /**
-     * ✅ text-only repair / salvage / name-only estimate 路徑
-     */
-    private JsonNode callGenerateContentTextOnly(
-            String systemInstruction,
-            String userPrompt,
-            String modelId,
-            boolean requireCoreNutrition,
-            boolean useStrictJsonSchema
-    ) {
-        ObjectNode req = requestBuilder.buildTextOnlyRequest(
-                systemInstruction,
-                userPrompt,
-                requireCoreNutrition,
-                useStrictJsonSchema
         );
 
         return http.post()
@@ -363,7 +245,7 @@ final class GeminiTransportSupport {
         return (t.length() > PREVIEW_LEN) ? t.substring(0, PREVIEW_LEN) : t;
     }
 
-    record CallResult(Tok tok, String text, JsonNode functionArgs) {}
+    public record CallResult(Tok tok, String text, JsonNode functionArgs) {}
 
-    record Tok(Integer promptTok, Integer candTok, Integer totalTok) {}
+    public record Tok(Integer promptTok, Integer candTok, Integer totalTok) {}
 }

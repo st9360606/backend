@@ -84,7 +84,7 @@ public class FoodLogOverrideService {
             case HEALTH_SCORE -> {
                 if (!v.isInt() && !v.isIntegralNumber()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
                 int n = v.asInt();
-                if (n < 1 || n > 10) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (n < 0 || n > 10) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
             }
             case QUANTITY -> {
                 if (!v.isObject()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");

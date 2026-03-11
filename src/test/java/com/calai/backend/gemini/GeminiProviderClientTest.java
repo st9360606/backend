@@ -1,187 +1,80 @@
-package com.calai.backend.gemini;
+package com.calai.backend.foodlog.provider;
 
-import com.calai.backend.foodlog.barcode.BarcodeLookupService;
-import com.calai.backend.foodlog.config.AiModelRouter;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
-import com.calai.backend.foodlog.model.ModelMode;
-import com.calai.backend.foodlog.packagedfood.ImageBarcodeDetector;
-import com.calai.backend.foodlog.packagedfood.OpenFoodFactsSearchService;
-import com.calai.backend.foodlog.provider.GeminiProviderClient;
-import com.calai.backend.foodlog.provider.config.GeminiProperties;
-import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.FoodLogWarning;
-import com.calai.backend.foodlog.task.ProviderTelemetry;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.calai.backend.foodlog.task.ProviderClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
-import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.RegisterExtension;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
-import org.springframework.web.client.RestClient;
 
-import java.io.ByteArrayInputStream;
-import java.net.http.HttpClient;
-import java.util.Optional;
+import java.util.List;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.*;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class GeminiProviderClientTest {
 
-    @RegisterExtension
-    static WireMockExtension wm = WireMockExtension.newInstance()
-            .options(wireMockConfig().dynamicPort())
-            .build();
+    @Test
+    void providerCode_should_return_GEMINI() {
+        GeminiModeProcessor p1 = mock(GeminiModeProcessor.class);
+        GeminiProviderClient client = new GeminiProviderClient(List.of(p1));
 
-    private static RestClient restClientHttp11(String baseUrl) {
-        HttpClient jdk = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
-
-        return RestClient.builder()
-                .baseUrl(baseUrl)
-                .requestFactory(new JdkClientHttpRequestFactory(jdk))
-                .build();
-    }
-
-    private static String geminiRespWithText(ObjectMapper om, String text, int p, int c, int t) throws Exception {
-        ObjectNode root = om.createObjectNode();
-        var candidates = root.putArray("candidates");
-        var cand0 = candidates.addObject();
-        var content = cand0.putObject("content");
-        var parts = content.putArray("parts");
-        parts.addObject().put("text", text);
-
-        var usage = root.putObject("usageMetadata");
-        usage.put("promptTokenCount", p);
-        usage.put("candidatesTokenCount", c);
-        usage.put("totalTokenCount", t);
-
-        return om.writeValueAsString(root);
+        assertEquals("GEMINI", client.providerCode());
     }
 
     @Test
-    void photo_should_call_main_and_at_most_one_text_repair_then_fallback_unknown() throws Exception {
-        String pathRegex = "/v1beta/models/.*:generateContent";
-        ObjectMapper om = new ObjectMapper();
+    void process_should_dispatch_to_first_supported_processor() throws Exception {
+        GeminiModeProcessor photoProcessor = mock(GeminiModeProcessor.class);
+        GeminiModeProcessor labelProcessor = mock(GeminiModeProcessor.class);
 
-        String mainText = """
-        {"foodName":"Paella","quantity":{"value":1,"unit":"SERVING"},
-         "nutrients":{"kcal":420,"protein":null,"fat":null,"carbs":null,"fiber":null,"sugar":null,"sodium":null},
-         "confidence":0.6,"warnings":[]}
-        """.replace("\n", "").replace("\r", "").replace(" ", "");
+        GeminiProviderClient client = new GeminiProviderClient(List.of(photoProcessor, labelProcessor));
 
-        String repairText = """
-        {"foodName":"Paella","quantity":{"value":1,"unit":"SERVING"},
-         "nutrients":{"kcal":null,"protein":null,"fat":null,"carbs":null,"fiber":null,"sugar":null,"sodium":null},
-         "confidence":0.2,"warnings":["LOW_CONFIDENCE"]}
-        """.replace("\n", "").replace("\r", "").replace(" ", "");
-
-        String mainResp = geminiRespWithText(om, mainText, 100, 50, 150);
-        String repairResp = geminiRespWithText(om, repairText, 80, 40, 120);
-
-        wm.stubFor(post(urlPathMatching(pathRegex))
-                .inScenario("seq-photo")
-                .whenScenarioStateIs(Scenario.STARTED)
-                .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody(mainResp))
-                .willSetStateTo("REPAIR"));
-
-        wm.stubFor(post(urlPathMatching(pathRegex))
-                .inScenario("seq-photo")
-                .whenScenarioStateIs("REPAIR")
-                .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody(repairResp)));
-
-        RestClient http = restClientHttp11(wm.getRuntimeInfo().getHttpBaseUrl());
-
-        GeminiProperties props = mock(GeminiProperties.class);
-        when(props.getApiKey()).thenReturn("TEST_API_KEY");
-        when(props.getMaxOutputTokens()).thenReturn(1024);
-        when(props.getTemperature()).thenReturn(0.0);
-        when(props.isLabelUseFunctionCalling()).thenReturn(false);
-
-        ProviderTelemetry telemetry = mock(ProviderTelemetry.class);
-
-        AiModelRouter router = mock(AiModelRouter.class);
-        when(router.resolveOrThrow(eq(ModelTier.MODEL_TIER_HIGH), eq(ModelMode.VISION)))
-                .thenReturn(new AiModelRouter.Resolved("GEMINI", "gemini-vision"));
-        when(router.resolveOrThrow(eq(ModelTier.MODEL_TIER_HIGH), eq(ModelMode.TEXT)))
-                .thenReturn(new AiModelRouter.Resolved("GEMINI", "gemini-text"));
-
-        ImageBarcodeDetector imageBarcodeDetector = mock(ImageBarcodeDetector.class);
-        when(imageBarcodeDetector.detect(any())).thenReturn(Optional.empty());
-
-        BarcodeLookupService barcodeLookupService = mock(BarcodeLookupService.class);
-        OpenFoodFactsSearchService offSearchService = mock(OpenFoodFactsSearchService.class);
-
-        GeminiProviderClient client = new GeminiProviderClient(
-                http,
-                props,
-                om,
-                telemetry,
-                router,
-                imageBarcodeDetector,
-                barcodeLookupService,
-                offSearchService
-        );
+        FoodLogEntity entity = new FoodLogEntity();
+        entity.setMethod("PHOTO");
 
         StorageService storage = mock(StorageService.class);
-        when(storage.open(anyString())).thenReturn(
-                new StorageService.OpenResult(
-                        new ByteArrayInputStream(new byte[]{1, 2, 3}),
-                        3L,
-                        "image/jpeg"
-                )
-        );
 
-        FoodLogEntity e = new FoodLogEntity();
-        e.setId("foodlog-1");
-        e.setMethod("PHOTO");
-        e.setDegradeLevel("DG-0");
-        e.setImageObjectKey("k1");
-        e.setImageContentType("image/jpeg");
+        ObjectMapper om = new ObjectMapper();
+        ObjectNode effective = om.createObjectNode();
+        effective.put("foodName", "Paella");
 
-        var out = client.process(e, storage);
+        ProviderClient.ProviderResult expected =
+                new ProviderClient.ProviderResult(effective, "GEMINI");
 
-        assertNotNull(out);
-        assertEquals("GEMINI", out.provider());
+        when(photoProcessor.supports("PHOTO")).thenReturn(true);
+        when(photoProcessor.process(entity, storage)).thenReturn(expected);
 
-        JsonNode effective = out.effective();
-        assertNotNull(effective);
+        ProviderClient.ProviderResult actual = client.process(entity, storage);
 
-        // ✅ 走 fallback unknown 時，不再要求保留 tentative foodName
-        assertTrue(effective.path("foodName").isMissingNode()
-                   || effective.path("foodName").isNull()
-                   || effective.path("foodName").asText().isBlank());
+        assertNotNull(actual);
+        assertEquals("GEMINI", actual.provider());
+        assertEquals("Paella", actual.effective().path("foodName").asText());
 
-        assertTrue(containsWarning(effective, FoodLogWarning.UNKNOWN_FOOD.name()));
-        assertTrue(containsWarning(effective, FoodLogWarning.LOW_CONFIDENCE.name()));
-
-        wm.verify(2, postRequestedFor(urlPathMatching(pathRegex)));
-
-        verify(telemetry, atLeastOnce()).ok(
-                eq("GEMINI"),
-                eq("gemini-vision"),
-                eq("foodlog-1"),
-                anyLong(),
-                eq(180),
-                eq(90),
-                eq(270)
-        );
+        verify(photoProcessor, times(1)).supports("PHOTO");
+        verify(photoProcessor, times(1)).process(entity, storage);
+        verifyNoInteractions(labelProcessor);
     }
 
-    private static boolean containsWarning(JsonNode effective, String code) {
-        if (effective == null) return false;
-        JsonNode w = effective.path("warnings");
-        if (!w.isArray()) return false;
-        for (JsonNode it : w) {
-            if (it != null && !it.isNull() && code.equalsIgnoreCase(it.asText())) return true;
-        }
-        return false;
+    @Test
+    void process_should_throw_when_no_processor_supports_method() {
+        GeminiModeProcessor p1 = mock(GeminiModeProcessor.class);
+        GeminiModeProcessor p2 = mock(GeminiModeProcessor.class);
+
+        when(p1.supports("UNKNOWN")).thenReturn(false);
+        when(p2.supports("UNKNOWN")).thenReturn(false);
+
+        GeminiProviderClient client = new GeminiProviderClient(List.of(p1, p2));
+
+        FoodLogEntity entity = new FoodLogEntity();
+        entity.setMethod("UNKNOWN");
+
+        StorageService storage = mock(StorageService.class);
+
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> client.process(entity, storage)
+        );
+
+        assertEquals("UNSUPPORTED_METHOD_FOR_GEMINI_PROVIDER", ex.getMessage());
     }
 }

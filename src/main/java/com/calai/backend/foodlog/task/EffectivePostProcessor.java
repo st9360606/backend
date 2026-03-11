@@ -1,7 +1,10 @@
 package com.calai.backend.foodlog.task;
 
+import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.*;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -12,117 +15,115 @@ import java.util.Locale;
 @Service
 public class EffectivePostProcessor {
 
-    private final HealthScore healthScore;
     private final NutritionSanityChecker sanityChecker;
 
-    /**
-     * ✅ 向後相容：舊呼叫點不傳 method 時，預設走非 LABEL 邏輯
-     */
     public ObjectNode apply(ObjectNode effective, String providerCode) {
         return apply(effective, providerCode, null);
     }
 
-    /**
-     * ✅ NEW：method-aware
-     * - LABEL：不套用 NON_FOOD_SUSPECT（避免誤傷），但仍計算 healthScore（你要求）
-     * - 其他：維持原本行為
-     */
     public ObjectNode apply(ObjectNode effective, String providerCode, String method) {
         if (effective == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
 
         ObjectNode nutrients = getObj(effective, "nutrients");
         if (nutrients == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
 
-        String m = (method == null) ? "" : method.trim().toUpperCase(Locale.ROOT);
-        boolean isLabel = "LABEL".equals(m);
-
-        Double conf = (effective.get("confidence") != null && effective.get("confidence").isNumber())
-                ? effective.get("confidence").asDouble()
-                : null;
-
-        // ✅ degraded 判斷：加入 NO_LABEL_DETECTED（Label 專用）
-        boolean noFood  = hasWarning(effective, FoodLogWarning.NO_FOOD_DETECTED.name());
-        boolean unknown = hasWarning(effective, FoodLogWarning.UNKNOWN_FOOD.name());
-        boolean noLabel = hasWarning(effective, FoodLogWarning.NO_LABEL_DETECTED.name());
-
-        boolean degraded = noFood || unknown || noLabel;
-
-        Integer score = null;
-
-        // ===== 1) degraded：不計分（因為 nutrients 通常全 null / 不可信）=====
-        if (degraded) {
-            effective.remove("healthScore");
-
-            // LOW_CONFIDENCE（保留）
-            if (conf == null || conf <= 0.4) addWarningWhitelist(effective, FoodLogWarning.LOW_CONFIDENCE);
-
-            // sanity check（保留）
-            sanityChecker.apply(effective);
-
-            // degradedReason 寫入 aiMeta
-            setDegradedReasonIfAny(effective);
-
-            // healthScore meta（保留格式）
-            ObjectNode meta = JsonNodeFactory.instance.objectNode();
-            meta.put("version", "v1");
-            meta.put("computedAtUtc", Instant.now().toString());
-            meta.put("provider", norm(providerCode));
-            effective.set("healthScoreMeta", meta);
-
-            sanitizeWarningsToWhitelist(effective);
-            return effective;
-        }
-
-        // ===== 2) 非 degraded：Label 跳過 NON_FOOD_SUSPECT，但仍計分 =====
-        if (isLabel) {
-            score = healthScore.score(nutrients);
-            if (score != null) effective.put("healthScore", score);
-            else effective.remove("healthScore");
-        } else {
-            // 原本邏輯：非 Label 才做 NON_FOOD_SUSPECT
-            boolean nonFood = isNonFoodSuspect(effective, conf);
-
-            if (!nonFood) {
-                score = healthScore.score(nutrients);
-                if (score != null) effective.put("healthScore", score);
-                else effective.remove("healthScore");
-            } else {
-                effective.remove("healthScore");
-                addWarningWhitelist(effective, FoodLogWarning.NON_FOOD_SUSPECT);
-                clampConfidenceMax(effective, 0.3);
+        Double conf = null;
+        JsonNode confNode = effective.get("confidence");
+        if (confNode != null && !confNode.isNull()) {
+            if (confNode.isNumber()) {
+                conf = confNode.asDouble();
+            } else if (confNode.isTextual()) {
+                try {
+                    conf = Double.parseDouble(confNode.asText().trim());
+                } catch (Exception ignore) {
+                    conf = null;
+                }
             }
         }
 
-        // LOW_CONFIDENCE（維持你原本）
+        Integer hs = null;
+        JsonNode hsNode = effective.get("healthScore");
+        if (hsNode != null && !hsNode.isNull()) {
+            if (hsNode.isIntegralNumber()) {
+                hs = hsNode.asInt();
+            } else if (hsNode.isNumber()) {
+                hs = (int) Math.round(hsNode.asDouble());
+            } else if (hsNode.isTextual()) {
+                try {
+                    hs = (int) Math.round(Double.parseDouble(hsNode.asText().trim()));
+                } catch (Exception ignore) {
+                    hs = null;
+                }
+            }
+        }
+
+        if (hs != null) {
+            if (hs < 0) hs = 0;
+            if (hs > 10) hs = 10;
+            effective.put("healthScore", hs);
+        } else {
+            effective.remove("healthScore");
+        }
+
+        boolean noFood = hasWarning(effective, FoodLogWarning.NO_FOOD_DETECTED.name());
+        boolean unknown = hasWarning(effective, FoodLogWarning.UNKNOWN_FOOD.name());
+        boolean noLabel = hasWarning(effective, FoodLogWarning.NO_LABEL_DETECTED.name());
+        boolean missingNutritionFacts = hasWarning(effective, FoodLogWarning.MISSING_NUTRITION_FACTS.name());
+
+        boolean degraded = noFood || unknown || noLabel || missingNutritionFacts;
+
         if (conf == null || conf <= 0.4) {
             addWarningWhitelist(effective, FoodLogWarning.LOW_CONFIDENCE);
         }
 
         sanityChecker.apply(effective);
+        setDegradedReasonIfAny(effective);
 
-        // healthScore meta
+        String provider = norm(providerCode);
+
         ObjectNode meta = JsonNodeFactory.instance.objectNode();
         meta.put("version", "v1");
         meta.put("computedAtUtc", Instant.now().toString());
-        meta.put("provider", norm(providerCode));
-        if (score != null) meta.put("score", score);
+
+        if (provider != null) {
+            meta.put("provider", provider);
+        } else {
+            meta.putNull("provider");
+        }
+
+        if (hs != null) {
+            meta.put("score", hs);
+            if (provider != null) {
+                meta.put("scoreSource", provider);
+            } else {
+                meta.putNull("scoreSource");
+            }
+        }
+
+        if (provider != null) {
+            meta.put("confidenceSource", provider);
+        } else {
+            meta.putNull("confidenceSource");
+        }
+
+        meta.put("degraded", degraded);
         effective.set("healthScoreMeta", meta);
 
-        setDegradedReasonIfAny(effective);
         sanitizeWarningsToWhitelist(effective);
-
         return effective;
     }
 
     private static void setDegradedReasonIfAny(ObjectNode eff) {
-        boolean noFood  = hasWarning(eff, FoodLogWarning.NO_FOOD_DETECTED.name());
+        boolean noFood = hasWarning(eff, FoodLogWarning.NO_FOOD_DETECTED.name());
         boolean unknown = hasWarning(eff, FoodLogWarning.UNKNOWN_FOOD.name());
         boolean noLabel = hasWarning(eff, FoodLogWarning.NO_LABEL_DETECTED.name());
+        boolean missingNutritionFacts = hasWarning(eff, FoodLogWarning.MISSING_NUTRITION_FACTS.name());
 
         String reason = null;
         if (noFood) reason = "NO_FOOD";
         else if (unknown) reason = "UNKNOWN_FOOD";
         else if (noLabel) reason = "NO_LABEL";
+        else if (missingNutritionFacts) reason = "MISSING_NUTRITION_FACTS";
 
         if (reason == null) return;
 
@@ -141,35 +142,6 @@ public class EffectivePostProcessor {
         ObjectNode out = JsonNodeFactory.instance.objectNode();
         root.set(field, out);
         return out;
-    }
-
-    private static boolean isNonFoodSuspect(ObjectNode eff, Double conf) {
-        String rawName = eff.path("foodName").asText("");
-        String name = rawName.toLowerCase(Locale.ROOT);
-
-        boolean noFoodDetected = hasWarning(eff, FoodLogWarning.NO_FOOD_DETECTED.name());
-
-        boolean nameMissing = rawName.isBlank();
-        boolean veryLowConf = (conf != null && conf <= 0.2);
-        boolean implicitNoFood = nameMissing && veryLowConf;
-
-        boolean nameLooksNonFood =
-                name.contains("glass") || name.contains("mug") || name.contains("cup")
-                || name.contains("plate") || name.contains("bottle") || name.contains("table");
-
-        boolean lowConf = (conf != null && conf <= 0.4);
-
-        boolean nameLooksNoFood =
-                name.contains("no food")
-                || name.contains("not food")
-                || name.contains("no meal")
-                || name.contains("unknown")
-                || name.contains("undetected");
-
-        return noFoodDetected
-               || implicitNoFood
-               || (nameLooksNonFood && lowConf)
-               || (nameLooksNoFood && lowConf);
     }
 
     private static boolean hasWarning(ObjectNode eff, String code) {
@@ -210,14 +182,6 @@ public class EffectivePostProcessor {
 
         if (out.isEmpty()) eff.remove("warnings");
         else eff.set("warnings", out);
-    }
-
-    private static void clampConfidenceMax(ObjectNode eff, double max) {
-        JsonNode c = eff.get("confidence");
-        if (c != null && c.isNumber()) {
-            double v = c.asDouble();
-            if (v > max) eff.put("confidence", max);
-        }
     }
 
     private static ObjectNode getObj(ObjectNode root, String field) {

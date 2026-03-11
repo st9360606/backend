@@ -2,11 +2,13 @@ package com.calai.backend.foodlog.provider;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Locale;
 
+@Component
 public final class GeminiJsonParsingSupport {
 
     private final ObjectMapper om;
@@ -176,21 +178,9 @@ public final class GeminiJsonParsingSupport {
     private static String patchDanglingTail(String s) {
         if (s == null) return null;
         String t = rtrim(s);
-
+        // 保守策略：只補 null，不發明 unit / basis 語意
         if (t.endsWith(":")) {
-            String key = extractLastJsonKeyBeforeColon(t);
-            if (key != null) {
-                String lower = key.toLowerCase(Locale.ROOT);
-                if (lower.equals("unit")) {
-                    t = t + "\"SERVING\"";
-                } else if (lower.equals("basis")) {
-                    t = t + "\"PER_SERVING\"";
-                } else {
-                    t = t + "null";
-                }
-            } else {
-                t = t + "null";
-            }
+            return t + "null";
         }
         return t;
     }

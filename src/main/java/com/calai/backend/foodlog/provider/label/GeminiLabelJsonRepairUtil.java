@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.provider.util;
+package com.calai.backend.foodlog.provider.label;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,9 +15,9 @@ import java.util.regex.Pattern;
  * 3) number 卡在 140.（JSON 不合法）
  * 4) 就算 JSON 無法 parse，也要能從破碎字串抽出 nutrients/quantity/confidence
  */
-public final class LabelJsonRepairUtil {
+public final class GeminiLabelJsonRepairUtil {
 
-    private LabelJsonRepairUtil() {}
+    private GeminiLabelJsonRepairUtil() {}
 
     // ---- public API ----
 
@@ -31,25 +31,6 @@ public final class LabelJsonRepairUtil {
         // 不可 parse：從破碎 JSON-like 字串抽值（餅乾那張可直接救回蛋白/脂肪/碳水/糖/鈉）
         return extractFromBrokenJsonLikeText(om, rawText, labelStrict);
     }
-
-    /** 判斷是否「太短/早斷」：像藍莓那張只到 kcal 就斷掉，通常需要重打 vision。 */
-    public static boolean looksLikeEarlyTruncation(String rawText) {
-        if (rawText == null) return false;
-        String t = rawText.trim();
-
-        // 很短、或 nutrients 裡只看到 kcal 看不到 carbs/sugar/fiber/protein 等
-        boolean tooShort = t.length() < 140;
-        boolean hasKcal = t.contains("\"kcal\"");
-        boolean missingMost = !(t.contains("\"carbs\"") || t.contains("\"sugar\"") || t.contains("\"fiber\"")
-                                || t.contains("\"protein\"") || t.contains("\"fat\""));
-
-        // ends with digit dot = 140. 也是典型「中途斷」
-        boolean endsWithDanglingNumberDot = t.matches(".*\\d+\\.$");
-
-        return (hasKcal && missingMost) || tooShort || endsWithDanglingNumberDot;
-    }
-
-    // ---- internals: parse/repair ----
 
     private static JsonNode tryParseJson(ObjectMapper om, String raw) {
         String payload = extractFirstJsonPayload(raw);
@@ -214,7 +195,7 @@ public final class LabelJsonRepairUtil {
 
         // confidence
         Double conf = extractJsonNumberValue(text, "confidence");
-        if (conf == null) out.put("confidence", 0.25);
+        if (conf == null) out.putNull("confidence");
         else out.put("confidence", conf);
 
         // labelStrict：補齊 warnings/labelMeta，避免 normalize 階段因缺 key 再爆

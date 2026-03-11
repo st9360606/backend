@@ -5,7 +5,7 @@ import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
-import com.calai.backend.foodlog.task.FoodLogWarning;
+import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -138,8 +138,15 @@ public class FoodLogHistoryService {
                 degradedReason = textOrNull(aiMeta.get("degradedReason"));
             }
             if (degradedReason == null && warnings != null) {
-                if (warnings.contains("NO_FOOD_DETECTED")) degradedReason = "NO_FOOD";
-                else if (warnings.contains("UNKNOWN_FOOD")) degradedReason = "UNKNOWN_FOOD";
+                if (warnings.contains("NO_FOOD_DETECTED")) {
+                    degradedReason = "NO_FOOD";
+                } else if (warnings.contains("UNKNOWN_FOOD")) {
+                    degradedReason = "UNKNOWN_FOOD";
+                } else if (warnings.contains("NO_LABEL_DETECTED")) {
+                    degradedReason = "NO_LABEL";
+                } else if (warnings.contains("MISSING_NUTRITION_FACTS")) {
+                    degradedReason = "MISSING_NUTRITION_FACTS";
+                }
             }
         }
 

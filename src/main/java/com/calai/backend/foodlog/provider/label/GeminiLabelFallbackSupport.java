@@ -1,6 +1,7 @@
-package com.calai.backend.foodlog.provider;
+package com.calai.backend.foodlog.provider.label;
 
-import com.calai.backend.foodlog.task.FoodLogWarning;
+import com.calai.backend.foodlog.provider.GeminiEffectiveJsonSupport;
+import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -36,6 +37,7 @@ public final class GeminiLabelFallbackSupport {
 
     public ObjectNode fallbackLabelPartialDetected(String rawText) {
         ObjectNode root = om.createObjectNode();
+
         String name = extractJsonStringValue(rawText, "foodName");
         if (name == null || name.isBlank()) root.putNull("foodName");
         else root.put("foodName", name);
@@ -45,15 +47,10 @@ public final class GeminiLabelFallbackSupport {
         q.put("unit", "SERVING");
 
         ObjectNode n = root.putObject("nutrients");
-        n.putNull("kcal");
-        n.putNull("protein");
-        n.putNull("fat");
-        n.putNull("carbs");
-        n.putNull("fiber");
-        n.putNull("sugar");
-        n.putNull("sodium");
+        fillMissingNutrientsWithZero(n);
 
-        root.put("confidence", 0.15);
+        // ✅ confidence 不自己猜，保持 null
+        root.putNull("confidence");
 
         ArrayNode w = root.putArray("warnings");
         w.add(FoodLogWarning.LABEL_PARTIAL.name());
@@ -70,12 +67,22 @@ public final class GeminiLabelFallbackSupport {
         root = GeminiEffectiveJsonSupport.unwrapRootObjectOrNull(root);
         if (root == null || !root.isObject()) return true;
 
-        if (!GeminiEffectiveJsonSupport.isAllNutrientsNull(root)) return false;
+        JsonNode n = root.get("nutrients");
+        if (n == null || !n.isObject()) return true;
+
+        boolean allZeroOrNull = true;
+        for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
+            Double v = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get(k));
+            if (v != null && Math.abs(v) > 0.0001d) {
+                allZeroOrNull = false;
+                break;
+            }
+        }
+
+        if (!allZeroOrNull) return false;
 
         Double conf = GeminiEffectiveJsonSupport.parseNumberNodeOrText(root.get("confidence"));
-        boolean veryLow = (conf == null || conf <= 0.1);
-
-        return veryLow;
+        return conf == null || conf <= 0.1d;
     }
 
     public boolean isLabelIncomplete(JsonNode root) {
@@ -85,40 +92,32 @@ public final class GeminiLabelFallbackSupport {
         JsonNode n = root.get("nutrients");
         if (n == null || !n.isObject()) return true;
 
-        int nonNull = 0;
-        JsonNode kcal = n.get("kcal");
-        boolean kcalPresent = (kcal != null && !kcal.isNull());
+        Double kcal = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get("kcal"));
+        Double protein = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get("protein"));
+        Double fat = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get("fat"));
+        Double carbs = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get("carbs"));
+        Double fiber = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get("fiber"));
+        Double sugar = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get("sugar"));
+        Double sodium = GeminiEffectiveJsonSupport.parseNumberNodeOrText(n.get("sodium"));
+        Double conf = GeminiEffectiveJsonSupport.parseNumberNodeOrText(root.get("confidence"));
 
-        for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
-            JsonNode v = n.get(k);
-            if (v != null && !v.isNull()) nonNull++;
-        }
+        boolean kcalMissing = (kcal == null);
+        boolean allZeroOrNull =
+                zeroOrNull(kcal) && zeroOrNull(protein) && zeroOrNull(fat) && zeroOrNull(carbs)
+                && zeroOrNull(fiber) && zeroOrNull(sugar) && zeroOrNull(sodium);
 
-        if (!kcalPresent) return true;
-        if (nonNull <= 1) return true;
+        boolean coreAllZeroOrNull =
+                zeroOrNull(kcal) && zeroOrNull(protein) && zeroOrNull(fat) && zeroOrNull(carbs);
 
-        boolean sodiumNull = (n.get("sodium") == null || n.get("sodium").isNull());
-        boolean allMacrosNull =
-                (n.get("protein") == null || n.get("protein").isNull())
-                && (n.get("fat") == null || n.get("fat").isNull())
-                && (n.get("carbs") == null || n.get("carbs").isNull())
-                && (n.get("sugar") == null || n.get("sugar").isNull());
+        if (kcalMissing) return true;
+        if (allZeroOrNull) return true;
+        if (coreAllZeroOrNull && (conf == null || conf <= 0.35d)) return true;
 
-        return sodiumNull && allMacrosNull;
+        return false;
     }
 
-    public int labelNutrientScore(JsonNode root) {
-        root = GeminiEffectiveJsonSupport.unwrapRootObjectOrNull(root);
-        if (root == null || !root.isObject()) return -1;
-        JsonNode n = root.get("nutrients");
-        if (n == null || !n.isObject()) return -1;
-
-        int nonNull = 0;
-        for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
-            JsonNode v = n.get(k);
-            if (v != null && !v.isNull()) nonNull++;
-        }
-        return nonNull;
+    private static boolean zeroOrNull(Double v) {
+        return v == null || Math.abs(v) < 0.0001d;
     }
 
     public void ensureLabelRequiredKeys(ObjectNode obj) {
@@ -133,28 +132,22 @@ public final class GeminiLabelFallbackSupport {
             obj.set("quantity", q);
         } else {
             ObjectNode q = (ObjectNode) obj.get("quantity");
-            if (!q.has("value")) q.put("value", 1d);
-            if (!q.has("unit")) q.put("unit", "SERVING");
+            if (!q.has("value") || q.get("value").isNull()) q.put("value", 1d);
+            if (!q.has("unit") || q.get("unit").isNull()) q.put("unit", "SERVING");
         }
 
         if (!obj.has("nutrients") || !obj.get("nutrients").isObject()) {
             ObjectNode n = om.createObjectNode();
-            n.putNull("kcal");
-            n.putNull("protein");
-            n.putNull("fat");
-            n.putNull("carbs");
-            n.putNull("fiber");
-            n.putNull("sugar");
-            n.putNull("sodium");
+            fillMissingNutrientsWithZero(n);
             obj.set("nutrients", n);
         } else {
             ObjectNode n = (ObjectNode) obj.get("nutrients");
-            for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
-                if (!n.has(k)) n.putNull(k);
-            }
+            fillMissingNutrientsWithZero(n);
         }
 
+        // ✅ confidence / healthScore 不自己補數字
         if (!obj.has("confidence")) obj.putNull("confidence");
+        if (!obj.has("healthScore")) obj.putNull("healthScore");
 
         if (!obj.has("warnings") || !obj.get("warnings").isArray()) {
             obj.set("warnings", om.createArrayNode());
@@ -196,17 +189,14 @@ public final class GeminiLabelFallbackSupport {
 
                 if (!obj.has("nutrients") || !obj.get("nutrients").isObject()) {
                     ObjectNode nutrients = om.createObjectNode();
-                    nutrients.putNull("kcal");
-                    nutrients.putNull("protein");
-                    nutrients.putNull("fat");
-                    nutrients.putNull("carbs");
-                    nutrients.putNull("fiber");
-                    nutrients.putNull("sugar");
-                    nutrients.putNull("sodium");
+                    fillMissingNutrientsWithZero(nutrients);
                     obj.set("nutrients", nutrients);
+                } else {
+                    fillMissingNutrientsWithZero((ObjectNode) obj.get("nutrients"));
                 }
 
-                if (!obj.has("confidence")) obj.put("confidence", 0.25);
+                if (!obj.has("confidence")) obj.putNull("confidence");
+                if (!obj.has("healthScore")) obj.putNull("healthScore");
 
                 if (!obj.has("quantity") || !obj.get("quantity").isObject()) {
                     ObjectNode quantity = om.createObjectNode();
@@ -274,7 +264,7 @@ public final class GeminiLabelFallbackSupport {
         putOrNull(n, "sugar", sugar);
         putOrNull(n, "sodium", sodium);
 
-        root.put("confidence", 0.25);
+        root.putNull("confidence");
         root.putArray("warnings").add(FoodLogWarning.LOW_CONFIDENCE.name());
 
         ObjectNode lm = root.putObject("labelMeta");
@@ -316,14 +306,10 @@ public final class GeminiLabelFallbackSupport {
         ObjectNode root = om.createObjectNode();
         root.putNull("foodName");
 
+        // 對齊 Prompt：quantity 不再輸出 GRAM / ML
         ObjectNode q = root.putObject("quantity");
-        if (servingAmount != null && servingAmount.value() != null && servingAmount.value() > 0) {
-            q.put("value", servingAmount.value());
-            q.put("unit", servingAmount.unit());
-        } else {
-            q.put("value", 1d);
-            q.put("unit", "SERVING");
-        }
+        q.put("value", 1d);
+        q.put("unit", inferLogicalUnitFromText(lower));
 
         ObjectNode n = root.putObject("nutrients");
         putOrNull(n, "kcal", kcal);
@@ -334,7 +320,7 @@ public final class GeminiLabelFallbackSupport {
         putOrNull(n, "sugar", sugar);
         putOrNull(n, "sodium", sodium);
 
-        root.put("confidence", 0.35);
+        root.putNull("confidence");
         ArrayNode w = root.putArray("warnings");
         w.add(FoodLogWarning.LOW_CONFIDENCE.name());
 
@@ -342,12 +328,36 @@ public final class GeminiLabelFallbackSupport {
         if (servingsPerContainer != null && servingsPerContainer > 1) {
             lm.put("servingsPerContainer", servingsPerContainer);
             lm.put("basis", "PER_SERVING");
+        } else if (servingAmount != null) {
+            lm.putNull("servingsPerContainer");
+            lm.put("basis", "PER_SERVING");
         } else {
             lm.putNull("servingsPerContainer");
             lm.putNull("basis");
         }
 
         return root;
+    }
+
+    private static String inferLogicalUnitFromText(String lower) {
+        if (lower == null || lower.isBlank()) {
+            return "SERVING";
+        }
+        if (lower.contains("bottle") || lower.contains("drink") || lower.contains("飲料")) {
+            return "BOTTLE";
+        }
+        if (lower.contains("can") || lower.contains("tin")) {
+            return "CAN";
+        }
+        if (lower.contains("bag") || lower.contains("pack") || lower.contains("package")
+            || lower.contains("box") || lower.contains("袋") || lower.contains("盒")) {
+            return "PACK";
+        }
+        if (lower.contains("piece") || lower.contains("pcs") || lower.contains("pc")
+            || lower.contains("顆") || lower.contains("片") || lower.contains("個")) {
+            return "PIECE";
+        }
+        return "SERVING";
     }
 
     public boolean isNoLabelLikely(String rawText) {
@@ -410,16 +420,14 @@ public final class GeminiLabelFallbackSupport {
         q.put("unit", "SERVING");
 
         ObjectNode n = root.putObject("nutrients");
-        n.putNull("kcal");
-        n.putNull("protein");
-        n.putNull("fat");
-        n.putNull("carbs");
-        n.putNull("fiber");
-        n.putNull("sugar");
-        n.putNull("sodium");
+        fillMissingNutrientsWithZero(n);
 
-        root.put("confidence", 0.1);
-        root.putArray("warnings").add(FoodLogWarning.NO_LABEL_DETECTED.name());
+        // ✅ confidence 不自己猜
+        root.putNull("confidence");
+
+        ArrayNode w = root.putArray("warnings");
+        w.add(FoodLogWarning.NO_LABEL_DETECTED.name());
+        w.add(FoodLogWarning.LOW_CONFIDENCE.name());
 
         ObjectNode lm = root.putObject("labelMeta");
         lm.putNull("servingsPerContainer");
@@ -501,13 +509,13 @@ public final class GeminiLabelFallbackSupport {
 
                 StringBuilder nutrients = new StringBuilder();
                 nutrients.append("\"nutrients\":{");
-                nutrients.append("\"kcal\":").append(kcal != null ? kcal : "null");
-                nutrients.append(",\"protein\":null");
-                nutrients.append(",\"fat\":null");
-                nutrients.append(",\"carbs\":null");
-                nutrients.append(",\"fiber\":null");
-                nutrients.append(",\"sugar\":null");
-                nutrients.append(",\"sodium\":").append(sodium != null ? sodium : "null");
+                nutrients.append("\"kcal\":").append(kcal != null ? kcal : 0.0);
+                nutrients.append(",\"protein\":0.0");
+                nutrients.append(",\"fat\":0.0");
+                nutrients.append(",\"carbs\":0.0");
+                nutrients.append(",\"fiber\":0.0");
+                nutrients.append(",\"sugar\":0.0");
+                nutrients.append(",\"sodium\":").append(sodium != null ? sodium : 0.0);
                 nutrients.append("}");
 
                 String beforeNutrients = text.substring(0, text.indexOf("\"nutrients\":{"));
@@ -519,7 +527,7 @@ public final class GeminiLabelFallbackSupport {
                     int firstBrace = afterNutrients.indexOf('}');
                     return beforeNutrients + nutrients + afterNutrients.substring(firstBrace);
                 } else {
-                    return beforeNutrients + nutrients + ",\"confidence\":0.25,\"warnings\":[\"LOW_CONFIDENCE\"],\"labelMeta\":{\"servingsPerContainer\":null,\"basis\":null}}";
+                    return beforeNutrients + nutrients + ",\"confidence\":null,\"warnings\":[\"LOW_CONFIDENCE\"],\"labelMeta\":{\"servingsPerContainer\":null,\"basis\":null}}";
                 }
             }
         }
@@ -600,7 +608,7 @@ public final class GeminiLabelFallbackSupport {
         putOrNull(nutrients, "sodium", sodium);
         root.set("nutrients", nutrients);
 
-        root.put("confidence", 0.25);
+        root.putNull("confidence");
         ArrayNode warnings = root.putArray("warnings");
         warnings.add(FoodLogWarning.LOW_CONFIDENCE.name());
 
@@ -688,8 +696,19 @@ public final class GeminiLabelFallbackSupport {
         }
     }
 
+    private static void fillMissingNutrientsWithZero(ObjectNode n) {
+        if (n == null) return;
+
+        for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
+            JsonNode v = n.get(k);
+            if (v == null || v.isNull()) {
+                n.put(k, 0.0);
+            }
+        }
+    }
+
     private static void putOrNull(ObjectNode obj, String key, Double v) {
-        if (v == null) obj.putNull(key);
+        if (v == null) obj.put(key, 0.0);
         else obj.put(key, v);
     }
 

@@ -10,7 +10,6 @@ import com.calai.backend.foodlog.task.EffectivePostProcessor;
 import com.calai.backend.foodlog.task.FoodLogTaskWorker;
 import com.calai.backend.foodlog.task.ProviderClient;
 import com.calai.backend.foodlog.task.ProviderRouter;
-import com.calai.backend.foodlog.task.TaskRetryPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -27,21 +26,15 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.eq;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.*;
 
 class FoodLogTaskWorkerTest {
 
-    // ✅ 固定時間，避免測試結果漂移
     private final Clock clock = Clock.fixed(
             Instant.parse("2026-03-03T00:00:00Z"),
             ZoneOffset.UTC
     );
 
-    /**
-     * ✅ 不依賴 ResourcelessTransactionManager
-     * 直接 mock 一個可讓 TransactionTemplate 正常執行的 txManager
-     */
     private PlatformTransactionManager newTxManager() {
         PlatformTransactionManager txManager = Mockito.mock(PlatformTransactionManager.class);
 
@@ -94,7 +87,7 @@ class FoodLogTaskWorkerTest {
     }
 
     @Test
-    void transient_failure_should_schedule_retry() throws Exception {
+    void failure_should_cancel_without_retry() throws Exception {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
@@ -124,7 +117,6 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log2"))
                 .thenReturn(Optional.of(log));
 
-        Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
 
         Mockito.when(provider.process(eq(log), eq(storage)))
@@ -135,20 +127,22 @@ class FoodLogTaskWorkerTest {
         );
         worker.runOnce();
 
-        assertEquals(FoodLogTaskEntity.TaskStatus.FAILED, task.getTaskStatus());
-        assertNotNull(task.getNextRetryAtUtc());
+        assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
+        assertNull(task.getNextRetryAtUtc());
         assertEquals(1, task.getAttempts());
+
         assertEquals(FoodLogStatus.FAILED, log.getStatus());
+        assertNotNull(log.getLastErrorCode());
+        assertNotNull(log.getLastErrorMessage());
 
         Mockito.verifyNoInteractions(postProcessor);
     }
 
     @Test
-    void reach_max_attempts_should_give_up() throws Exception {
+    void queued_task_with_attempts_already_at_limit_should_cancel_before_provider() {
         FoodLogTaskRepository taskRepo = Mockito.mock(FoodLogTaskRepository.class);
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
-        ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
         EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
         PlatformTransactionManager txManager = newTxManager();
@@ -157,7 +151,7 @@ class FoodLogTaskWorkerTest {
         task.setId("t3");
         task.setFoodLogId("log3");
         task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-        task.setAttempts(TaskRetryPolicy.MAX_ATTEMPTS - 1);
+        task.setAttempts(1); // maxAttemptsForMethod() 現在固定回 1
         task.setCreatedAtUtc(clock.instant());
         task.setUpdatedAtUtc(clock.instant());
 
@@ -174,12 +168,6 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log3"))
                 .thenReturn(Optional.of(log));
 
-        Mockito.when(router.pick(eq(log))).thenReturn(provider);
-        Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
-
-        Mockito.when(provider.process(eq(log), eq(storage)))
-                .thenThrow(new RuntimeException("always fail"));
-
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
                 taskRepo, logRepo, router, storage, postProcessor, txManager, clock
         );
@@ -187,10 +175,13 @@ class FoodLogTaskWorkerTest {
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
         assertNull(task.getNextRetryAtUtc());
-        assertEquals(TaskRetryPolicy.MAX_ATTEMPTS, task.getAttempts());
+        assertEquals(1, task.getAttempts());
 
-        assertEquals("PROVIDER_GIVE_UP", log.getLastErrorCode());
+        assertEquals(FoodLogStatus.FAILED, log.getStatus());
+        assertEquals("MAX_ATTEMPTS_EXCEEDED", log.getLastErrorCode());
 
+        Mockito.verify(router, never()).pick(any());
+        Mockito.verify(router, never()).pickStrict(any());
         Mockito.verifyNoInteractions(postProcessor);
     }
 
@@ -225,7 +216,6 @@ class FoodLogTaskWorkerTest {
         Mockito.when(logRepo.findByIdForUpdate("log4"))
                 .thenReturn(Optional.of(log));
 
-        Mockito.when(router.pick(eq(log))).thenReturn(provider);
         Mockito.when(router.pickStrict(eq(log))).thenReturn(provider);
 
         ObjectMapper om = new ObjectMapper();

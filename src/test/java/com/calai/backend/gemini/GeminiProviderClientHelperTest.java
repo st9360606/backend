@@ -1,6 +1,6 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.provider.GeminiLabelFallbackSupport;
+import com.calai.backend.foodlog.provider.label.GeminiLabelFallbackSupport;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

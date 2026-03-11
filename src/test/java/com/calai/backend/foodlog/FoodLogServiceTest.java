@@ -1,9 +1,6 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.entity.FoodLogEntity;
-import com.calai.backend.foodlog.model.FoodLogStatus;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,23 +9,25 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class FoodLogServiceTest {
 
     @Test
-    void resetForRetry_should_clear_effective_and_errors() {
+    void resolveTierUsedDisplay_barcode_should_return_BARCODE() {
         FoodLogEntity log = new FoodLogEntity();
+        log.setMethod("BARCODE");
+        log.setDegradeLevel("DG-0");
 
-        ObjectMapper om = new ObjectMapper();
-        ObjectNode effective = om.createObjectNode();
-        effective.put("foodName", "Old Result");
+        assertEquals("BARCODE", FoodLogService.resolveTierUsedDisplay(log));
+    }
 
-        log.setStatus(FoodLogStatus.FAILED);
-        log.setEffective(effective);
-        log.setLastErrorCode("LOW_CONFIDENCE");
-        log.setLastErrorMessage("old message");
+    @Test
+    void resolveTierUsedDisplay_dg0_should_return_MODEL_TIER_HIGH() {
+        FoodLogEntity log = new FoodLogEntity();
+        log.setMethod("PHOTO");
+        log.setDegradeLevel("DG-0");
 
-        FoodLogService.resetForRetry(log);
+        assertEquals("MODEL_TIER_HIGH", FoodLogService.resolveTierUsedDisplay(log));
+    }
 
-        assertEquals(FoodLogStatus.PENDING, log.getStatus());
-        assertNull(log.getEffective());
-        assertNull(log.getLastErrorCode());
-        assertNull(log.getLastErrorMessage());
+    @Test
+    void resolveTierUsedDisplay_null_entity_should_return_null() {
+        assertNull(FoodLogService.resolveTierUsedDisplay(null));
     }
 }

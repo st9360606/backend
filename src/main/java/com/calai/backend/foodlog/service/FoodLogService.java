@@ -22,7 +22,7 @@ import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.FoodLogWarning;
+import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.calai.backend.foodlog.task.ProviderClient;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
@@ -926,9 +926,15 @@ public class FoodLogService {
             }
 
             if (degradedReason == null && warnings != null) {
-                if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) degradedReason = "NO_FOOD";
-                else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) degradedReason = "UNKNOWN_FOOD";
-                else if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) degradedReason = "NO_LABEL";
+                if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) {
+                    degradedReason = "NO_FOOD";
+                } else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) {
+                    degradedReason = "UNKNOWN_FOOD";
+                } else if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) {
+                    degradedReason = "NO_LABEL";
+                } else if (warnings.stream().anyMatch("MISSING_NUTRITION_FACTS"::equalsIgnoreCase)) {
+                    degradedReason = "MISSING_NUTRITION_FACTS";
+                }
             }
         }
 
@@ -1113,57 +1119,18 @@ public class FoodLogService {
             String deviceId,
             String requestId
     ) {
-        Instant now = clock.instant();
-
         FoodLogEntity log = repo.findByIdForUpdate(foodLogId)
                 .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
-        if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
-        if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
-        if (log.getStatus() == FoodLogStatus.DRAFT || log.getStatus() == FoodLogStatus.SAVED) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
-        }
-        if (log.getStatus() != FoodLogStatus.FAILED) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
-        }
-        if ("BARCODE".equalsIgnoreCase(log.getMethod())) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
+
+        if (!userId.equals(log.getUserId())) {
+            throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
         }
 
-        ZoneId quotaTz = resolveQuotaTz();
+        if (log.getStatus() == FoodLogStatus.DELETED) {
+            throw new IllegalArgumentException("FOOD_LOG_DELETED");
+        }
 
-        // retry 也要擋一下，不然狂點 retry 一樣會打爆
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
-        rateLimiter.checkOrThrow(userId, tier, now);
-
-        String did = normalizeDeviceId(userId, deviceId);
-        abuseGuard.onOperationAttempt(userId, did, false, now, quotaTz);
-
-        QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, now);
-
-        log.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
-
-        Optional<FoodLogTaskEntity> opt = taskRepo.findByFoodLogIdForUpdate(foodLogId);
-        FoodLogTaskEntity task = opt.orElseGet(() -> {
-            FoodLogTaskEntity t = new FoodLogTaskEntity();
-            t.setFoodLogId(foodLogId);
-            t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-            t.setPollAfterSec(2);
-            t.setAttempts(0);
-            return t;
-        });
-
-        task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-        task.setNextRetryAtUtc(null);
-        task.setPollAfterSec(2);
-        task.setAttempts(0);
-        task.setLastErrorCode(null);
-        task.setLastErrorMessage(null);
-        taskRepo.save(task);
-
-        resetForRetry(log);
-        repo.save(log);
-
-        return getOne(userId, foodLogId, requestId);
+        throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
     }
 
     // =========================
@@ -1213,13 +1180,6 @@ public class FoodLogService {
             );
             throw ex;
         }
-    }
-
-    static void resetForRetry(FoodLogEntity log) {
-        log.setStatus(FoodLogStatus.PENDING);
-        log.setEffective(null);
-        log.setLastErrorCode(null);
-        log.setLastErrorMessage(null);
     }
 
     private static String aiMetaTextOrNull(JsonNode effective, String field) {

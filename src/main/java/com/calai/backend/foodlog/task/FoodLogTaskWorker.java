@@ -7,6 +7,7 @@ import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
@@ -132,12 +133,8 @@ public class FoodLogTaskWorker {
         Instant now = clock.instant();
 
         // claim 與真正執行之間，重新確認仍是 runnable
-        if (task.getTaskStatus() != FoodLogTaskEntity.TaskStatus.QUEUED
-                && task.getTaskStatus() != FoodLogTaskEntity.TaskStatus.FAILED) {
-            return null;
-        }
-
-        if (task.getNextRetryAtUtc() != null && task.getNextRetryAtUtc().isAfter(now)) {
+        // ✅ 已關閉自動 retry：只允許 QUEUED，不允許 FAILED 再次進入執行
+        if (task.getTaskStatus() != FoodLogTaskEntity.TaskStatus.QUEUED) {
             return null;
         }
 
@@ -238,9 +235,6 @@ public class FoodLogTaskWorker {
         taskRepo.save(task);
     }
 
-    /**
-     * 短交易：失敗結果回寫
-     */
     private void applyFailure(
             String taskId,
             String foodLogId,
@@ -271,7 +265,7 @@ public class FoodLogTaskWorker {
         Integer retryAfter = mapped.retryAfterSec();
         Instant failAt = clock.instant();
 
-        // 429：一律不自動重試
+        // 429：保留特殊訊息，方便前端顯示 retryAfterSec，但不自動重試
         if ("PROVIDER_RATE_LIMITED".equals(mappedCode)) {
             String msg = buildRateLimitedMsg(mappedMsg, retryAfter, attemptsAfterStart);
 
@@ -285,11 +279,8 @@ public class FoodLogTaskWorker {
             return;
         }
 
-        // LABEL：最後一次仍 PROVIDER_BAD_RESPONSE → 降級成 DRAFT + NO_LABEL_DETECTED
-        if ("LABEL".equalsIgnoreCase(method)
-                && "PROVIDER_BAD_RESPONSE".equals(mappedCode)
-                && attemptsAfterStart >= maxAttemptsForMethod(method)) {
-
+        // LABEL：單次失敗若是 PROVIDER_BAD_RESPONSE，直接降級成 NO_LABEL_DETECTED，不做 retry
+        if ("LABEL".equalsIgnoreCase(method) && "PROVIDER_BAD_RESPONSE".equals(mappedCode)) {
             ObjectNode fb = fallbackNoLabelDetectedEffective();
             ObjectNode finalEff = postProcessor.apply(fb, "GEMINI", "LABEL");
 
@@ -306,53 +297,8 @@ public class FoodLogTaskWorker {
             return;
         }
 
-        // BAD_RESPONSE：最多重試 1 次（attempts>=2 直接停）
-        if ("PROVIDER_BAD_RESPONSE".equals(mappedCode) && attemptsAfterStart >= 2) {
-            String msg = "bad json from provider (give up) attempts=" + attemptsAfterStart;
-
-            task.markCancelled(failAt, "PROVIDER_BAD_RESPONSE", msg);
-            taskRepo.save(task);
-
-            logEntity.setStatus(FoodLogStatus.FAILED);
-            logEntity.setLastErrorCode("PROVIDER_BAD_RESPONSE");
-            logEntity.setLastErrorMessage(msg);
-            logRepo.save(logEntity);
-            return;
-        }
-
-        // 不可重試：直接取消
-        if (isNonRetryable(mappedCode)) {
-            task.markCancelled(failAt, mappedCode, mappedMsg);
-            taskRepo.save(task);
-
-            logEntity.setStatus(FoodLogStatus.FAILED);
-            logEntity.setLastErrorCode(mappedCode);
-            logEntity.setLastErrorMessage(mappedMsg);
-            logRepo.save(logEntity);
-            return;
-        }
-
-        // 達到上限：give up
-        if (attemptsAfterStart >= maxAttemptsForMethod(method)) {
-            String giveUpMsg = ("[" + mappedCode + "] " + (mappedMsg == null ? "" : mappedMsg)).trim();
-
-            task.markCancelled(failAt, "PROVIDER_GIVE_UP", giveUpMsg);
-            taskRepo.save(task);
-
-            logEntity.setStatus(FoodLogStatus.FAILED);
-            logEntity.setLastErrorCode("PROVIDER_GIVE_UP");
-            logEntity.setLastErrorMessage(giveUpMsg);
-            logRepo.save(logEntity);
-            return;
-        }
-
-        // 可重試
-        int delaySec = TaskRetryPolicy.nextDelaySec(attemptsAfterStart);
-        if (retryAfter != null) {
-            delaySec = Math.max(delaySec, retryAfter);
-        }
-
-        task.markFailed(failAt, mappedCode, mappedMsg, delaySec);
+        // 其他失敗：直接結束，不做任何 retry
+        task.markCancelled(failAt, mappedCode, mappedMsg);
         taskRepo.save(task);
 
         logEntity.setStatus(FoodLogStatus.FAILED);
@@ -362,9 +308,7 @@ public class FoodLogTaskWorker {
     }
 
     private static int maxAttemptsForMethod(String method) {
-        if (method == null) return TaskRetryPolicy.MAX_ATTEMPTS;
-        if ("LABEL".equalsIgnoreCase(method)) return 2; // 最多重試一次
-        return TaskRetryPolicy.MAX_ATTEMPTS;
+        return 1;
     }
 
     private static ObjectNode fallbackNoLabelDetectedEffective() {
@@ -376,16 +320,25 @@ public class FoodLogTaskWorker {
         q.put("unit", "SERVING");
 
         ObjectNode n = root.putObject("nutrients");
-        n.putNull("kcal");
-        n.putNull("protein");
-        n.putNull("fat");
-        n.putNull("carbs");
-        n.putNull("fiber");
-        n.putNull("sugar");
-        n.putNull("sodium");
+        n.put("kcal", 0.0);
+        n.put("protein", 0.0);
+        n.put("fat", 0.0);
+        n.put("carbs", 0.0);
+        n.put("fiber", 0.0);
+        n.put("sugar", 0.0);
+        n.put("sodium", 0.0);
 
-        root.put("confidence", 0.1);
-        root.putArray("warnings").add(FoodLogWarning.NO_LABEL_DETECTED.name());
+        root.putNull("confidence");
+        root.putNull("healthScore");
+
+        root.putArray("warnings")
+                .add(FoodLogWarning.NO_LABEL_DETECTED.name())
+                .add(FoodLogWarning.LOW_CONFIDENCE.name());
+
+        ObjectNode lm = root.putObject("labelMeta");
+        lm.putNull("servingsPerContainer");
+        lm.putNull("basis");
+
         return root;
     }
 
@@ -396,23 +349,6 @@ public class FoodLogTaskWorker {
         String base = (mappedMsg == null || mappedMsg.isBlank()) ? "rate limited" : mappedMsg.trim();
         if (retryAfterSec != null) base = base + " suggestedRetryAfterSec=" + retryAfterSec;
         return base + " attempts=" + attempts;
-    }
-
-    private static boolean isNonRetryable(String code) {
-        if (code == null || code.isBlank()) return false;
-
-        // SAFETY / RECITATION / HARM_CATEGORY 一律不重試
-        if (code.startsWith("PROVIDER_REFUSED_")) return true;
-
-        return switch (code) {
-            case "PROVIDER_NOT_CONFIGURED",
-                 "PROVIDER_NOT_AVAILABLE",
-                 "PROVIDER_AUTH_FAILED",
-                 "PROVIDER_BAD_REQUEST",
-                 "GEMINI_API_KEY_MISSING",
-                 "PROVIDER_BLOCKED" -> true;
-            default -> false;
-        };
     }
 
     private record TaskExecution(

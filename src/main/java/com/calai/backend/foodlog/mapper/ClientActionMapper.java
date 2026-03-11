@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.mapper;
 
 import com.calai.backend.foodlog.model.ClientAction;
-import com.calai.backend.foodlog.task.FoodLogWarning;
+import com.calai.backend.foodlog.unit.FoodLogWarning;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -58,7 +58,10 @@ public class ClientActionMapper {
                  "PROVIDER_BAD_RESPONSE",
                  "PROVIDER_AUTH_FAILED",
                  "GEMINI_API_KEY_MISSING",
-                 "PROVIDER_NOT_AVAILABLE" -> ClientAction.CONTACT_SUPPORT;
+                 "PROVIDER_NOT_AVAILABLE",
+                 "PROVIDER_NOT_CONFIGURED",
+                 "IMAGE_OBJECT_KEY_MISSING",
+                 "WORKER_STALE_RUNNING" -> ClientAction.CONTACT_SUPPORT;
 
             // ===== BLOCK / SAFETY / OTHER =====
             case "PROVIDER_BLOCKED" -> ClientAction.RETRY_LATER;
@@ -95,6 +98,9 @@ public class ClientActionMapper {
         }
         if (containsIgnoreCase(warnings, FoodLogWarning.UNKNOWN_FOOD.name())) {
             return ClientAction.ENTER_MANUALLY;
+        }
+        if (containsIgnoreCase(warnings, FoodLogWarning.MISSING_NUTRITION_FACTS.name())) {
+            return ClientAction.TRY_LABEL;
         }
         if (containsIgnoreCase(warnings, FoodLogWarning.LOW_CONFIDENCE.name())) {
             return ClientAction.ENTER_MANUALLY;

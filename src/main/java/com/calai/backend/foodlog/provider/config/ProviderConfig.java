@@ -1,18 +1,13 @@
 package com.calai.backend.foodlog.provider.config;
 
-import com.calai.backend.foodlog.barcode.BarcodeLookupService;
 import com.calai.backend.foodlog.config.AiModelRouter;
 import com.calai.backend.foodlog.config.AiModelTiersProperties;
 import com.calai.backend.foodlog.model.ModelMode;
-import com.calai.backend.foodlog.packagedfood.ImageBarcodeDetector;
-import com.calai.backend.foodlog.packagedfood.OpenFoodFactsSearchService;
 import com.calai.backend.foodlog.provider.GeminiProviderClient;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.task.ProviderClient;
-import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.calai.backend.foodlog.task.StubProviderClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -73,14 +68,9 @@ public class ProviderConfig {
             matchIfMissing = false
     )
     public ProviderClient geminiProviderClient(
-            @Qualifier("geminiRestClient") RestClient geminiRestClient,
             GeminiProperties props,
-            ObjectMapper om,
-            ProviderTelemetry telemetry,
             AiModelRouter modelRouter,
-            ImageBarcodeDetector imageBarcodeDetector,
-            BarcodeLookupService barcodeLookupService,
-            OpenFoodFactsSearchService offSearchService
+            java.util.List<com.calai.backend.foodlog.provider.GeminiModeProcessor> processors
     ) {
         // ✅ Fail-fast：啟動就抓到 key/base-url 缺失
         String k = props.getApiKey();
@@ -97,16 +87,11 @@ public class ProviderConfig {
         assertGeminiTierConfigured(modelRouter, ModelTier.MODEL_TIER_HIGH, ModelMode.TEXT);
         assertGeminiTierConfigured(modelRouter, ModelTier.MODEL_TIER_LOW, ModelMode.TEXT);
 
-        return new GeminiProviderClient(
-                geminiRestClient,
-                props,
-                om,
-                telemetry,
-                modelRouter,
-                imageBarcodeDetector,
-                barcodeLookupService,
-                offSearchService
-        );
+        if (processors == null || processors.isEmpty()) {
+            throw new IllegalStateException("GEMINI_MODE_PROCESSORS_MISSING");
+        }
+
+        return new GeminiProviderClient(processors);
     }
 
     private static void assertGeminiTierConfigured(AiModelRouter router, ModelTier tier, ModelMode mode) {

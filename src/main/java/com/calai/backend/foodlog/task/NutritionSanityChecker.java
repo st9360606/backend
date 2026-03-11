@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.task;
 
+import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,8 @@ public class NutritionSanityChecker {
 
     private static final double MAX_GRAM_OR_ML = 3000.0;
     private static final double MAX_SERVING = 10.0;
+    private static final double MAX_PIECE = 20.0;
+    private static final double MAX_CONTAINER = 3.0;
 
     private static final double MAX_KCAL = 2500.0;
     private static final double MAX_PROTEIN = 250.0;
@@ -21,8 +24,6 @@ public class NutritionSanityChecker {
     private static final double MAX_CARBS = 400.0;
     private static final double MAX_SUGAR = 200.0;
     private static final double MAX_FIBER = 100.0;
-
-    // ✅ 移除：SODIUM_* 相關門檻（避免誤會）
 
     private static final double ENERGY_MISMATCH_RATIO = 0.30;
     private static final double ENERGY_MISMATCH_ABS_KCAL = 150.0;
@@ -40,13 +41,21 @@ public class NutritionSanityChecker {
             Map.entry("SERVING", "SERVING"),
             Map.entry("SERVINGS", "SERVING"),
             Map.entry("PORTION", "SERVING"),
-            Map.entry("PORTIONS", "SERVING")
+            Map.entry("PORTIONS", "SERVING"),
+
+            // 對齊 Prompt logical units
+            Map.entry("PACK", "PACK"),
+            Map.entry("PACKAGE", "PACK"),
+            Map.entry("BOTTLE", "BOTTLE"),
+            Map.entry("CAN", "CAN"),
+            Map.entry("PIECE", "PIECE"),
+            Map.entry("PCS", "PIECE"),
+            Map.entry("PC", "PIECE"),
+            Map.entry("UNIT", "PIECE"),
+            Map.entry("WHOLE", "PIECE")
     );
 
-    // ✅ 只抓非負數字（含小數）："100 g" / "~300" / "約 120"
     private static final Pattern FIRST_NUMBER = Pattern.compile("(\\d+(?:\\.\\d+)?)");
-
-    // ✅ 單位正規化：取第一段英文字母 token（"g/ml" -> "g", "grams)" -> "grams"）
     private static final Pattern FIRST_ALPHA_TOKEN = Pattern.compile("([A-Za-z]+)");
 
     public void apply(ObjectNode effective) {
@@ -55,24 +64,22 @@ public class NutritionSanityChecker {
         ObjectNode nutrients = obj(effective, "nutrients");
         if (nutrients == null) return;
 
-        // ===== quantity / unit normalization（先做，避免 all-null 直接 return 吃掉 UNIT_UNKNOWN）=====
         ObjectNode q = obj(effective, "quantity");
         String unitRaw = q == null ? null : text(q.get("unit"));
         Double qty = numFlexible(q == null ? null : q.get("value"));
 
         UnitNorm unitNorm = normalizeUnitWithFlag(unitRaw);
 
-        // ✅ 只有「unit 有值但無法辨識」且 qty 也有值，才加 UNIT_UNKNOWN
+        // 只有 unit 有值但無法辨識時，才加 UNIT_UNKNOWN
         if (unitNorm.unknownUnit && qty != null) {
             addWarning(effective, FoodLogWarning.UNIT_UNKNOWN);
         }
 
-        String unit = unitNorm.unit; // GRAM/ML/SERVING or null
+        String unit = unitNorm.unit;
 
-        // nutrients 全 null：只保留 UNIT_UNKNOWN（不做 outlier）
+        // nutrients 全 null：只保留 UNIT_UNKNOWN，不做其他 outlier
         if (allNutrientsNull(nutrients)) return;
 
-        // ===== qty outlier =====
         if (unit != null && qty != null) {
             if (("GRAM".equals(unit) || "ML".equals(unit)) && qty > MAX_GRAM_OR_ML) {
                 addWarning(effective, FoodLogWarning.QUANTITY_OUTLIER);
@@ -80,20 +87,24 @@ public class NutritionSanityChecker {
             if ("SERVING".equals(unit) && qty > MAX_SERVING) {
                 addWarning(effective, FoodLogWarning.QUANTITY_OUTLIER);
             }
+            if ("PIECE".equals(unit) && qty > MAX_PIECE) {
+                addWarning(effective, FoodLogWarning.QUANTITY_OUTLIER);
+            }
+            if (("PACK".equals(unit) || "BOTTLE".equals(unit) || "CAN".equals(unit)) && qty > MAX_CONTAINER) {
+                addWarning(effective, FoodLogWarning.QUANTITY_OUTLIER);
+            }
         }
 
-        // ===== kcal outlier =====
         Double kcal = numFlexible(nutrients.get("kcal"));
         if (isFiniteNonNegative(kcal) && kcal > MAX_KCAL) {
             addWarning(effective, FoodLogWarning.KCAL_OUTLIER);
         }
 
-        // ===== macro outlier =====
         Double protein = numFlexible(nutrients.get("protein"));
-        Double fat     = numFlexible(nutrients.get("fat"));
-        Double carbs   = numFlexible(nutrients.get("carbs"));
-        Double sugar   = numFlexible(nutrients.get("sugar"));
-        Double fiber   = numFlexible(nutrients.get("fiber"));
+        Double fat = numFlexible(nutrients.get("fat"));
+        Double carbs = numFlexible(nutrients.get("carbs"));
+        Double sugar = numFlexible(nutrients.get("sugar"));
+        Double fiber = numFlexible(nutrients.get("fiber"));
 
         boolean macroOutlier =
                 (isFiniteNonNegative(protein) && protein > MAX_PROTEIN) ||
@@ -104,9 +115,6 @@ public class NutritionSanityChecker {
 
         if (macroOutlier) addWarning(effective, FoodLogWarning.MACRO_OUTLIER);
 
-        // ✅ 移除：SODIUM_OUTLIER / SODIUM_UNIT_SUSPECT（避免誤會）
-
-        // ===== kcal vs macro mismatch（抓單位錯/亂猜）=====
         if (isFiniteNonNegative(kcal) && atLeastTwoPresent(protein, carbs, fat)) {
             double kcalEst = finiteOrZero(protein) * 4.0
                              + finiteOrZero(carbs) * 4.0
@@ -117,7 +125,6 @@ public class NutritionSanityChecker {
             double ratio = diff / denom;
 
             if (diff >= ENERGY_MISMATCH_ABS_KCAL && ratio >= ENERGY_MISMATCH_RATIO) {
-                // TODO：若未來你要更精準，建議新增 ENERGY_MISMATCH enum
                 addWarning(effective, FoodLogWarning.MACRO_OUTLIER);
             }
         }
@@ -142,8 +149,6 @@ public class NutritionSanityChecker {
         if (u0.isEmpty()) return new UnitNorm(null, false);
 
         Matcher m = FIRST_ALPHA_TOKEN.matcher(u0);
-
-        // ✅ 有填 unit 但完全沒有英文字母（例如 "克" / "毫升" / "杯"）→ 視為未知單位
         if (!m.find()) return new UnitNorm(null, true);
 
         String u = m.group(1).toUpperCase(Locale.ROOT);
@@ -191,7 +196,7 @@ public class NutritionSanityChecker {
     /**
      * 支援：
      * - number: 123.4
-     * - string: "123.4" / " 1,234.5 " / "100 g" / "~300" / "1/2" / "null"
+     * - string: "123.4" / "100 g" / "~300" / "1/2" / "null"
      */
     private static Double numFlexible(JsonNode v) {
         if (v == null || v.isNull()) return null;

@@ -1,9 +1,7 @@
-package com.calai.backend.foodlog.provider;
+package com.calai.backend.foodlog.provider.config;
 
-import com.calai.backend.foodlog.provider.config.GeminiProperties;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
@@ -17,7 +15,6 @@ import java.util.Locale;
  * 用途：K8s/Cloud Run readiness check
  */
 @Component
-@ConditionalOnProperty(prefix = "app.provider.gemini", name = "enabled", havingValue = "true")
 public class GeminiConfigHealthIndicator implements HealthIndicator {
 
     private final GeminiProperties props;
@@ -28,17 +25,26 @@ public class GeminiConfigHealthIndicator implements HealthIndicator {
 
     @Override
     public Health health() {
+        if (!props.isEnabled()) {
+            return Health.up()
+                    .withDetail("provider", "GEMINI")
+                    .withDetail("enabled", false)
+                    .withDetail("reason", "GEMINI_DISABLED")
+                    .build();
+        }
+
         String apiKey = props.getApiKey();
         String baseUrl = props.getBaseUrl();
         String model = props.getModel();
 
         boolean hasKey = apiKey != null && !apiKey.isBlank();
-        boolean baseOk = baseUrl != null && !baseUrl.isBlank() && baseUrl.toLowerCase(Locale.ROOT).startsWith("https://");
+        boolean baseOk = baseUrl != null
+                         && !baseUrl.isBlank()
+                         && baseUrl.toLowerCase(Locale.ROOT).startsWith("https://");
         boolean modelOk = model != null && !model.isBlank();
 
         Health.Builder b;
 
-        // ✅ 只要 enabled=true 但缺 key -> DOWN
         if (!hasKey) {
             b = Health.down().withDetail("reason", "GEMINI_API_KEY_MISSING");
         } else if (!baseOk) {
@@ -49,7 +55,6 @@ public class GeminiConfigHealthIndicator implements HealthIndicator {
             b = Health.up();
         }
 
-        // ✅ 不要輸出 apiKey
         return b.withDetail("provider", "GEMINI")
                 .withDetail("enabled", true)
                 .withDetail("baseUrl", safe(baseUrl))

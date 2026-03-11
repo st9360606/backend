@@ -1,4 +1,4 @@
-package com.calai.backend.foodlog.provider;
+package com.calai.backend.foodlog.provider.transport;
 
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
 import com.fasterxml.jackson.databind.JsonNode;
