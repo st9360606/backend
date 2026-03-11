@@ -23,38 +23,47 @@ public final class GeminiPromptFactory {
             
             GLOBAL ADAPTABILITY:
             - Handle international packaging. Convert kJ to kcal (kJ / 4.184).
+            - For alcoholic beverages, estimate calories based on standard ABV if nutrition facts are missing.
             
             FOOD NAME RULES:
-            - Do NOT force translation of foodName.
-            - For packaged/branded foods, preserve the original visible product name from the package whenever possible.
-            - Do NOT translate brand names.
+            - Do NOT force translation of foodName. Keep it concise (max 100 chars).
+            - For packaged/branded foods, preserve the original visible product name. Do NOT translate brands.
             - Do NOT mix original product text with your own translated category words.
-            - Do NOT append guessed generic category words such as cookies, biscuit, snack, chocolate, drink, beverage, candy, cake, noodle, bread, chips, 餅乾, 巧克力, 飲料, 糖果, 蛋糕, 麵, 麵包, 洋芋片 unless they are clearly visible on the package.
-            - For non-packaged cooked meals, you may return a short descriptive food name in the most natural language supported by the image context.
+            - Do NOT append guessed generic category words unless clearly visible.
             
             FOCUS RULE:
-            - Analyze ONLY ONE dominant edible subject (centered or most prominent).
+            - Analyze ONLY ONE dominant edible subject. Ignore background clutter like receipts or menus.
+            - If the food is clearly partially consumed, estimate only the REMAINING portion visible.
+            - For drinks, exclude non-edible volume like excessive ice or large decorative garnishes.
             - If multiple items exist, focus on the main dish and include "MIXED_MEAL" in warnings.
             
             HEALTH EVALUATION (1-10):
-            - Assign a healthScore from 1 to 10 based on visual composition and estimated macros.
-            - 9-10: Whole foods, fresh vegetables, lean proteins, unprocessed.
-            - 5-8: Balanced cooked meals, moderate carbs/fats.
-            - 1-4: Highly processed, deep-fried, high sugar, or high sodium junk food.
+            - Assign a healthScore (1-10): 9-10 (Whole foods), 5-8 (Balanced), 1-4 (Highly processed/Junk).
+            
+            ESTIMATION LOGIC (CRITICAL):
+            1. Determine total net weight (g) or volume (ml) first. Consider food density.
+            2. For packages, search for net weight markers. ALWAYS calculate for the TOTAL weight even if you output as "SERVING".
+            3. Be skeptical of large marketing slogans (e.g., "20g PROTEIN!"); verify them against the estimated total weight.
+            4. If no weight is visible, visually estimate size based on relative scale (e.g., hands/utensils).
+            5. Calculate nutrients: Total = (Standard Value per 100g * Total Estimated Weight / 100).
+            6. Round all nutrient values to ONE decimal place.
+            7. Provide your brief thought process in "_reasoning" (Max 15 words).
             
             CORE LOGIC:
-            1. PACKAGED FOOD: Provide nutrition for the WHOLE PACKAGE.
-               - Set quantity: {"value": 1.0, "unit": "PACK"}. Basis: "WHOLE_PACKAGE".
-            2. BOTTLED/CANNED BEVERAGE: Provide nutrition for the ENTIRE BOTTLE/CAN.
-               - Set quantity: {"value": 1.0, "unit": "BOTTLE" | "CAN"}. Basis: "WHOLE_PACKAGE".
+            1. PACKAGED FOOD: Calculate for the ENTIRE container (Whole Bag/Box).
+               - Treat the whole package as ONE "SERVING".
+               - Set quantity: {"value": 1.0, "unit": "SERVING"}. Basis: "WHOLE_PACKAGE".
+            2. BOTTLED/CANNED BEVERAGE: Calculate for the ENTIRE BOTTLE/CAN.
+               - Treat the whole bottle/can as ONE "SERVING".
+               - Set quantity: {"value": 1.0, "unit": "SERVING"}. Basis: "WHOLE_PACKAGE".
             3. COOKED MEAL / SINGLE ITEMS: Estimate portion size or count.
-               - For countable items (e.g. nuggets, fruit), use "PIECE" and the count.
-               - For dishes, use "SERVING".
+               - For dishes (e.g. Pasta): Use "SERVING". 
+               - For countable items (e.g. 5 Nuggets): Use "PIECE" and the count.
                - Set labelMeta.basis: "ESTIMATED_PORTION".
             
             NUTRIENT HANDLING:
             - Default missing or invisible nutrients to 0.0. Do NOT use null.
-            - Logic Check: Sugar <= Carbs, Fiber <= Carbs. Protein + Fat + Carbs <= Total Weight.
+            - Logic Check: Sugar <= Carbs, Fiber <= Carbs. Protein + Fat + Carbs <= Estimated Total Weight.
             
             WARNING CODE RULES:
             [%s]
@@ -64,8 +73,9 @@ public final class GeminiPromptFactory {
               "foodName": "string|null",
               "quantity": { "value": number, "unit": "%s" },
               "nutrients": { "kcal": number, "protein": number, "fat": number, "carbs": number, "fiber": number, "sugar": number, "sodium": number },
-              "confidence": number, (Range: 0.0 to 1.0)
-              "healthScore": number, (Range: 1 to 10)
+              "_reasoning": "string",
+              "confidence": number,
+              "healthScore": number,
               "warnings": string[],
               "labelMeta": { "servingsPerContainer": number|null, "basis": %s }
             }
