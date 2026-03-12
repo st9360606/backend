@@ -79,9 +79,14 @@ public final class GeminiPromptFactory {
                - add "PACKAGE_SIZE_UNVERIFIED" if total size or quantity is not readable,
                - do NOT upscale uncertain estimates into exact whole-package totals.
             
-            8. VISUAL ESTIMATION BOUNDARY:
-               Use visual estimation only for (C) COOKED_MEAL_OR_SINGLE_ITEM or clearly visible edible portions.
-               Do NOT use visual estimation to determine the full contents of a sealed branded package.
+            8. VISUAL ESTIMATION BOUNDARY (STATE-AWARE):
+               - ESTIMATE BY PREPARATION: Always evaluate food based on its visual state, not its raw ingredients. If food appears roasted, fried, seasoned, or glazed, you MUST include estimated hidden calories, sodium, and sugars from standard culinary fats, salts, and syrups/glazes.
+               - GLAZE & SAUCE RECOGNITION (Universal Sugar Logic): If the food surface shows a "Glossy," "Sticky," or "Caramelized" sheen (e.g., BBQ, Teriyaki, Glazed meats), you MUST incorporate a "Sugar Offset" (minimum 2.0-8.0g per serving) even if the base ingredient is a protein.
+               - CATEGORY-SPECIFIC OVERRIDE: If the dish is identified as "Sweet and Sour" (糖醋) or "Honey-Glazed" (蜜汁), increase the Sugar Offset minimum to 15.0g.
+               - CULINARY PENALTY: For any cooked protein (Type C), incorporate a "Culinary Penalty" for sodium (minimum 400-800mg per serving) and fats/oils inherent to that cooking style (e.g., frying oil, basting butter).
+               - MULTI-METHOD LOGIC: If multiple preparation methods are visible (e.g., fried then glazed), apply the stricter (higher) nutrient penalty for all categories.
+               - WHOLE FOODS / RAW: Use "NATURAL-BASE" profiles ONLY if the item is clearly raw or unprocessed (e.g., a whole fruit, raw cucumber).
+               - EDIBLE PORTION: Calculate weight for EDIBLE PORTION ONLY (e.g., for Roast Duck or Steak, exclude bone weight but include skin and rendered fat).
             
             9. SKEPTICISM:
                Be skeptical of marketing slogans and front-of-package claims. Prefer printed nutrition tables and explicit numeric quantities over promotional text.
