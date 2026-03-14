@@ -56,7 +56,19 @@ class GeminiJsonParsingSupportTest {
     }
 
     @Test
-    void patchDanglingTail_should_fill_defaults_for_unit_and_basis() {
+    void tryParseJson_should_parse_truncated_unit_colon_as_null() {
+        GeminiJsonParsingSupport support = new GeminiJsonParsingSupport(OM);
+
+        String raw = "{\"quantity\":{\"unit\":";
+
+        JsonNode parsed = support.tryParseJson(raw);
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed.get("quantity").get("unit").isNull()).isTrue();
+    }
+
+    @Test
+    void patchDanglingTail_should_fill_null_for_unit_and_basis() {
         String unit = "{\"quantity\":{\"unit\":";
         String unitFixed = (String) invokePrivateStatic(
                 GeminiJsonParsingSupport.class,
@@ -64,7 +76,7 @@ class GeminiJsonParsingSupportTest {
                 new Class[]{String.class},
                 unit
         );
-        assertThat(unitFixed).endsWith("\"SERVING\"");
+        assertThat(unitFixed).endsWith("null");
 
         String basis = "{\"labelMeta\":{\"basis\":";
         String basisFixed = (String) invokePrivateStatic(
@@ -73,7 +85,7 @@ class GeminiJsonParsingSupportTest {
                 new Class[]{String.class},
                 basis
         );
-        assertThat(basisFixed).endsWith("\"PER_SERVING\"");
+        assertThat(basisFixed).endsWith("null");
     }
 
     @Test

@@ -46,12 +46,11 @@ public final class GeminiTransportSupport {
             String userPrompt,
             String modelId,
             boolean isLabel,
-            String foodLogIdForLog,
-            boolean requireCoreNutrition
+            String foodLogIdForLog
     ) {
         JsonNode resp;
         try {
-            resp = callGenerateContent(imageBytes, mimeType, userPrompt, modelId, isLabel, requireCoreNutrition);
+            resp = callGenerateContent(imageBytes, mimeType, userPrompt, modelId, isLabel);
         } catch (RestClientResponseException re) {
             ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(re);
             ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(mapped.code());
@@ -103,16 +102,14 @@ public final class GeminiTransportSupport {
             String mimeType,
             String userPrompt,
             String modelId,
-            boolean isLabel,
-            boolean requireCoreNutrition
+            boolean isLabel
     ) {
         ObjectNode req = requestBuilder.buildRequest(
                 imageBytes,
                 mimeType,
                 userPrompt,
                 isLabel,
-                FN_EMIT_NUTRITION,
-                requireCoreNutrition
+                FN_EMIT_NUTRITION
         );
 
         return http.post()

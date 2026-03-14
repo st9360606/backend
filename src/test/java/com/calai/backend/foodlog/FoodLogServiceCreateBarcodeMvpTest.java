@@ -269,7 +269,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
         verify(abuseGuard).onBarcodeAttempt(userId, "device-1", NOW, ZoneOffset.UTC);
         verify(barcodeLookupService).lookupOff(eq(barcode), anyString());
         verify(idem).attach(userId, requestId, "log-bc-no-nutrition", NOW);
-        verify(postProcessor, never()).apply(any(), anyString(), anyString());
+        verify(postProcessor, never()).apply(any(), anyString());
     }
 
     @Test
@@ -399,7 +399,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
                         off
                 ));
 
-        when(postProcessor.apply(any(ObjectNode.class), eq("OPENFOODFACTS"), eq("BARCODE")))
+        when(postProcessor.apply(any(ObjectNode.class), eq("OPENFOODFACTS")))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         mockTxTemplateExecutePassThrough();
@@ -438,7 +438,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
         verify(rateLimiter).checkOrThrow(userId, EntitlementService.Tier.TRIAL, NOW);
         verify(abuseGuard).onBarcodeAttempt(userId, "device-1", NOW, ZoneOffset.UTC);
         verify(barcodeLookupService).lookupOff(eq(barcode), anyString());
-        verify(postProcessor).apply(any(ObjectNode.class), eq("OPENFOODFACTS"), eq("BARCODE"));
+        verify(postProcessor).apply(any(ObjectNode.class), eq("OPENFOODFACTS"));
         verify(idem).attach(userId, requestId, "log-bc-success", NOW);
     }
 

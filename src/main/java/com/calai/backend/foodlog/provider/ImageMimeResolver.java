@@ -7,12 +7,10 @@ import java.util.Locale;
  * 1. normalize 已存在的 content-type
  * 2. 從 bytes sniff 真實 MIME
  * 3. 提供 fallback 預設值
- *
  * 目前支援：
  * - image/jpeg
  * - image/png
  * - image/webp
- *
  * 暫不支援：
  * - image/heic
  * - image/heif
@@ -25,7 +23,6 @@ public final class ImageMimeResolver {
 
     /**
      * 解析最終可用的圖片 MIME。
-     *
      * 規則：
      * 1. 若 storedMime 有值，先 normalize 後回傳
      * 2. 若 storedMime 缺失，從 bytes sniff
@@ -47,12 +44,10 @@ public final class ImageMimeResolver {
 
     /**
      * 正規化 MIME 字串。
-     *
      * 例如：
      * - image/jpg   -> image/jpeg
      * - image/x-png -> image/png
      * - image/webp  -> image/webp
-     *
      * 若為 null / blank，回傳 null。
      */
     public static String normalize(String raw) {

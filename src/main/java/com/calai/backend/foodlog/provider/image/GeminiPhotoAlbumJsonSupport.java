@@ -1,21 +1,16 @@
 package com.calai.backend.foodlog.provider.image;
 
 import com.calai.backend.foodlog.provider.GeminiEffectiveJsonSupport;
-import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.calai.backend.foodlog.unit.NutritionBasis;
 import com.calai.backend.foodlog.unit.QuantityUnit;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Locale;
 
 /**
  * PHOTO / ALBUM 專用 normalize。
- *
  * 重點：
  * 1. 對齊 GeminiPromptFactory
  * 2. 保留 PACK / BOTTLE
@@ -115,101 +110,6 @@ public final class GeminiPhotoAlbumJsonSupport {
         return v == null || Math.abs(v) < 0.0001d;
     }
 
-    public static boolean hasCompleteCoreQuartet(JsonNode root) {
-        root = GeminiEffectiveJsonSupport.unwrapRootObjectOrNull(root);
-        if (root == null || !root.isObject()) return false;
-
-        JsonNode n = root.get("nutrients");
-        if (n == null || !n.isObject()) return false;
-
-        return hasValue(n.get("kcal"))
-               && hasValue(n.get("protein"))
-               && hasValue(n.get("fat"))
-               && hasValue(n.get("carbs"));
-    }
-
-    public static boolean hasAnyCoreNutrientValue(JsonNode root) {
-        root = GeminiEffectiveJsonSupport.unwrapRootObjectOrNull(root);
-        if (root == null || !root.isObject()) return false;
-
-        JsonNode n = root.get("nutrients");
-        if (n == null || !n.isObject()) return false;
-
-        return hasValue(n.get("kcal"))
-               || hasValue(n.get("protein"))
-               || hasValue(n.get("fat"))
-               || hasValue(n.get("carbs"));
-    }
-
-    private static boolean hasValue(JsonNode node) {
-        return node != null && !node.isNull();
-    }
-
-    private static void copyNonNegativeNumberOrNull(JsonNode from, ObjectNode to, String key) {
-        JsonNode v = from.get(key);
-        if (v == null || v.isMissingNode() || v.isNull()) {
-            to.putNull(key);
-            return;
-        }
-
-        Double d = null;
-        String unit = null;
-
-        if (v.isNumber()) {
-            d = v.asDouble();
-        } else if (v.isTextual()) {
-            String raw = v.asText("").trim();
-            if (!raw.isEmpty()) {
-                d = parseFirstNumber(raw);
-                unit = raw;
-            }
-        } else if (v.isObject()) {
-            JsonNode vv = v.get("value");
-            if (vv != null) {
-                if (vv.isNumber()) d = vv.asDouble();
-                else if (vv.isTextual()) d = parseFirstNumber(vv.asText("").trim());
-            }
-            JsonNode uu = v.get("unit");
-            if (uu == null) uu = v.get("uom");
-            if (uu != null && uu.isTextual()) unit = uu.asText();
-        } else {
-            to.putNull(key);
-            return;
-        }
-
-        if (d == null || d < 0) {
-            to.putNull(key);
-            return;
-        }
-
-        String u = (unit == null) ? "" : unit.toLowerCase(Locale.ROOT).trim();
-        boolean isMg = u.contains("mg") || u.contains("毫克");
-        boolean isGram = !isMg && (
-                u.equals("g")
-                || u.endsWith(" g")
-                || u.endsWith("g")
-                || u.contains("公克")
-                || u.equals("克")
-        );
-        boolean isKj = u.contains("kj") || u.contains("千焦");
-
-        if ("kcal".equals(key)) {
-            if (isKj && !u.contains("kcal")) {
-                d = d / 4.184d;
-            }
-        } else if ("sodium".equals(key)) {
-            if (isGram) {
-                d = d * 1000d;
-            }
-        } else {
-            if (isMg) {
-                d = d / 1000d;
-            }
-        }
-
-        to.put(key, d);
-    }
-
     private static void roundNutrients1dp(ObjectNode effective) {
         JsonNode nNode = effective.get("nutrients");
         if (!(nNode instanceof ObjectNode nutrients)) {
@@ -236,10 +136,11 @@ public final class GeminiPhotoAlbumJsonSupport {
     }
 
     private static Double normalizeConfidence(Double value) {
-        if (value == null) return null;
-        if (value >= 0.0 && value <= 1.0) return value;
-        if (value > 1.0 && value <= 100.0) return value / 100.0;
-        return null;
+        if (value == null || !Double.isFinite(value)) {
+            return null;
+        }
+        // ✅ 嚴格模式：只接受 0.0 ~ 1.0
+        return (value >= 0.0 && value <= 1.0) ? value : null;
     }
 
     private static Double parseNumberNodeOrText(JsonNode node) {

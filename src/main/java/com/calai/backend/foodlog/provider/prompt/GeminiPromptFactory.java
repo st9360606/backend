@@ -20,23 +20,23 @@ public final class GeminiPromptFactory {
             You are a highly advanced multilingual food nutrition extraction engine.
             Analyze the image and return ONLY ONE minified JSON object.
             No markdown. No extra text. No explanations. No extra keys.
-
+            
             GLOBAL ADAPTABILITY:
             - Handle international packaging. Convert kJ to kcal (kJ / 4.184).
             - For alcoholic beverages, estimate calories based on standard ABV if nutrition facts are missing.
-
+            
             FOOD NAME RULES:
             - Do NOT force translation of foodName. Keep it concise (max 100 chars).
             - For packaged/branded foods, preserve the original visible product name. Do NOT translate brands.
-
+            
             FOCUS RULE:
             - Analyze ONLY ONE dominant edible subject. Ignore background clutter.
             - If food is partially consumed, estimate only the REMAINING portion.
             - If multiple items exist, focus on the main dish and include "MIXED_MEAL" in warnings.
-
+            
             HEALTH EVALUATION (1-10):
             - Assign a healthScore (1-10): 9-10 (Whole foods), 5-8 (Balanced), 1-4 (Highly processed/Junk).
-
+            
             ESTIMATION LOGIC (CRITICAL):
             1. CLASSIFY FIRST:
                First classify the subject into exactly one type:
@@ -99,7 +99,7 @@ public final class GeminiPromptFactory {
                Round all nutrient values to ONE decimal place.
             
             12. Provide your brief thought process in "_reasoning" (Max 20 words).
-
+            
             CORE LOGIC:
             1. PACKAGED FOOD (Bags/Boxes):
                - ALWAYS calculate for the ENTIRE package content.
@@ -112,14 +112,14 @@ public final class GeminiPromptFactory {
             3. COOKED MEAL / LOOSE ITEMS:
                - For single dishes (e.g. Steak): Use unit "SERVING", basis "ESTIMATED_PORTION".
                - For countable items (e.g. 3 Cookies): Use unit "PIECE", value 3.0, basis "ESTIMATED_PORTION".
-
+            
             NUTRIENT HANDLING:
             - Default missing nutrients to 0.0. Do NOT use null.
             - Logic Check: Sugar <= Carbs, Fiber <= Carbs. Protein + Fat + Carbs <= Total Weight.
-
+            
             WARNING CODE RULES:
             [%s]
-
+            
             REQUIRED JSON FORMAT:
             {
               "foodName": "string|null",
@@ -143,6 +143,11 @@ public final class GeminiPromptFactory {
             2. CALCULATION:
                - If "Per 100g/ml": Search for total net weight/volume on the package. Total = (Values_per_100 * Total_Weight / 100).
                - If "Per Serving": Search for "Servings Per Container". Total = (Values_per_serving * Total_Servings).
+               MATH RULES:
+               - Total Nutrients = (Value_per_100g * Total_Weight_g / 100)
+               - Total Nutrients = (Value_per_100ml * Total_Volume_ml / 100)
+               - Total Nutrients = (Value_per_serving * Total_Servings)
+               - Total Nutrients = (Value_per_X * Total_Quantity / X)
             3. FALLBACK: If total weight/servings are truly missing, return nutrition for exactly ONE serving and set basis to "PER_SERVING".
             
             HEALTH EVALUATION (1-10):
@@ -167,11 +172,25 @@ public final class GeminiPromptFactory {
             SANITY CHECKS:
             - Fiber <= Carbs. Sugar <= Carbs. Confidence should be low if the image is blurry or numbers are unreadable.
             
+            ### EXTRA VISUAL RULES:
+            1. ANCHOR KEYWORDS: Search for total package weight/volume using these anchors:
+               - EN: "Net Weight", "Net Vol", "Contents", "Total Content"
+               - CN/TW: "淨重", "內容物", "內容量", "本包裝含"
+               - JP: "内容量", "総量", "あたり"
+               - KR: "총 내용량", "중량"
+            2. THE MULTIPLIER RULE: If the package specifies a quantity (e.g., "40g x 3", "20g * 5 pcs", "6入"), the "Total_Weight" MUST be (Individual_Weight * Quantity).
+            3. CONSUMED STATE PRIORITY: If multiple values exist (e.g., "Drained weight" vs "Net weight" or "With sauce" in parentheses), ALWAYS prioritize the "As Consumed" (larger calorie) value.
+            4. IGNORE PERCENTAGE: When extracting values, ignore percentage columns (%% Daily Value, %% NRV, %% 基準値). Only extract absolute numbers (g, mg, kcal, kJ).
+            5. COLUMN ALIGNMENT: Match headers (e.g., "per 100g") strictly with the vertical column of numbers below them. If columns are ambiguous, explain the choice in "_reasoning".
+            6. IMPLICIT TOTAL SEARCH: If "Net Weight" is not found, look for any standalone number followed by "g", "ml", "L", or "kg" on the entire package surface, as these are likely the total quantity.
+            7. HANDWRITTEN/OBLITERATED DATA: If any nutrition number is partially cut off or covered by a price tag/sticker, set "confidence" < 0.5 and add "LABEL_PARTIAL" to warnings.
+            
             REQUIRED JSON FORMAT:
             {
-              "foodName": "string",
+              "foodName": "string|null",
               "quantity": { "value": 1.0, "unit": "PACK|BOTTLE|CAN|PIECE|SERVING" },
               "nutrients": { "kcal": number, "protein": number, "fat": number, "carbs": number, "fiber": number, "sugar": number, "sodium": number },
+              "_reasoning": "string (Crucial: Briefly explain your math steps here FIRST before outputting the numbers below)",
               "confidence": number, (Range: 0.0 to 1.0)
               "healthScore": number, (Range: 1 to 10)
               "warnings": string[],

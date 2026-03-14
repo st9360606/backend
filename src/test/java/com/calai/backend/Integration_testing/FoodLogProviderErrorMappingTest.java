@@ -42,7 +42,7 @@ public class FoodLogProviderErrorMappingTest {
     @Autowired FoodLogTaskRepository taskRepo;
 
     @Test
-    void timeout_should_map_to_PROVIDER_TIMEOUT_and_surface_in_getOne() throws Exception {
+    void timeout_should_map_to_PROVIDER_TIMEOUT_and_cancel_task_but_surface_failed_in_getOne() throws Exception {
         Long userId = 1L;
         Instant now = Instant.now();
 
@@ -77,14 +77,15 @@ public class FoodLogProviderErrorMappingTest {
         assertThat(updatedLog.getLastErrorCode()).isEqualTo("PROVIDER_TIMEOUT");
 
         var updatedTask = taskRepo.findByFoodLogId(log.getId()).orElseThrow();
-        assertThat(updatedTask.getTaskStatus()).isEqualTo(FoodLogTaskEntity.TaskStatus.FAILED);
+        assertThat(updatedTask.getTaskStatus()).isEqualTo(FoodLogTaskEntity.TaskStatus.CANCELLED);
         assertThat(updatedTask.getLastErrorCode()).isEqualTo("PROVIDER_TIMEOUT");
+        assertThat(updatedTask.getNextRetryAtUtc()).isNull();
 
         FoodLogEnvelope env = service.getOne(userId, log.getId(), "test-req");
         assertThat(env.status()).isEqualTo("FAILED");
         assertThat(env.error()).isNotNull();
         assertThat(env.error().errorCode()).isEqualTo("PROVIDER_TIMEOUT");
-        assertThat(env.error().retryAfterSec()).isNotNull();
+        assertThat(env.error().retryAfterSec()).isNull();
     }
 
     @TestConfiguration

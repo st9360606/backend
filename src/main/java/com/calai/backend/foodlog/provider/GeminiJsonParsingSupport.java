@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.Locale;
 
 @Component
 public final class GeminiJsonParsingSupport {
@@ -189,15 +188,6 @@ public final class GeminiJsonParsingSupport {
         int i = s.length();
         while (i > 0 && Character.isWhitespace(s.charAt(i - 1))) i--;
         return s.substring(0, i);
-    }
-
-    private static String extractLastJsonKeyBeforeColon(String t) {
-        int colon = t.length() - 1;
-        int q2 = t.lastIndexOf('"', colon - 1);
-        if (q2 < 0) return null;
-        int q1 = t.lastIndexOf('"', q2 - 1);
-        if (q1 < 0) return null;
-        return t.substring(q1 + 1, q2);
     }
 
     private static String stripFence(String s) {

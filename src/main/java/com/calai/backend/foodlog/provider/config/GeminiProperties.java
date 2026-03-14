@@ -1,9 +1,11 @@
 package com.calai.backend.foodlog.provider.config;
 
+import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
+@Data
 @ConfigurationProperties(prefix = "app.provider.gemini")
 public class GeminiProperties {
 
@@ -48,86 +50,7 @@ public class GeminiProperties {
      */
     private TextOnlyTuning textOnly = new TextOnlyTuning();
 
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    public String getBaseUrl() {
-        return baseUrl;
-    }
-
-    public void setBaseUrl(String baseUrl) {
-        this.baseUrl = baseUrl;
-    }
-
-    public String getModel() {
-        return model;
-    }
-
-    public void setModel(String model) {
-        this.model = model;
-    }
-
-    public String getApiKey() {
-        return apiKey;
-    }
-
-    public void setApiKey(String apiKey) {
-        this.apiKey = apiKey;
-    }
-
-    public Duration getConnectTimeout() {
-        return connectTimeout;
-    }
-
-    public void setConnectTimeout(Duration connectTimeout) {
-        this.connectTimeout = connectTimeout;
-    }
-
-    public Duration getReadTimeout() {
-        return readTimeout;
-    }
-
-    public void setReadTimeout(Duration readTimeout) {
-        this.readTimeout = readTimeout;
-    }
-
-    public boolean isLabelUseFunctionCalling() {
-        return labelUseFunctionCalling;
-    }
-
-    public void setLabelUseFunctionCalling(boolean labelUseFunctionCalling) {
-        this.labelUseFunctionCalling = labelUseFunctionCalling;
-    }
-
-    public RequestTuning getPhotoAlbum() {
-        return photoAlbum;
-    }
-
-    public void setPhotoAlbum(RequestTuning photoAlbum) {
-        this.photoAlbum = photoAlbum;
-    }
-
-    public RequestTuning getLabelJson() {
-        return labelJson;
-    }
-
-    public void setLabelJson(RequestTuning labelJson) {
-        this.labelJson = labelJson;
-    }
-
-    public TextOnlyTuning getTextOnly() {
-        return textOnly;
-    }
-
-    public void setTextOnly(TextOnlyTuning textOnly) {
-        this.textOnly = textOnly;
-    }
-
+    @Data
     public static class RequestTuning {
         /** 每次 request 的輸出 token 上限 */
         private int maxOutputTokens = 1024;
@@ -135,67 +58,19 @@ public class GeminiProperties {
         /** 生成溫度 */
         private double temperature = 0.0;
 
-        public RequestTuning() {
-        }
-
         public RequestTuning(int maxOutputTokens, double temperature) {
             this.maxOutputTokens = maxOutputTokens;
             this.temperature = temperature;
         }
 
-        public int getMaxOutputTokens() {
-            return maxOutputTokens;
-        }
-
-        public void setMaxOutputTokens(int maxOutputTokens) {
-            this.maxOutputTokens = maxOutputTokens;
-        }
-
-        public double getTemperature() {
-            return temperature;
-        }
-
-        public void setTemperature(double temperature) {
-            this.temperature = temperature;
-        }
     }
 
+    @Data
     public static class TextOnlyTuning {
         private RequestTuning strictRequireCore = new RequestTuning(1024, 0.0);
         private RequestTuning strictDefault = new RequestTuning(768, 0.0);
         private RequestTuning looseRequireCore = new RequestTuning(1536, 0.0);
         private RequestTuning looseDefault = new RequestTuning(768, 0.0);
 
-        public RequestTuning getStrictRequireCore() {
-            return strictRequireCore;
-        }
-
-        public void setStrictRequireCore(RequestTuning strictRequireCore) {
-            this.strictRequireCore = strictRequireCore;
-        }
-
-        public RequestTuning getStrictDefault() {
-            return strictDefault;
-        }
-
-        public void setStrictDefault(RequestTuning strictDefault) {
-            this.strictDefault = strictDefault;
-        }
-
-        public RequestTuning getLooseRequireCore() {
-            return looseRequireCore;
-        }
-
-        public void setLooseRequireCore(RequestTuning looseRequireCore) {
-            this.looseRequireCore = looseRequireCore;
-        }
-
-        public RequestTuning getLooseDefault() {
-            return looseDefault;
-        }
-
-        public void setLooseDefault(RequestTuning looseDefault) {
-            this.looseDefault = looseDefault;
-        }
     }
 }

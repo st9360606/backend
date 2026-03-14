@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.task.config;
 
+import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
@@ -8,9 +9,11 @@ import java.time.Duration;
  * application.yml:
  * app.storage.local.tmp-cleaner.*
  */
+@Data
 @ConfigurationProperties(prefix = "app.storage.local.tmp-cleaner")
 public class LocalTempBlobCleanerProperties {
 
+    // ===== getters/setters =====
     /** 一鍵開關（prod 想關就關） */
     private boolean enabled = true;
 
@@ -34,26 +37,5 @@ public class LocalTempBlobCleanerProperties {
      */
     private String tmpSubdir = "blobs/tmp";
 
-    // ===== getters/setters =====
-    public boolean isEnabled() { return enabled; }
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
-
-    public Duration getKeep() { return keep; }
-    public void setKeep(Duration keep) { this.keep = keep; }
-
-    public int getMaxDepth() { return maxDepth; }
-    public void setMaxDepth(int maxDepth) { this.maxDepth = maxDepth; }
-
-    public Duration getFixedDelay() { return fixedDelay; }
-    public void setFixedDelay(Duration fixedDelay) { this.fixedDelay = fixedDelay; }
-
-    public Duration getInitialDelay() { return initialDelay; }
-    public void setInitialDelay(Duration initialDelay) { this.initialDelay = initialDelay; }
-
-    public boolean isDeleteEmptyDirs() { return deleteEmptyDirs; }
-    public void setDeleteEmptyDirs(boolean deleteEmptyDirs) { this.deleteEmptyDirs = deleteEmptyDirs; }
-
-    public String getTmpSubdir() { return tmpSubdir; }
-    public void setTmpSubdir(String tmpSubdir) { this.tmpSubdir = tmpSubdir; }
 }
 

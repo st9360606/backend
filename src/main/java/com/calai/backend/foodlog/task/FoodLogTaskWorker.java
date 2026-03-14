@@ -94,7 +94,7 @@ public class FoodLogTaskWorker {
                 throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
             }
 
-            ObjectNode finalEff = postProcessor.apply(eff, result.provider(), execution.method());
+            ObjectNode finalEff = postProcessor.apply(eff, result.provider());
 
             txTemplate.executeWithoutResult(status ->
                     applySuccess(execution.taskId(), execution.foodLogId(), result.provider(), finalEff)
@@ -282,7 +282,7 @@ public class FoodLogTaskWorker {
         // LABEL：單次失敗若是 PROVIDER_BAD_RESPONSE，直接降級成 NO_LABEL_DETECTED，不做 retry
         if ("LABEL".equalsIgnoreCase(method) && "PROVIDER_BAD_RESPONSE".equals(mappedCode)) {
             ObjectNode fb = fallbackNoLabelDetectedEffective();
-            ObjectNode finalEff = postProcessor.apply(fb, "GEMINI", "LABEL");
+            ObjectNode finalEff = postProcessor.apply(fb, "GEMINI");
 
             logEntity.setEffective(finalEff);
             logEntity.setProvider("GEMINI");

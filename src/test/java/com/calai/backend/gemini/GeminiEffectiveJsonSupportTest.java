@@ -36,7 +36,7 @@ class GeminiEffectiveJsonSupportTest {
         labelMeta.put("basis", "PER_SERVING");
 
         ObjectNode effective = GeminiEffectiveJsonSupport.normalizeToEffective(raw);
-        GeminiEffectiveJsonSupport.finalizeEffective(false, raw, effective);
+        GeminiEffectiveJsonSupport.finalizeEffective(raw, effective);
 
         assertThat(effective.path("nutrients").path("kcal").asDouble()).isEqualTo(500.0);
         assertThat(effective.path("nutrients").path("protein").asDouble()).isEqualTo(10.0);
@@ -72,9 +72,9 @@ class GeminiEffectiveJsonSupportTest {
         labelMeta.put("basis", "PER_SERVING");
 
         ObjectNode effective = GeminiEffectiveJsonSupport.normalizeToEffective(raw);
-        GeminiEffectiveJsonSupport.finalizeEffective(false, raw, effective);
+        GeminiEffectiveJsonSupport.finalizeEffective(raw, effective);
 
-        assertThat(effective.path("labelMeta").path("basis").asText()).isEqualTo("WHOLE_PACKAGE");
+        assertThat(effective.path("labelMeta").path("basis").asText()).isEqualTo("PER_SERVING");
         assertThat(effective.path("labelMeta").path("servingsPerContainer").asDouble()).isEqualTo(1.0);
         assertThat(effective.path("quantity").path("value").asDouble()).isEqualTo(1.0);
         assertThat(effective.path("quantity").path("unit").asText()).isEqualTo("SERVING");

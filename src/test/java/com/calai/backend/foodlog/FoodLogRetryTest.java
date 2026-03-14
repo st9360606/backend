@@ -112,9 +112,7 @@ class FoodLogServiceRetryTest {
         FoodLogTaskEntity task = existingTask("task-1", foodLogId);
 
         when(repo.findByIdForUpdate(foodLogId)).thenReturn(Optional.of(log));
-        when(repo.findByIdAndUserId(foodLogId, userId)).thenReturn(Optional.of(log));
         when(taskRepo.findByFoodLogIdForUpdate(foodLogId)).thenReturn(Optional.of(task));
-        when(taskRepo.findByFoodLogId(foodLogId)).thenReturn(Optional.of(task));
 
         when(entitlementService.resolveTier(userId, NOW)).thenReturn(EntitlementService.Tier.TRIAL);
         when(quota.consumeOperationOrThrow(userId, EntitlementService.Tier.TRIAL, ZoneOffset.UTC, NOW))
@@ -158,9 +156,7 @@ class FoodLogServiceRetryTest {
         AtomicReference<FoodLogTaskEntity> savedTaskRef = new AtomicReference<>();
 
         when(repo.findByIdForUpdate(foodLogId)).thenReturn(Optional.of(log));
-        when(repo.findByIdAndUserId(foodLogId, userId)).thenReturn(Optional.of(log));
         when(taskRepo.findByFoodLogIdForUpdate(foodLogId)).thenReturn(Optional.empty());
-        when(taskRepo.findByFoodLogId(foodLogId)).thenAnswer(inv -> Optional.ofNullable(savedTaskRef.get()));
 
         when(entitlementService.resolveTier(userId, NOW)).thenReturn(EntitlementService.Tier.MONTHLY);
         when(quota.consumeOperationOrThrow(userId, EntitlementService.Tier.MONTHLY, ZoneOffset.UTC, NOW))

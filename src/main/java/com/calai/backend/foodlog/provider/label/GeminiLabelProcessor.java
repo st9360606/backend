@@ -92,10 +92,10 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
             modelId = resolveModelIdVision(entity);
             String promptMain = promptFactory.mainPrompt(true);
 
-            log.info("gemini_call_1_main_start foodLogId={} method={} modelId={} isLabel={}",
-                    entity.getId(), entity.getMethod(), modelId, true);
+            log.info("gemini_call_1_main_start foodLogId={} method={} modelId={}",
+                    entity.getId(), entity.getMethod(), modelId);
 
-            CallResult r1 = callAndExtract(bytes, mime, promptMain, modelId, true, entity.getId());
+            CallResult r1 = callAndExtract(bytes, mime, promptMain, modelId, entity.getId());
             Tok tok = r1.tok();
 
             JsonNode parsed = (r1.functionArgs() != null) ? r1.functionArgs() : tryParseJson(r1.text());
@@ -149,14 +149,14 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
                 // provider 明確回 no-label
                 if (hasWarning(raw, FoodLogWarning.NO_LABEL_DETECTED.name())) {
                     ObjectNode effective = normalizeToEffective(raw);
-                    return okAndReturn(modelId, entity, t0, tok, true, raw, effective);
+                    return okAndReturn(modelId, entity, t0, tok, raw, effective);
                 }
 
                 // 空殼 / 幾乎無內容
                 if (isLabelEmptyArgs(raw)) {
                     raw = fallbackLabelPartialDetected(r1.text());
                     ObjectNode effective = normalizeToEffective(raw);
-                    return okAndReturn(modelId, entity, t0, tok, true, raw, effective);
+                    return okAndReturn(modelId, entity, t0, tok, raw, effective);
                 }
 
                 if (isLabelIncomplete(raw)) {
@@ -165,11 +165,11 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
 
                     // ✅ 不再強行覆蓋 confidence，保留 Gemini 原值；若沒有就維持 null
                     ObjectNode effective = normalizeToEffective(raw);
-                    return okAndReturn(modelId, entity, t0, tok, true, raw, effective);
+                    return okAndReturn(modelId, entity, t0, tok, raw, effective);
                 }
 
                 ObjectNode effective = normalizeToEffective(raw);
-                return okAndReturn(modelId, entity, t0, tok, true, raw, effective);
+                return okAndReturn(modelId, entity, t0, tok, raw, effective);
             }
 
             // 完全 parse 不出來時的 deterministic fallback
@@ -182,7 +182,7 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
             }
 
             ObjectNode effective = normalizeToEffective(raw);
-            return okAndReturn(modelId, entity, t0, tok, true, raw, effective);
+            return okAndReturn(modelId, entity, t0, tok, raw, effective);
 
         } catch (Exception e) {
             ProviderErrorMapper.Mapped mapped = ProviderErrorMapper.map(e);
@@ -240,7 +240,6 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
             String mimeType,
             String userPrompt,
             String modelId,
-            boolean isLabel,
             String foodLogIdForLog
     ) {
         GeminiTransportSupport.CallResult r =
@@ -249,9 +248,8 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
                         mimeType,
                         userPrompt,
                         modelId,
-                        isLabel,
-                        foodLogIdForLog,
-                        false
+                        true,
+                        foodLogIdForLog
                 );
 
         return new CallResult(
@@ -302,11 +300,10 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
             FoodLogEntity entity,
             long t0,
             Tok tok,
-            boolean isLabel,
             JsonNode rawForFinalize,
             ObjectNode effective
     ) {
-        finalizeEffective(isLabel, rawForFinalize, effective);
+        finalizeEffective(rawForFinalize, effective);
         normalizeWholePackageQuantity(effective);
 
         telemetry.ok(
@@ -321,27 +318,17 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
         return new ProviderClient.ProviderResult(effective, "GEMINI");
     }
 
-    private static void finalizeEffective(boolean isLabel, JsonNode rawForFinalize, ObjectNode effective) {
-        GeminiEffectiveJsonSupport.finalizeEffective(isLabel, rawForFinalize, effective);
+    private static void finalizeEffective(JsonNode rawForFinalize, ObjectNode effective) {
+        GeminiEffectiveJsonSupport.finalizeEffective(rawForFinalize, effective);
     }
 
-    /**
-     * 只做最終 quantity 補正，不再把 whole-package 改成 SERVING。
-     */
     private static void normalizeWholePackageQuantity(ObjectNode effective) {
         if (effective == null) {
             return;
         }
-
         ObjectNode quantity = effective.with("quantity");
-
-        Double value = GeminiEffectiveJsonSupport.parseNumberNodeOrText(quantity.get("value"));
-        if (value == null || value <= 0) {
-            quantity.put("value", 1.0);
-        } else {
-            quantity.put("value", value);
-        }
-
+        // ✅ 對齊 USER_PROMPT_LABEL_MAIN：LABEL 一律代表整個實體，固定 1.0
+        quantity.put("value", 1.0);
         String unit = GeminiEffectiveJsonSupport.normalizeUnit(quantity.path("unit").asText(null));
         quantity.put("unit", unit);
     }

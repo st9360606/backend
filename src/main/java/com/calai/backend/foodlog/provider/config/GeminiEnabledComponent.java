@@ -7,7 +7,6 @@ import java.lang.annotation.*;
 
 /**
  * 只有在 app.provider.gemini.enabled=true 時才建立的 Spring Component。
- *
  * 用途：
  * - 避免重複寫 @Component + @ConditionalOnProperty(...)
  * - 統一 Gemini 相關元件的啟動條件

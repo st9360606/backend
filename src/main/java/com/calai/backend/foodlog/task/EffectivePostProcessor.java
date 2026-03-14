@@ -18,10 +18,6 @@ public class EffectivePostProcessor {
     private final NutritionSanityChecker sanityChecker;
 
     public ObjectNode apply(ObjectNode effective, String providerCode) {
-        return apply(effective, providerCode, null);
-    }
-
-    public ObjectNode apply(ObjectNode effective, String providerCode, String method) {
         if (effective == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
 
         ObjectNode nutrients = getObj(effective, "nutrients");
@@ -41,25 +37,9 @@ public class EffectivePostProcessor {
             }
         }
 
-        Integer hs = null;
-        JsonNode hsNode = effective.get("healthScore");
-        if (hsNode != null && !hsNode.isNull()) {
-            if (hsNode.isIntegralNumber()) {
-                hs = hsNode.asInt();
-            } else if (hsNode.isNumber()) {
-                hs = (int) Math.round(hsNode.asDouble());
-            } else if (hsNode.isTextual()) {
-                try {
-                    hs = (int) Math.round(Double.parseDouble(hsNode.asText().trim()));
-                } catch (Exception ignore) {
-                    hs = null;
-                }
-            }
-        }
+        Integer hs = parseHealthScoreStrict(effective.get("healthScore"));
 
         if (hs != null) {
-            if (hs < 0) hs = 0;
-            if (hs > 10) hs = 10;
             effective.put("healthScore", hs);
         } else {
             effective.remove("healthScore");
@@ -72,7 +52,7 @@ public class EffectivePostProcessor {
 
         boolean degraded = noFood || unknown || noLabel || missingNutritionFacts;
 
-        if (conf == null || conf <= 0.4) {
+        if (conf != null && conf <= 0.4) {
             addWarningWhitelist(effective, FoodLogWarning.LOW_CONFIDENCE);
         }
 
@@ -134,6 +114,38 @@ public class EffectivePostProcessor {
         if (aiMeta.get("degradedAtUtc") == null || aiMeta.get("degradedAtUtc").isNull()) {
             aiMeta.put("degradedAtUtc", Instant.now().toString());
         }
+    }
+
+    private static Integer parseHealthScoreStrict(JsonNode hsNode) {
+        if (hsNode == null || hsNode.isNull()) {
+            return null;
+        }
+        if (hsNode.isIntegralNumber()) {
+            int v = hsNode.asInt();
+            return (v >= 0 && v <= 10) ? v : null;
+        }
+        if (hsNode.isTextual()) {
+            try {
+                String raw = hsNode.asText().trim();
+                if (raw.isEmpty()) {
+                    return null;
+                }
+                double d = Double.parseDouble(raw);
+                if (!Double.isFinite(d)) {
+                    return null;
+                }
+                if (d < 0 || d > 10) {
+                    return null;
+                }
+                if (d % 1 != 0) {
+                    return null;
+                }
+                return (int) d;
+            } catch (Exception ignore) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static ObjectNode ensureObj(ObjectNode root, String field) {

@@ -27,8 +27,7 @@ public final class GeminiRequestBuilder {
             String mimeType,
             String userPrompt,
             boolean isLabel,
-            String functionName,
-            boolean requireCoreNutrition
+            String functionName
     ) {
         String b64 = Base64.getEncoder().encodeToString(imageBytes);
         ObjectNode root = om.createObjectNode();
@@ -131,6 +130,9 @@ public final class GeminiRequestBuilder {
         }
         propsNode.set("nutrients", nutrients);
 
+        // ✅ 對齊 USER_PROMPT_MAIN
+        propsNode.set("_reasoning", sString(true));
+
         propsNode.set("confidence", sNumber(true));
         propsNode.set("healthScore", sNumber(true));
 
@@ -148,6 +150,7 @@ public final class GeminiRequestBuilder {
         req.add("foodName");
         req.add("quantity");
         req.add("nutrients");
+        req.add("_reasoning");
         req.add("confidence");
         req.add("healthScore");
         req.add("warnings");
@@ -195,6 +198,9 @@ public final class GeminiRequestBuilder {
         }
         propsNode.set("nutrients", nutrients);
 
+        // ✅ 對齊 prompt JSON
+        propsNode.set("_reasoning", sString(true));
+
         propsNode.set("confidence", sNumber(true));
         propsNode.set("healthScore", sNumber(true));
 
@@ -212,6 +218,7 @@ public final class GeminiRequestBuilder {
         req.add("foodName");
         req.add("quantity");
         req.add("nutrients");
+        req.add("_reasoning");
         req.add("confidence");
         req.add("healthScore");
 
@@ -340,6 +347,10 @@ public final class GeminiRequestBuilder {
             nReq.add(k);
         }
 
+        // ✅ 對齊 USER_PROMPT_LABEL_MAIN
+        ObjectNode reasoning = propsNode.putObject("_reasoning");
+        reasoning.putArray("type").add("string").add("null");
+
         propsNode.putObject("confidence").putArray("type").add("number").add("null");
         propsNode.putObject("healthScore").putArray("type").add("number").add("null");
 
@@ -351,6 +362,7 @@ public final class GeminiRequestBuilder {
                 .add("foodName")
                 .add("quantity")
                 .add("nutrients")
+                .add("_reasoning")
                 .add("confidence")
                 .add("healthScore");
 

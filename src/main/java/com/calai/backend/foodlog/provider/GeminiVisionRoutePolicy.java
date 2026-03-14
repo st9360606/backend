@@ -8,11 +8,9 @@ import java.util.Locale;
  * - 最多 2 次 GEMINI
  * - 允許 OFF name-search fallback
  * - 先不開 OFF local barcode fast path，避免抓到背景條碼
- *
  * BARCODE：
  * - 不在 GeminiProviderClient 內處理
  * - 仍由 FoodLogService#createBarcodeMvp() 走 OFF
- *
  * LABEL：
  * - 保持既有行為
  */
@@ -28,22 +26,6 @@ public final class GeminiVisionRoutePolicy {
 
     public static boolean isLabel(String method) {
         return method != null && "LABEL".equalsIgnoreCase(method.trim());
-    }
-
-    /**
-     * 先保守維持 false。
-     * 若你後續確認 ImageBarcodeDetector 只會抓主體商品的條碼，
-     * 再改成 return isPhotoOrAlbum(method);
-     */
-    public static boolean allowOffLocalFastPath(String method) {
-        return false;
-    }
-
-    /**
-     * PHOTO / ALBUM 不允許 OFF name-search fallback。
-     */
-    public static boolean allowOffNameSearchFallback(String method) {
-        return false;
     }
 
     /**

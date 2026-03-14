@@ -104,7 +104,7 @@ public class EffectivePostProcessorTest {
 
         eff.put("confidence", 0.98);
 
-        ObjectNode out = processor.apply(eff, "OPENFOODFACTS", "BARCODE");
+        ObjectNode out = processor.apply(eff, "OPENFOODFACTS");
 
         assertThat(out.path("healthScoreMeta").path("provider").asText()).isEqualTo("OPENFOODFACTS");
         assertThat(out.path("healthScoreMeta").path("confidenceSource").asText()).isEqualTo("OPENFOODFACTS");

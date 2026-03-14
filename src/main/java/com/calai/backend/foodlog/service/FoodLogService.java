@@ -191,7 +191,7 @@ public class FoodLogService {
                     e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
                     markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -345,7 +345,7 @@ public class FoodLogService {
                     ObjectNode copied = hit.get().getEffective().deepCopy();
 
                     // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
                     markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -497,7 +497,7 @@ public class FoodLogService {
                     e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
                     markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -782,7 +782,7 @@ public class FoodLogService {
             aiMeta.put("foodCategory", resolvedCategory.category().name());
             aiMeta.put("foodSubCategory", resolvedCategory.subCategory().name());
 
-            ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
+            ObjectNode processed = postProcessor.apply(eff, e.getProvider());
             e.setEffective(processed);
 
             e.setStatus(FoodLogStatus.DRAFT);
@@ -1130,7 +1130,55 @@ public class FoodLogService {
             throw new IllegalArgumentException("FOOD_LOG_DELETED");
         }
 
-        throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
+        String method = log.getMethod() == null ? "" : log.getMethod().trim().toUpperCase(Locale.ROOT);
+        boolean retryableMethod =
+                "PHOTO".equals(method)
+                        || "ALBUM".equals(method)
+                        || "LABEL".equals(method);
+
+        if (!retryableMethod || log.getStatus() != FoodLogStatus.FAILED) {
+            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
+        }
+
+        Instant now = clock.instant();
+        ZoneId quotaTz = resolveQuotaTz();
+        String did = normalizeDeviceId(userId, deviceId);
+
+        // 先做 precheck，失敗時不得有任何 save
+        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
+        rateLimiter.checkOrThrow(userId, tier, now);
+        abuseGuard.onOperationAttempt(userId, did, false, now, quotaTz);
+
+        QuotaService.Decision decision =
+                quota.consumeOperationOrThrow(userId, tier, quotaTz, now);
+
+        // precheck / quota 都過了，才開始重置 log
+        log.setStatus(FoodLogStatus.PENDING);
+        log.setEffective(null);
+        log.setLastErrorCode(null);
+        log.setLastErrorMessage(null);
+        log.setDegradeLevel(
+                decision.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2"
+        );
+
+        FoodLogTaskEntity task = taskRepo.findByFoodLogIdForUpdate(foodLogId)
+                .orElseGet(() -> {
+                    FoodLogTaskEntity t = new FoodLogTaskEntity();
+                    t.setFoodLogId(foodLogId);
+                    return t;
+                });
+
+        task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
+        task.setNextRetryAtUtc(null);
+        task.setPollAfterSec(2);
+        task.setAttempts(0);
+        task.setLastErrorCode(null);
+        task.setLastErrorMessage(null);
+
+        taskRepo.save(task);
+        repo.save(log);
+
+        return toEnvelope(log, task, requestId);
     }
 
     // =========================

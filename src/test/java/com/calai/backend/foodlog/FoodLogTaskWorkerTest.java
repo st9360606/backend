@@ -231,7 +231,7 @@ class FoodLogTaskWorkerTest {
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenReturn(new ProviderClient.ProviderResult(eff, "GEMINI"));
 
-        Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO")))
+        Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI")))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
@@ -245,6 +245,6 @@ class FoodLogTaskWorkerTest {
         assertEquals("GEMINI", log.getProvider());
 
         Mockito.verify(postProcessor, Mockito.times(1))
-                .apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO"));
+                .apply(any(ObjectNode.class), eq("GEMINI"));
     }
 }

@@ -4,21 +4,15 @@ import com.calai.backend.foodlog.config.AiModelRouter;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
 import com.calai.backend.foodlog.model.ModelMode;
-import com.calai.backend.foodlog.provider.GeminiJsonParsingSupport;
-import com.calai.backend.foodlog.provider.GeminiModeProcessor;
+import com.calai.backend.foodlog.provider.*;
 import com.calai.backend.foodlog.provider.config.GeminiEnabledComponent;
 import com.calai.backend.foodlog.provider.prompt.GeminiPromptFactory;
 import com.calai.backend.foodlog.provider.transport.GeminiTransportSupport;
-import com.calai.backend.foodlog.provider.GeminiVisionRoutePolicy;
-import com.calai.backend.foodlog.provider.GeminiEffectiveJsonSupport;
-import com.calai.backend.foodlog.provider.ImageMimeResolver;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.task.ProviderClient;
 import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
-import com.calai.backend.foodlog.unit.NutritionBasis;
-import com.calai.backend.foodlog.unit.QuantityUnit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -29,7 +23,6 @@ import java.util.Locale;
 
 /**
  * PHOTO / ALBUM 單次 Gemini 流程。
- *
  * 原則：
  * 1. 只打一次 Gemini
  * 2. 不做 text repair
@@ -93,8 +86,7 @@ public class GeminiPhotoAlbumProcessor implements GeminiModeProcessor {
                     prompt,
                     modelId,
                     false,
-                    entity.getId(),
-                    false
+                    entity.getId()
             );
 
             JsonNode parsed = (result.functionArgs() != null)
@@ -243,22 +235,6 @@ public class GeminiPhotoAlbumProcessor implements GeminiModeProcessor {
             return "BOTTLE";
         }
         return "PACK";
-    }
-
-    private static void addWarningIfMissing(ObjectNode raw, FoodLogWarning warning) {
-        JsonNode warnings = raw.get("warnings");
-        if (warnings == null || !warnings.isArray()) {
-            raw.putArray("warnings").add(warning.name());
-            return;
-        }
-
-        for (JsonNode item : warnings) {
-            if (item != null && warning.name().equalsIgnoreCase(item.asText())) {
-                return;
-            }
-        }
-
-        ((com.fasterxml.jackson.databind.node.ArrayNode) warnings).add(warning.name());
     }
 
     private String resolveModelIdVision(FoodLogEntity entity) {

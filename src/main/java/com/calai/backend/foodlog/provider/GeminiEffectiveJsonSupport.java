@@ -198,6 +198,7 @@ public final class GeminiEffectiveJsonSupport {
         }
 
         Double d = null;
+
         if (node.isNumber()) {
             d = node.asDouble();
         } else if (node.isTextual()) {
@@ -207,19 +208,20 @@ public final class GeminiEffectiveJsonSupport {
                 return null;
             }
         }
-
         if (d == null || !Double.isFinite(d)) {
             return null;
         }
-
-        int v = (int) Math.round(d);
-        if (v < 0 || v > 10) {
+        // ✅ 不再四捨五入；只有 Gemini 已經給整數時才接受
+        if (d < 0 || d > 10) {
             return null;
         }
-        return v;
+        if (d % 1 != 0) {
+            return null;
+        }
+        return d.intValue();
     }
 
-    public static void finalizeEffective(boolean isLabel, JsonNode rawForFinalize, ObjectNode effective) {
+    public static void finalizeEffective(JsonNode rawForFinalize, ObjectNode effective) {
         if (effective == null) {
             return;
         }
@@ -241,18 +243,6 @@ public final class GeminiEffectiveJsonSupport {
             if (code.equalsIgnoreCase(it.asText())) return true;
         }
         return false;
-    }
-
-    public static boolean isAllNutrientsNull(JsonNode root) {
-        if (root == null || !root.isObject()) return true;
-        JsonNode n = root.get("nutrients");
-        if (n == null || !n.isObject()) return true;
-
-        for (String k : new String[]{"kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium"}) {
-            JsonNode v = n.get(k);
-            if (v != null && !v.isNull()) return false;
-        }
-        return true;
     }
 
     public static JsonNode unwrapRootObjectOrNull(JsonNode raw) {
@@ -325,72 +315,13 @@ public final class GeminiEffectiveJsonSupport {
         }
     }
 
-    private static void copyNonNegativeNumberOrNull(JsonNode from, ObjectNode to, String key) {
-        JsonNode v = from.get(key);
-        if (v == null || v.isMissingNode() || v.isNull()) {
-            to.putNull(key);
-            return;
-        }
-
-        Double d = null;
-        String unit = null;
-
-        if (v.isNumber()) {
-            d = v.asDouble();
-        } else if (v.isTextual()) {
-            String raw = v.asText("").trim();
-            if (!raw.isEmpty()) {
-                d = parseFirstNumber(raw);
-                unit = raw;
-            }
-        } else if (v.isObject()) {
-            JsonNode vv = v.get("value");
-            if (vv != null) {
-                if (vv.isNumber()) d = vv.asDouble();
-                else if (vv.isTextual()) d = parseFirstNumber(vv.asText("").trim());
-            }
-            JsonNode uu = v.get("unit");
-            if (uu == null) uu = v.get("uom");
-            if (uu != null && uu.isTextual()) unit = uu.asText();
-        } else {
-            to.putNull(key);
-            return;
-        }
-
-        if (d == null || d < 0) {
-            to.putNull(key);
-            return;
-        }
-
-        String u = (unit == null) ? "" : unit.toLowerCase(Locale.ROOT).trim();
-
-        boolean isMg = u.contains("mg") || u.contains("毫克");
-        boolean isGram = !isMg && (
-                u.equals("g")
-                || u.endsWith(" g")
-                || u.endsWith("g")
-                || u.contains("公克")
-                || u.equals("克")
-        );
-
-        boolean isKj = u.contains("kj") || u.contains("千焦");
-
-        if ("kcal".equals(key)) {
-            if (isKj && !u.contains("kcal")) d = d / 4.184d;
-        } else if ("sodium".equals(key)) {
-            if (isGram) d = d * 1000d;
-        } else {
-            if (isMg) d = d / 1000d;
-        }
-
-        to.put(key, d);
-    }
-
     private static Double normalizeConfidence(Double v) {
-        if (v == null) return null;
-        if (v >= 0.0 && v <= 1.0) return v;
-        if (v > 1.0 && v <= 100.0) return v / 100.0;
-        return null;
+        if (v == null || !Double.isFinite(v)) {
+            return null;
+        }
+        // ✅ 嚴格模式：只接受 Gemini 已經回成 0.0 ~ 1.0 的值
+        //    不再把 85 轉成 0.85，避免後端介入計算
+        return (v >= 0.0 && v <= 1.0) ? v : null;
     }
 
     private static void copyCanonicalCategoryAiMetaIfPresent(JsonNode raw, ObjectNode out) {
