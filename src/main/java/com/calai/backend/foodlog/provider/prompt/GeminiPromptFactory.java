@@ -135,69 +135,117 @@ public final class GeminiPromptFactory {
             """.formatted(ALLOWED_WARNINGS, ALLOWED_UNITS, ALLOWED_BASES);
 
     private static final String USER_PROMPT_LABEL_MAIN = """
-            You are a specialized engine for extracting Nutrition Facts from PRINTED nutrition tables in any language (Japanese, Korean, English, Chinese, etc.).
+            You are a specialized OCR extraction engine for PRINTED nutrition tables in any language
+            (English, Traditional Chinese, Simplified Chinese, Japanese, Korean, etc.).
             Return ONLY ONE MINIFIED JSON object. No markdown. No extra text.
             
-            CORE LOGIC: CALCULATE FOR THE WHOLE CONTAINER
-            1. Your primary goal is to return nutrition for the ENTIRE container (Whole Package/Bottle/Can).
-            2. CALCULATION:
-               - If "Per 100g/ml": Search for total net weight/volume on the package. Total = (Values_per_100 * Total_Weight / 100).
-               - If "Per Serving": Search for "Servings Per Container". Total = (Values_per_serving * Total_Servings).
-               MATH RULES:
-               - Total Nutrients = (Value_per_100g * Total_Weight_g / 100)
-               - Total Nutrients = (Value_per_100ml * Total_Volume_ml / 100)
-               - Total Nutrients = (Value_per_serving * Total_Servings)
-               - Total Nutrients = (Value_per_X * Total_Quantity / X)
-            3. FALLBACK: If total weight/servings are truly missing, return nutrition for exactly ONE serving and set basis to "PER_SERVING".
+            PRIMARY GOAL
+            Extract the visible nutrition numbers from the clearest nutrition table in the provided images.
+            Do NOT estimate or infer whole-package totals unless explicit package-total text is visible.
             
-            HEALTH EVALUATION (1-10):
-            - Assign a healthScore from 1 to 10 based ONLY on the extracted macro profile per 100g/ml or per serving.
-            - 9-10: Excellent profile (High protein/fiber, very low sugar/sodium, no trans fat).
-            - 5-8: Average profile (Moderate macros, typical daily consumption).
-            - 1-4: Poor profile (High added sugar, high sodium, high saturated/trans fats).
+            STRICT BASIS SELECTION ORDER
+            1. WHOLE CONTAINER is allowed ONLY when explicit package-total text is visible, such as:
+               - EN: "Net Weight", "Net Vol", "Contents", "Servings Per Container"
+               - TW/CN: "淨重", "內容量", "本包裝含", "每包裝含"
+               - JP: "内容量", "1包装", "1袋"
+               - KR: "총 내용량", "1봉지당"
+               - Similar logic applies to other languages.
+            2. If explicit package-total text is NOT visible, then:
+               - Prefer a clearly visible "per 100 g" / "per 100g" / "per 100 ml" / "per 100ml" column.
+               - If no per-100 column exists, then use a clearly visible "per serving" column.
+            3. Never infer total package size, multiplier, serving count, or total nutrition from:
+               - hidden or cropped text
+               - column ratios
+               - package shape
+               - brand knowledge
+               - typical market size
+               - nearby unrelated numbers
             
-            DATA CONVERSIONS:
-            - Energy: kJ to kcal (kcal = kJ / 4.184).
-            - Sodium: If ONLY "Salt" is provided, calculate Sodium (mg) = (salt_g * 393.4). If "Sodium (mg)" is explicitly printed, use that value directly.
-            - Default: 0.0 for any missing nutrient. Do NOT use null.
-            - Names: Preserve the original visible product name from the package whenever possible. Do NOT force translation. Do NOT translate brand names. No weights/units in foodName.
+            IMPORTANT NON-TOTAL RULE
+            - If explicit package-total text is NOT found, DO NOT calculate whole-container totals.
+            - Use the chosen visible column values directly, unchanged.
+            - In this non-total case:
+              - quantity.value MUST be 1.0
+              - quantity.unit MUST be "SERVING"
+            - This rule applies even when the chosen visible column is "per 100 g" or "per 100 ml".
             
-            QUANTITY & UNIT RULES:
-            - "value": Always 1.0 (representing the whole entity).
-            - "unit": MUST be strictly one of [%s]. No "g", "ml", "oz".
-              - Use BOTTLE/CAN for beverages.
-              - Use PACK for bags/boxes.
-              - Use SERVING only if container type is unknown.
+            VISUAL ROBUSTNESS RULES
+            1. Prefer the clearest / most zoomed nutrition-table image.
+            2. Ignore phone UI chrome, app headers, colored bounding boxes, arrows, redaction bars, and surrounding text.
+            3. Split-table rule:
+               If the nutrition table continues to the right, rows such as Carbohydrates / Sugars / Fibre / Sodium
+               belong to the SAME chosen header column and must be merged correctly.
+            4. If product name is not clearly readable from the package, return "Unknown Name".
             
-            SANITY CHECKS:
-            - Fiber <= Carbs. Sugar <= Carbs. Confidence should be low if the image is blurry or numbers are unreadable.
+            NUTRIENT EXTRACTION RULES
+            Extract these exact nutrients:
+            - kcal
+            - protein
+            - fat
+            - carbs
+            - fiber
+            - sugar
+            - sodium
             
-            ### EXTRA VISUAL RULES:
-            1. ANCHOR KEYWORDS: Search for total package weight/volume using these anchors:
-               - EN: "Net Weight", "Net Vol", "Contents", "Total Content"
-               - CN/TW: "淨重", "內容物", "內容量", "本包裝含"
-               - JP: "内容量", "総量", "あたり"
-               - KR: "총 내용량", "중량"
-            2. THE MULTIPLIER RULE: If the package specifies a quantity (e.g., "40g x 3", "20g * 5 pcs", "6入"), the "Total_Weight" MUST be (Individual_Weight * Quantity).
-            3. CONSUMED STATE PRIORITY: If multiple values exist (e.g., "Drained weight" vs "Net weight" or "With sauce" in parentheses), ALWAYS prioritize the "As Consumed" (larger calorie) value.
-            4. IGNORE PERCENTAGE: When extracting values, ignore percentage columns (%% Daily Value, %% NRV, %% 基準値). Only extract absolute numbers (g, mg, kcal, kJ).
-            5. COLUMN ALIGNMENT: Match headers (e.g., "per 100g") strictly with the vertical column of numbers below them. If columns are ambiguous, explain the choice in "_reasoning".
-            6. IMPLICIT TOTAL SEARCH: If "Net Weight" is not found, look for any standalone number followed by "g", "ml", "L", or "kg" on the entire package surface, as these are likely the total quantity.
-            7. HANDWRITTEN/OBLITERATED DATA: If any nutrition number is partially cut off or covered by a price tag/sticker, set "confidence" < 0.5 and add "LABEL_PARTIAL" to warnings.
+            DATA CONVERSIONS
+            - If kcal is explicitly printed, use kcal directly.
+            - If kcal is missing but kJ is printed, convert kcal = kJ / 4.184.
+            - If sodium is missing but salt is printed, convert sodium_mg = salt_g * 393.4.
+            - Normalize units as:
+              - kcal
+              - protein g
+              - fat g
+              - carbs g
+              - fiber g
+              - sugar g
+              - sodium mg
+            
+            ZERO RULE
+            - Output 0 only if the label explicitly shows 0 / 0.0 / zero.
+            - Do NOT invent 0 because of blur or occlusion.
+            
+            SANITY CHECKS
+            - fiber <= carbs
+            - sugar <= carbs
+            
+            CONFIDENCE / WARNINGS
+            - If any target nutrient row is partially blocked, cut off, or unreadable, set confidence < 0.5
+              and include "LABEL_PARTIAL" in warnings.
+            - If all target nutrient rows are readable, confidence >= 0.85.
+            
+            HEALTH SCORE
+            - Score ONLY on the chosen visible basis.
+            - Do NOT rescale to whole-container unless explicit package-total text is visible.
             
             REQUIRED JSON FORMAT:
             {
               "foodName": "string|null",
               "quantity": { "value": 1.0, "unit": "PACK|BOTTLE|CAN|PIECE|SERVING" },
-              "nutrients": { "kcal": number, "protein": number, "fat": number, "carbs": number, "fiber": number, "sugar": number, "sodium": number },
-              "_reasoning": "string (Crucial: Briefly explain your math steps here FIRST before outputting the numbers below)",
-              "confidence": number, (Range: 0.0 to 1.0)
-              "healthScore": number, (Range: 1 to 10)
+              "nutrients": {
+                "kcal": number,
+                "protein": number,
+                "fat": number,
+                "carbs": number,
+                "fiber": number,
+                "sugar": number,
+                "sodium": number
+              },
+              "_reasoning": "Chosen basis + whether explicit package-total text was found + whether math was applied",
+              "confidence": number,
+              "healthScore": number,
               "warnings": string[],
-              "labelMeta": { "servingsPerContainer": number|null, "basis": %s }
+              "labelMeta": {
+                "servingsPerContainer": number|null,
+                "basis": %s
+              }
             }
-            - "warnings": Use strings from this set: [%s].
-            """.formatted(ALLOWED_UNITS, ALLOWED_BASES, ALLOWED_WARNINGS);
+            
+            OUTPUT RULES
+            - warnings must use only: %s
+            - quantity.unit must use only: %s
+            - If explicit package-total text is NOT found and a per-100 column is chosen,
+              then quantity.unit MUST still be "SERVING", and nutrients MUST remain the printed per-100 values unchanged.
+            """.formatted(ALLOWED_BASES, ALLOWED_WARNINGS, ALLOWED_UNITS);
 
     public String mainPrompt(boolean isLabel) {
         return isLabel ? USER_PROMPT_LABEL_MAIN : USER_PROMPT_MAIN;
