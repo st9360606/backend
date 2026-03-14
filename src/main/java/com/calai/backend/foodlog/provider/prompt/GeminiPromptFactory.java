@@ -134,118 +134,315 @@ public final class GeminiPromptFactory {
             - If "NO_FOOD_DETECTED" is triggered, set foodName to null, nutrients to 0.0, healthScore to 0, and confidence to 0.0.
             """.formatted(ALLOWED_WARNINGS, ALLOWED_UNITS, ALLOWED_BASES);
 
+//    private static final String USER_PROMPT_LABEL_MAIN = """
+//            You are a specialized OCR extraction engine for PRINTED nutrition tables in any language
+//            (English, Traditional Chinese, Simplified Chinese, Japanese, Korean, Spanish, French, German,
+//            Portuguese, Italian, Dutch, Russian, Arabic, Hebrew, Thai, Vietnamese, Malay, Filipino, Hindi, etc.).
+//            Return ONLY ONE MINIFIED JSON object. No markdown. No extra text.
+//
+//            PRIMARY GOAL
+//            Extract the visible nutrition numbers from the clearest nutrition table in the provided images.
+//            Use translation only as an internal aid to understand local-language headers and nutrient names.
+//            Do NOT translate the whole table first.
+//            Preserve the printed row and column structure exactly as seen.
+//            Do NOT estimate or infer whole-package totals unless explicit package-total text is visible.
+//
+//            STRICT BASIS SELECTION ORDER
+//            1. WHOLE CONTAINER calculation is MANDATORY when explicit package-total text is visible.
+//               Explicit package-total text includes either:
+//               - explicit total weight or volume (e.g. "1250 ml", "Net Weight 200 g"), or
+//               - explicit serving size plus servings per container (e.g. "每一份量 125 毫升", "本包裝含 10 份", "Serving size 45g", "Servings per package 10").
+//
+//            2. BASIS PRIORITY when explicit package-total text is visible:
+//               - If BOTH a "per serving" column AND an explicit servings-per-container value are visible,
+//                 PRIMARY SOURCE MUST be the "per serving" column.
+//                 Final nutrients MUST be calculated as:
+//                 total_nutrient = per_serving_value * servings_per_container
+//               - Else if a "per 100 g" or "per 100 ml" column AND an explicit total weight or volume are visible,
+//                 PRIMARY SOURCE MUST be the "per 100 g" or "per 100 ml" column.
+//                 Final nutrients MUST be calculated as:
+//                 total_nutrient = per_100_value * total_quantity / 100
+//               - If both calculation paths are available, prefer the PER_SERVING path for the final answer
+//                 and use the PER_100 column only as a cross-check.
+//
+//            3. ROW-LEVEL RECOVERY is allowed ONLY when explicit package-total text is visible:
+//               - If one target nutrient row in the primary source column is blurry, curved, compressed,
+//                 partially cut off, or visually weaker than other rows, recover that row from the secondary column
+//                 using explicit package math.
+//               - Never discard a visible non-zero row just because adjacent rows are zero.
+//
+//            4. If explicit package-total text is NOT visible, then:
+//               - Prefer a clearly visible "per 100 g" or "per 100 ml" column.
+//               - If no per-100 column exists, then use a clearly visible "per serving" column.
+//
+//            5. Never infer total package size, multiplier, serving count, or total nutrition from:
+//               - hidden or cropped text
+//               - package shape
+//               - brand knowledge
+//               - typical market size
+//               - nearby unrelated numbers
+//
+//            6. IMPORTANT:
+//               - Cross-column math is FORBIDDEN unless explicit package-total text is visible.
+//               - When explicit package-total text is visible, cross-column math is REQUIRED for row-level recovery.
+//
+//            IMPORTANT NON-TOTAL RULE
+//            - If explicit package-total text is NOT found, DO NOT calculate whole-container totals.
+//            - Use the chosen visible column values directly, unchanged.
+//            - In this non-total case:
+//              - quantity.value MUST be 1.0
+//              - quantity.unit MUST be "SERVING"
+//            - This rule applies even when the chosen visible column is "per 100 g" or "per 100 ml".
+//
+//            VISUAL ROBUSTNESS RULES
+//            1. Prefer the clearest and most zoomed nutrition-table image.
+//
+//            2. Ignore phone UI chrome, app headers, colored bounding boxes, arrows, reflections,
+//               transparent bottle background, redaction bars, and surrounding marketing text.
+//
+//            3. Read the table ROW BY ROW, not by overall pattern.
+//               For each target nutrient, independently locate:
+//               nutrient label -> same horizontal row -> selected basis column value -> unit.
+//               Do NOT assume target nutrients appear in one uninterrupted consecutive sequence.
+//               Non-target rows may appear between target rows, such as gluten, cholesterol, vitamins,
+//               minerals, caffeine, amino acids, additives, or other extra nutrients.
+//               These non-target rows MUST be skipped without shifting the mapping of later target rows.
+//
+//            4. BOTTOM-ROW RULE:
+//               The last printed nutrient row is often the most distorted by bottle curvature, transparent base,
+//               can rim, label seam, glare, or perspective compression.
+//               You MUST inspect the bottom-most nutrient row separately and MUST NOT skip it.
+//
+//            5. CURVED SURFACE ALIGNMENT:
+//               Nutrition tables on bottles or cans are often curved at the edges or bottom.
+//               Carefully trace the horizontal line from the nutrient label
+//               (e.g. Sodium / 鈉 / Natrium / Sodio / salt-equivalent row)
+//               to its exact value, even if the text baseline is warped, skewed, or compressed.
+//
+//            6. FULL-ROW CROSS-COLUMN RECONCILIATION:
+//               If the table has multiple columns (e.g. "per serving" and "per 100 g/ml"), you MUST reconcile ALL target nutrients
+//               across both visible columns before final output whenever whole-container calculation is active.
+//
+//               Reconciliation rules:
+//               - A target nutrient may be output as 0 ONLY if the exact target row supports zero in the chosen basis,
+//                 and there is no visible numeric non-zero evidence for that same target nutrient in any other visible basis column.
+//               - If one visible basis column shows a numeric non-zero value for a target nutrient, and the other column is blurry,
+//                 missing, conflicting, or textually noisy, preserve the numeric non-zero value and compute the final result from the preferred basis.
+//               - Never let an inferred zero override visible numeric evidence.
+//               - Prefer the interpretation that preserves the largest number of visible target-row numeric values.
+//
+//            7. NON-UNIFORM ROW RULE:
+//               Different rows may have different readability.
+//               Never assume one row has the same value pattern as the rows above or below it.
+//
+//            8. If product name is not clearly readable from the package, return "Nutrition facts label".
+//               Do not append weight, volume, serving count, or nutrition values to the foodName.
+//
+//            NUTRIENT EXTRACTION RULES
+//            Extract ONLY these target nutrients:
+//            - kcal
+//            - protein
+//            - fat
+//            - carbs
+//            - fiber
+//            - sugar
+//            - sodium
+//
+//            ROW LABEL MATCHING RULE
+//            - Match each target nutrient by its own printed row label and its own value cell.
+//            - Do NOT infer a target nutrient from nearby rows.
+//            - Do NOT assume the target rows are consecutive.
+//
+//            TARGET ROW DEFINITIONS
+//            - kcal = energy in kcal only. If kcal is missing, derive from kJ.
+//            - protein = protein row only.
+//            - fat = total fat row only. Do NOT use saturated fat or trans fat as total fat.
+//            - carbs = total carbohydrate row only. Do NOT use sugars as total carbs.
+//            - fiber = dietary fibre row only.
+//            - sugar = sugars row only.
+//            - sodium = sodium row only. If sodium is missing but salt is present, convert salt to sodium.
+//
+//            NON-TARGET ROW SKIP RULE
+//            - Nutrition tables may contain non-target rows between target rows, such as:
+//              gluten, cholesterol, vitamins, minerals, calcium, iron, caffeine, additives,
+//              amino acids, saturated fat, trans fat, or other extra nutrients not requested by the schema.
+//            - These rows are NOT target nutrients and MUST be ignored for output.
+//            - Skipping a non-target row MUST NOT shift or overwrite the mapping of later target nutrients.
+//
+//            TEXTUAL VALUE SCOPING RULE
+//            - Textual values such as "not detected", "none detected", "nil", "trace", "N/D", "ND",
+//              "less than", "<", or similar apply ONLY to the exact row where they are printed.
+//            - A textual value on one row MUST NOT propagate upward or downward to neighboring rows.
+//            - A textual value on a non-target row MUST NOT zero-out or replace numeric values on later target rows.
+//
+//            WHOLE-CONTAINER MATH RULE
+//            - When whole-container calculation is active, apply math independently to each target nutrient row.
+//            - Multiply only the numeric value from that exact target row.
+//            - Non-target rows do not participate in math and do not affect neighboring target rows.
+//
+//            DATA CONVERSIONS
+//            - If kcal is explicitly printed, use kcal directly.
+//            - If kcal is missing but kJ is printed, convert kcal = kJ / 4.184.
+//            - If sodium is missing but salt is explicitly printed, convert sodium_mg = salt_g * 393.4.
+//            - Accept multilingual unit variants such as:
+//              "公克" = g, "克" = g, "그램" = g, "г" = g, "毫克" = mg, "mg" = mg, "大卡" = kcal.
+//            - Accept decimal comma as decimal point when needed.
+//            - Normalize units as:
+//              - kcal
+//              - protein g
+//              - fat g
+//              - carbs g
+//              - fiber g
+//              - sugar g
+//              - sodium mg
+//
+//            ZERO RULE
+//            - Output 0 only if the selected-basis value for that EXACT target nutrient row
+//              is explicitly printed as 0, 0.0, zero, none, nil, not detected, or an equivalent textual-zero marker,
+//              AND there is no visible numeric non-zero evidence for that same target nutrient in any other visible basis column.
+//
+//            - Do NOT output 0 because neighboring rows are zero.
+//            - Do NOT output 0 because the product looks healthy, low-calorie, sugar-free, or low-sodium.
+//            - Do NOT output 0 because a non-target row contains a textual value such as "not detected" or "trace".
+//            - Do NOT output 0 as a fallback when later rows are harder to read than earlier rows.
+//
+//            TEXTUAL-RESULT SAFETY RULE
+//            - If a TARGET nutrient row itself explicitly says "not detected", "none detected", "nil", "trace",
+//              "N/D", or similar, treat that target row as zero for that target nutrient only.
+//            - If a NON-TARGET row says "not detected", "none detected", "nil", "trace", "N/D", or similar,
+//              that text applies ONLY to that non-target row and MUST NOT affect any target nutrient row.
+//
+//            NON-ZERO PRESERVATION RULE
+//            - If ANY visible basis column shows a numeric non-zero value for a target nutrient,
+//              the final answer for that target nutrient MUST remain non-zero.
+//            - When explicit package-total text is visible, preserve that numeric row and apply the required whole-container math.
+//            - Never replace a visible numeric non-zero value with 0 because of row-order confusion,
+//              nearby textual rows, or pattern-matching from other rows.
+//
+//            LATE-ROW STABILITY RULE
+//            - Later target rows such as carbs, sugar, fiber, and sodium are often more vulnerable to collapse than earlier rows.
+//            - If earlier rows parse successfully but later rows collapse to 0 while visible numeric evidence exists,
+//              keep the visible non-zero later-row values and do NOT emit a zero-collapse interpretation.
+//
+//            UNREADABLE-ROW RULE
+//            - If a target nutrient row is unreadable and no visible numeric evidence exists in any basis column,
+//              lower confidence and add warnings instead of inventing 0.
+//            - Do NOT borrow a textual value from an adjacent row.
+//
+//            CONFLICT RESOLUTION RULE
+//            - If multiple candidate parses are possible, choose the parse that:
+//              1. preserves the greatest number of visible target-row numeric values,
+//              2. preserves visible non-zero evidence,
+//              3. remains consistent across "per serving", "per 100 g/ml", and whole-container math,
+//              4. does not collapse later target rows to zero when those later rows visibly contain numeric values.
+//
+//            - Prefer a numerically consistent parse over a conservative zero-filled parse.
+//            - Do NOT emit "MACRO_OUTLIER" when a more directly supported visible numeric parse exists.
+//            - Warning generation must not replace or override visible row-level numeric evidence.
+//
+//            SANITY CHECKS
+//            - fiber <= carbs when both are numeric.
+//            - sugar <= carbs when both are numeric.
+//            - Whole-container results must still preserve per-row math consistency.
+//
+//            CONFIDENCE AND WARNINGS
+//            - If any target nutrient row is partially blocked, cut off, warped, curved, or unreadable,
+//              set confidence below 0.5 and include "LABEL_PARTIAL" in warnings.
+//            - If confidence is low, also include an appropriate low-confidence warning from the allowed warning set.
+//            - If all target nutrient rows are readable, set confidence at or above 0.85.
+//
+//            HEALTH SCORE
+//            - Score ONLY on the chosen visible basis before whole-container rescaling.
+//            - Do NOT use marketing claims to influence the score.
+//
+//            REQUIRED JSON FORMAT:
+//            {
+//              "foodName": "string|null",
+//              "quantity": { "value": number, "unit": "PACK|BOTTLE|CAN|PIECE|SERVING" },
+//              "nutrients": {
+//                "kcal": number,
+//                "protein": number,
+//                "fat": number,
+//                "carbs": number,
+//                "fiber": number,
+//                "sugar": number,
+//                "sodium": number
+//              },
+//              "_reasoning": "Chosen basis + whether explicit package-total text was found + whether math was applied",
+//              "confidence": number,
+//              "healthScore": number,
+//              "warnings": string[],
+//              "labelMeta": {
+//                "servingsPerContainer": number|null,
+//                "basis": %s
+//              }
+//            }
+//
+//            OUTPUT RULES
+//            - warnings must use only: %s
+//            - quantity.unit must use only: %s
+//            - If explicit package-total text is NOT found and a per-100 column is chosen,
+//              then quantity.unit MUST still be "SERVING", and nutrients MUST remain the printed per-100 values unchanged.
+//            - If whole-container calculation is active, choose quantity.unit by visible container type:
+//              PACK for bag, box, pouch, carton, or package;
+//              BOTTLE for bottle;
+//              CAN for can;
+//              PIECE for a single discrete item;
+//              SERVING only if the container type is unclear.
+//            """.formatted(ALLOWED_BASES, ALLOWED_WARNINGS, ALLOWED_UNITS);
+
     private static final String USER_PROMPT_LABEL_MAIN = """
-            You are a specialized OCR extraction engine for PRINTED nutrition tables in any language
-            (English, Traditional Chinese, Simplified Chinese, Japanese, Korean, etc.).
-            Return ONLY ONE MINIFIED JSON object. No markdown. No extra text.
+            You are an object dedicated to identifying nutrition labels on food packaging from various countries around the world and calculating the nutritional value for the entire serving size.
+            Return only a concise JSON object. No Markdown or extra text.
             
-            PRIMARY GOAL
-            Extract the visible nutrition numbers from the clearest nutrition table in the provided images.
-            Do NOT estimate or infer whole-package totals unless explicit package-total text is visible.
+            PRIMARY GOAL:
+            Calculate the total nutritional content for the entire package.
+            If the label provides "Per Serving" and "Servings per Package", multiply them ONCE to get the total. If "Per 100g/ml" is provided, multiply by (Total Net Weight / 100).
+            "If the total net weight or servings per package is NOT visible anywhere in the image, calculate the nutrients based on the visible reference unit (e.g., per 100g or per 1 serving), set 'value' to 1.0, and explain this assumption in '_reasoning'."
             
-            STRICT BASIS SELECTION ORDER
-            1. WHOLE CONTAINER is allowed ONLY when explicit package-total text is visible, such as:
-               - EN: "Net Weight", "Net Vol", "Contents", "Servings Per Container"
-               - TW/CN: "淨重", "內容量", "本包裝含", "每包裝含"
-               - JP: "内容量", "1包装", "1袋"
-               - KR: "총 내용량", "1봉지당"
-               - Similar logic applies to other languages.
-            2. If explicit package-total text is NOT visible, then:
-               - Prefer a clearly visible "per 100 g" / "per 100g" / "per 100 ml" / "per 100ml" column.
-               - If no per-100 column exists, then use a clearly visible "per serving" column.
-            3. Never infer total package size, multiplier, serving count, or total nutrition from:
-               - hidden or cropped text
-               - column ratios
-               - package shape
-               - brand knowledge
-               - typical market size
-               - nearby unrelated numbers
+            VISUAL STRATEGY:
+            1. MULTI-LANGUAGE KEYWORDS: Match labels in any language (e.g., '碳水化合物'/'炭水化物'=carbs, '糖'/'糖類'/'糖分'=sugar, '膳食纖維'=fiber, '鈉'/'ナトリウム'=sodium, '食塩相当量'=salt_equivalent).
+            2. HIERARCHY & NESTED ITEMS: Tables often have indented sub-items (e.g., 'Saturated Fat' under 'Fat'; 'Sugars' under 'Carbs'). You MUST treat these as a continuation of the same table. DO NOT stop scanning until you have reached the absolute last row of the main nutrients (usually 'Sodium', '鈉', or 'Salt Equivalent'/'食鹽相當量').
+            3. PARENTHESES PRIORITY: If a row has two values (e.g., "5.0g (7.5g)"), prefer the LARGER/PARENTHESES value as it often represents the total with seasonings/sauces.
+            4. SINGLE PATH CALCULATION: Choose ONLY ONE base column (prefer "Per Serving"). Multiply by the serving count exactly ONCE. Do NOT double-multiply.
+            5. SKIP INTERRUPTIONS: Ignore non-target rows (Gluten, Vitamins, or marketing text) without stopping the scan. Ensure 'sodium' is captured even if it is at the very bottom or slightly distorted.
+
+            HEALTH EVALUATION (1-10):
+            - Assign a healthScore from 1 to 10 based ONLY on the extracted macro profile per 100g/ml or per serving.
+            - 9-10: Excellent profile (High protein/fiber, very low sugar/sodium, no trans fat).
+            - 5-8: Average profile (Moderate macros, typical daily consumption).
+            - 1-4: Poor profile (High added sugar, high sodium, high saturated/trans fats).
             
-            IMPORTANT NON-TOTAL RULE
-            - If explicit package-total text is NOT found, DO NOT calculate whole-container totals.
-            - Use the chosen visible column values directly, unchanged.
-            - In this non-total case:
-              - quantity.value MUST be 1.0
-              - quantity.unit MUST be "SERVING"
-            - This rule applies even when the chosen visible column is "per 100 g" or "per 100 ml".
+            DATA CONVERSIONS:
+            - Energy: kJ to kcal (kcal = kJ / 4.184).
+            - Sodium: If ONLY "Salt" is provided, calculate Sodium (mg) = (salt_g * 393.4). If "Sodium (mg)" is explicitly printed, use that value directly.
+            - Defaults: Use 0.0 for missing nutrients.
+            - Names: Preserve the original visible product name from the package whenever possible. Do NOT force translation. Do NOT translate brand names. No weights/units in foodName.
+            - Round all calculated nutrient values to ONE decimal place (e.g., 45.5).
             
-            VISUAL ROBUSTNESS RULES
-            1. Prefer the clearest / most zoomed nutrition-table image.
-            2. Ignore phone UI chrome, app headers, colored bounding boxes, arrows, redaction bars, and surrounding text.
-            3. Split-table rule:
-               If the nutrition table continues to the right, rows such as Carbohydrates / Sugars / Fibre / Sodium
-               belong to the SAME chosen header column and must be merged correctly.
-            4. If product name is not clearly readable from the package, return "Unknown Name".
+            QUANTITY & UNIT RULES:
+            - "value": Always 1.0 (representing the whole entity).
+            - "unit": MUST be strictly one of [%s]. No "g", "ml", "oz".
+            - Use BOTTLE/CAN for beverages.
+            - Use PACK for bags/boxes.
+            - Use SERVING only if container type is unknown.
             
-            NUTRIENT EXTRACTION RULES
-            Extract these exact nutrients:
-            - kcal
-            - protein
-            - fat
-            - carbs
-            - fiber
-            - sugar
-            - sodium
+            SANITY CHECKS:
+            - Fiber <= Carbs. Sugar <= Carbs. Confidence should be low if the image is blurry or numbers are unreadable.
             
-            DATA CONVERSIONS
-            - If kcal is explicitly printed, use kcal directly.
-            - If kcal is missing but kJ is printed, convert kcal = kJ / 4.184.
-            - If sodium is missing but salt is printed, convert sodium_mg = salt_g * 393.4.
-            - Normalize units as:
-              - kcal
-              - protein g
-              - fat g
-              - carbs g
-              - fiber g
-              - sugar g
-              - sodium mg
-            
-            ZERO RULE
-            - Output 0 only if the label explicitly shows 0 / 0.0 / zero.
-            - Do NOT invent 0 because of blur or occlusion.
-            
-            SANITY CHECKS
-            - fiber <= carbs
-            - sugar <= carbs
-            
-            CONFIDENCE / WARNINGS
-            - If any target nutrient row is partially blocked, cut off, or unreadable, set confidence < 0.5
-              and include "LABEL_PARTIAL" in warnings.
-            - If all target nutrient rows are readable, confidence >= 0.85.
-            
-            HEALTH SCORE
-            - Score ONLY on the chosen visible basis.
-            - Do NOT rescale to whole-container unless explicit package-total text is visible.
-            
-            REQUIRED JSON FORMAT:
+            Please help me calculate the entire serving of "nutrients" REQUIRED JSON FORMAT:
             {
-              "foodName": "string|null",
+              "foodName": "string",
               "quantity": { "value": 1.0, "unit": "PACK|BOTTLE|CAN|PIECE|SERVING" },
-              "nutrients": {
-                "kcal": number,
-                "protein": number,
-                "fat": number,
-                "carbs": number,
-                "fiber": number,
-                "sugar": number,
-                "sodium": number
-              },
-              "_reasoning": "Chosen basis + whether explicit package-total text was found + whether math was applied",
-              "confidence": number,
-              "healthScore": number,
+              "nutrients": { "kcal": number, "protein": number, "fat": number, "carbs": number, "fiber": number, "sugar": number, "sodium": number },
+              "_reasoning": "string",
+              "confidence": number, (Range: 0.0 to 1.0)
+              "healthScore": number, (Range: 1 to 10)
               "warnings": string[],
-              "labelMeta": {
-                "servingsPerContainer": number|null,
-                "basis": %s
-              }
+              "labelMeta": { "servingsPerContainer": number|null, "basis": %s }
             }
-            
-            OUTPUT RULES
-            - warnings must use only: %s
-            - quantity.unit must use only: %s
-            - If explicit package-total text is NOT found and a per-100 column is chosen,
-              then quantity.unit MUST still be "SERVING", and nutrients MUST remain the printed per-100 values unchanged.
-            """.formatted(ALLOWED_BASES, ALLOWED_WARNINGS, ALLOWED_UNITS);
+            - "warnings": Use strings from this set: [%s].
+            """.formatted(ALLOWED_UNITS, ALLOWED_BASES, ALLOWED_WARNINGS);
 
     public String mainPrompt(boolean isLabel) {
         return isLabel ? USER_PROMPT_LABEL_MAIN : USER_PROMPT_MAIN;
