@@ -35,7 +35,15 @@ public final class GeminiPromptFactory {
             - If multiple items exist, focus on the main dish and include "MIXED_MEAL" in warnings.
             
             HEALTH EVALUATION (1-10):
-            - Assign a healthScore (1-10): 9-10 (Whole foods), 5-8 (Balanced), 1-4 (Highly processed/Junk).
+            - Evaluate based on "Nutrient Density" vs "Empty Calories".
+            - GREEN FLAGS (Score +): High protein, high dietary fiber, low sugar-to-carb ratio, contains healthy fats.
+            - RED FLAGS (Score -): Trans fats > 0, excessive sodium (>800mg per serving), high added sugar (>20g per serving or sugar being the primary carb source).
+            - SCORING GUIDE:
+              * 9-10 (Nutrient Dense): High protein/fiber with minimal processing markers. Essential "superfoods" (e.g., Natto, plain nuts).
+              * 7-8 (Good/Balanced): Solid macro profile, moderate sodium, manageable sugar. Typical of healthy meals.
+              * 4-6 (Moderate/Processed): High energy but low "quality" nutrients (fiber/protein). Many common snacks or instant meals fall here.
+              * 1-3 (Empty Calories): High in "Red Flags". Pure sugar, high sodium, or trans fats with near-zero fiber/protein (e.g., Soda, candy, some ultra-processed pastries).
+            - BEVERAGE RULE: Be stricter with liquid sugar; beverages with >10g sugar per 100ml should rarely score above 5.
             
             ESTIMATION LOGIC (CRITICAL):
             1. CLASSIFY FIRST:
@@ -391,45 +399,145 @@ public final class GeminiPromptFactory {
 //              SERVING only if the container type is unclear.
 //            """.formatted(ALLOWED_BASES, ALLOWED_WARNINGS, ALLOWED_UNITS);
 
+//    private static final String USER_PROMPT_LABEL_MAIN = """
+//            You are an object dedicated to identifying nutrition labels on food packaging from various countries around the world and calculating the nutritional value for the entire serving size.
+//            Return only a concise JSON object. No Markdown or extra text.
+//
+//            PRIMARY GOAL:
+//            Calculate the total nutritional content for the entire package.
+//            If the label provides "Per Serving" and "Servings per Package", multiply them ONCE to get the total.
+//            If "Per 100g/ml" is provided, multiply by (Total Net Weight / 100).
+//            If the total net weight or servings per package is NOT visible anywhere in the image, calculate the nutrients based on the visible reference unit (e.g., per 100g or per 1 serving), set 'value' to 1.0, and explain this assumption in '_reasoning'.
+//
+//            VISUAL STRATEGY:
+//            1. MULTI-LANGUAGE KEYWORDS: Match labels in any language (e.g., '碳水化合物'/'炭水化物'=carbs, '糖'/'糖類'/'糖分'=sugar, '膳食纖維'=fiber, '鈉'/'ナトリウム'=sodium, '食塩相当量'=salt_equivalent).
+//            2. HIERARCHY & NESTED ITEMS: Tables often have indented sub-items (e.g., 'Saturated Fat' under 'Fat'). These are frequently prefixed with structural symbols like dashes, dots, or bullets (e.g., '-', 'ー', '・', '>'). You MUST treat these prefixes strictly as indentation markers. NEVER interpret a leading dash as a negative sign or a reason to skip the row. Continue scanning until you reach the absolute end of the macro-nutrient list (e.g., 'Sodium', 'Salt', or '食塩相当量').
+//            3. INCLUDED CONTENTS PRIORITY: If a row presents multiple values (e.g., "0.6g (0.0g)"), intelligently select the value representing the product WITH all its INCLUDED sauces/seasoning packets.\s
+//               - DO select the total value of the package contents.
+//               - DO NOT select "As Prepared" values that include external ingredients not sold in the package (e.g., added milk, eggs, or oil).
+//               - Use the table's header context (e.g., "たれ付" meaning with sauce, or "( )" meaning without sauce) to determine the correct value.
+//            4. SINGLE PATH CALCULATION: Choose ONLY ONE base column (prefer "Per Serving"). Multiply by the serving count exactly ONCE. Do NOT double-multiply.
+//            5. SKIP INTERRUPTIONS: Ignore non-target rows (Gluten, Vitamins, or marketing text) without stopping the scan. Ensure 'sodium' is captured even if it is at the very bottom or slightly distorted.
+//            6. TYPOGRAPHICAL NOISE: Ignore all decorative characters used for alignment, such as leader dots (....) or decorative separators. Crucially, disregard internal whitespace used for text justification. (e.g., '糖  質' must be read as '糖質', and '- of which  sugars' as 'sugars'). If a word is split by symbols or spaces to fit a column, recombine it into the standard nutrient name before matching.
+//            7. INEQUALITY HANDLING (Upper Bound Principle): > If a nutrient value contains inequality symbols such as '<' (less than) or '≤' (less than or equal to), you MUST treat the numeric value following the symbol as the base value for calculation (e.g., treat '<1g' as '1.0g'). This ensures a conservative "upper bound" estimate for total package nutrition, which is safer for dietary tracking. Do NOT estimate a lower value or treat it as zero unless the numeric value itself is 0.
+//
+//            HEALTH EVALUATION (1-10):
+//            - Evaluate based on "Nutrient Density" vs "Empty Calories".
+//            - GREEN FLAGS (Score +): High protein, high dietary fiber, low sugar-to-carb ratio, contains healthy fats.
+//            - RED FLAGS (Score -): Trans fats > 0, excessive sodium (>800mg per serving), high added sugar (>20g per serving or sugar being the primary carb source).
+//            - SCORING GUIDE:
+//              * 9-10 (Nutrient Dense): High protein/fiber with minimal processing markers. Essential "superfoods" (e.g., Natto, plain nuts).
+//              * 7-8 (Good/Balanced): Solid macro profile, moderate sodium, manageable sugar. Typical of healthy meals.
+//              * 4-6 (Moderate/Processed): High energy but low "quality" nutrients (fiber/protein). Many common snacks or instant meals fall here.
+//              * 1-3 (Empty Calories): High in "Red Flags". Pure sugar, high sodium, or trans fats with near-zero fiber/protein (e.g., Soda, candy, some ultra-processed pastries).
+//            - BEVERAGE RULE: Be stricter with liquid sugar; beverages with >10g sugar per 100ml should rarely score above 5.
+//
+//            DATA CONVERSIONS:
+//            - Energy: kJ to kcal (kcal = kJ / 4.184).
+//            - Sodium: If ONLY "Salt" is provided, calculate Sodium (mg) = (salt_g * 393.4). If "Sodium (mg)" is explicitly printed, use that value directly.
+//            - Defaults: Use 0.0 for missing nutrients.
+//            - Names: Preserve the original visible product name from the package whenever possible. Do NOT force translation. Do NOT translate brand names. No weights/units in foodName.
+//            - Round all calculated nutrient values to ONE decimal place (e.g., 45.5).
+//
+//            QUANTITY & UNIT RULES:
+//            - "value": Always 1.0 (representing the whole entity).
+//            - "unit": MUST be strictly one of [%s]. No "g", "ml", "oz".
+//            - Use SERVING only if container type is unknown.
+//
+//            SANITY CHECKS:
+//            - Fiber <= Carbs. Sugar <= Carbs. Confidence should be low if the image is blurry or numbers are unreadable.
+//
+//            CORE LOGIC (Entity Normalization):
+//            1. PACKAGED FOOD (Bags/Boxes):
+//               - ALWAYS calculate for the ENTIRE package content.
+//               - Set quantity: {"value": 1.0, "unit": "PACK"}.
+//               - Set labelMeta: {"servingsPerContainer": [Actual number from label], "basis": "WHOLE_PACKAGE"}.
+//            2. BOTTLED/CANNED BEVERAGE:
+//               - ALWAYS calculate for the ENTIRE bottle/can.
+//               - Set quantity: {"value": 1.0, "unit": "BOTTLE" or "CAN"}.
+//               - Set labelMeta: {"servingsPerContainer": [Actual number from label], "basis": "WHOLE_PACKAGE"}.
+//
+//            Please help me calculate the entire serving of "nutrients" REQUIRED JSON FORMAT:
+//            {
+//              "foodName": "string",
+//              "quantity": { "value": 1.0, "unit": "PACK|BOTTLE|CAN|PIECE|SERVING" },
+//              "nutrients": { "kcal": number, "protein": number, "fat": number, "carbs": number, "fiber": number, "sugar": number, "sodium": number },
+//              "_reasoning": "string",
+//              "confidence": number, (Range: 0.0 to 1.0)
+//              "healthScore": number, (Range: 1 to 10)
+//              "warnings": string[],
+//              "labelMeta": { "servingsPerContainer": number|null, "basis": %s }
+//            }
+//            - "warnings": Use strings from this set: [%s].
+//            """.formatted(ALLOWED_UNITS, ALLOWED_BASES, ALLOWED_WARNINGS);
+
     private static final String USER_PROMPT_LABEL_MAIN = """
             You are an object dedicated to identifying nutrition labels on food packaging from various countries around the world and calculating the nutritional value for the entire serving size.
             Return only a concise JSON object. No Markdown or extra text.
-            
+
             PRIMARY GOAL:
             Calculate the total nutritional content for the entire package.
-            If the label provides "Per Serving" and "Servings per Package", multiply them ONCE to get the total. If "Per 100g/ml" is provided, multiply by (Total Net Weight / 100).
-            "If the total net weight or servings per package is NOT visible anywhere in the image, calculate the nutrients based on the visible reference unit (e.g., per 100g or per 1 serving), set 'value' to 1.0, and explain this assumption in '_reasoning'."
-            
+            1. REFERENCE COLUMN SELECTION: If multiple data columns exist (e.g., "Per 100g" and "Per Serving/30g"), ALWAYS prioritize the "Per 100g/ml" column for calculation to ensure maximum precision, unless the total net weight is missing but servings are known.
+            2. CALCULATION:\s
+               - If using "Per 100g/ml": Total = (Value / 100) * Total Net Weight.
+               - If Total Net Weight is UNKNOWN: Use the "Per 100g" values directly as the base, set 'value' to 1.0, and unit to 'SERVING'.
+               - If ONLY "Per Serving" is visible: Multiply by "Servings per Package".
+
             VISUAL STRATEGY:
             1. MULTI-LANGUAGE KEYWORDS: Match labels in any language (e.g., '碳水化合物'/'炭水化物'=carbs, '糖'/'糖類'/'糖分'=sugar, '膳食纖維'=fiber, '鈉'/'ナトリウム'=sodium, '食塩相当量'=salt_equivalent).
-            2. HIERARCHY & NESTED ITEMS: Tables often have indented sub-items (e.g., 'Saturated Fat' under 'Fat'; 'Sugars' under 'Carbs'). You MUST treat these as a continuation of the same table. DO NOT stop scanning until you have reached the absolute last row of the main nutrients (usually 'Sodium', '鈉', or 'Salt Equivalent'/'食鹽相當量').
-            3. PARENTHESES PRIORITY: If a row has two values (e.g., "5.0g (7.5g)"), prefer the LARGER/PARENTHESES value as it often represents the total with seasonings/sauces.
+            2. HIERARCHY & NESTED ITEMS: Tables often have indented sub-items (e.g., 'Saturated Fat' under 'Fat'). These are frequently prefixed with structural symbols like dashes, dots, or bullets (e.g., '-', 'ー', '・', '>'). You MUST treat these prefixes strictly as indentation markers. NEVER interpret a leading dash as a negative sign or a reason to skip the row. Continue scanning until you reach the absolute end of the macro-nutrient list (e.g., 'Sodium', 'Salt', or '食塩相当量').
+            3. INCLUDED CONTENTS PRIORITY: If a row presents multiple values (e.g., "0.6g (0.0g)"), intelligently select the value representing the product WITH all its INCLUDED sauces/seasoning packets.\s
+               - DO select the total value of the package contents.
+               - DO NOT select "As Prepared" values that include external ingredients not sold in the package (e.g., added milk, eggs, or oil).
+               - Use the table's header context (e.g., "たれ付" meaning with sauce, or "( )" meaning without sauce) to determine the correct value.
             4. SINGLE PATH CALCULATION: Choose ONLY ONE base column (prefer "Per Serving"). Multiply by the serving count exactly ONCE. Do NOT double-multiply.
             5. SKIP INTERRUPTIONS: Ignore non-target rows (Gluten, Vitamins, or marketing text) without stopping the scan. Ensure 'sodium' is captured even if it is at the very bottom or slightly distorted.
-
+            6. TYPOGRAPHICAL NOISE: Ignore all decorative characters used for alignment, such as leader dots (....) or decorative separators. Crucially, disregard internal whitespace used for text justification. (e.g., '糖  質' must be read as '糖質', and '- of which  sugars' as 'sugars'). If a word is split by symbols or spaces to fit a column, recombine it into the standard nutrient name before matching.
+            7. INEQUALITY HANDLING (Upper Bound Principle): > If a nutrient value contains inequality symbols such as '<' (less than) or '≤' (less than or equal to), you MUST treat the numeric value following the symbol as the base value for calculation (e.g., treat '<1g' as '1.0g'). This ensures a conservative "upper bound" estimate for total package nutrition, which is safer for dietary tracking. Do NOT estimate a lower value or treat it as zero unless the numeric value itself is 0.
+            8. COMPLEX MULTILINGUAL & UNIT NOISE HANDLING:
+               - MULTI-SLASH KEYS: Labels in regions like EU or Middle East often list 3-5 languages separated by slashes (e.g., 'Karbonhidrat / Carbohydrate / Sacharidy'). Treat the entire multilingual block before the first numeric value as a single nutrient key.
+               - COLUMN ALIGNMENT: In multi-language tables, the values (e.g., '69,1g') might be far to the right of the start of the text. Do not stop scanning until you find the numeric columns (typically 'Per 100g' and 'Per Serving').
+               - UNIT & SYMBOL STRIPPING: Extract ONLY numeric values. Ignore non-standard unit suffixes or noise attached to numbers (e.g., treat '11,3g(q)' as '11.3', '5.0g/гр' as '5.0', '11,3(q)' as '11.3').
+               - COMMA AS DECIMAL: Treat commas in numeric strings as decimal points (e.g., '3,6g' = 3.6).
+               - LAST ROW VIGILANCE: Salt/Sodium (Tuz/Salt/Sare) is usually the final row. Ensure the scan reaches the absolute bottom of the table.
+               - SALT-TO-SODIUM MANDATE: If only 'Salt' (Tuz, Sol, Sare, Sal) is provided in grams, you MUST calculate: Sodium (mg) = Salt (g) * 393.4.
+           
             HEALTH EVALUATION (1-10):
-            - Assign a healthScore from 1 to 10 based ONLY on the extracted macro profile per 100g/ml or per serving.
-            - 9-10: Excellent profile (High protein/fiber, very low sugar/sodium, no trans fat).
-            - 5-8: Average profile (Moderate macros, typical daily consumption).
-            - 1-4: Poor profile (High added sugar, high sodium, high saturated/trans fats).
-            
+            - Evaluate based on "Nutrient Density" vs "Empty Calories".
+            - GREEN FLAGS (Score +): High protein, high dietary fiber, low sugar-to-carb ratio, contains healthy fats.
+            - RED FLAGS (Score -): Trans fats > 0, excessive sodium (>800mg per serving), high added sugar (>20g per serving or sugar being the primary carb source).
+            - SCORING GUIDE:
+              * 9-10 (Nutrient Dense): High protein/fiber with minimal processing markers. Essential "superfoods" (e.g., Natto, plain nuts).
+              * 7-8 (Good/Balanced): Solid macro profile, moderate sodium, manageable sugar. Typical of healthy meals.
+              * 4-6 (Moderate/Processed): High energy but low "quality" nutrients (fiber/protein). Many common snacks or instant meals fall here.
+              * 1-3 (Empty Calories): High in "Red Flags". Pure sugar, high sodium, or trans fats with near-zero fiber/protein (e.g., Soda, candy, some ultra-processed pastries).
+            - BEVERAGE RULE: Be stricter with liquid sugar; beverages with >10g sugar per 100ml should rarely score above 5.
+
             DATA CONVERSIONS:
             - Energy: kJ to kcal (kcal = kJ / 4.184).
             - Sodium: If ONLY "Salt" is provided, calculate Sodium (mg) = (salt_g * 393.4). If "Sodium (mg)" is explicitly printed, use that value directly.
             - Defaults: Use 0.0 for missing nutrients.
             - Names: Preserve the original visible product name from the package whenever possible. Do NOT force translation. Do NOT translate brand names. No weights/units in foodName.
             - Round all calculated nutrient values to ONE decimal place (e.g., 45.5).
-            
+
             QUANTITY & UNIT RULES:
             - "value": Always 1.0 (representing the whole entity).
             - "unit": MUST be strictly one of [%s]. No "g", "ml", "oz".
-            - Use BOTTLE/CAN for beverages.
-            - Use PACK for bags/boxes.
             - Use SERVING only if container type is unknown.
-            
+
             SANITY CHECKS:
             - Fiber <= Carbs. Sugar <= Carbs. Confidence should be low if the image is blurry or numbers are unreadable.
-            
+
+            CORE LOGIC (Entity Normalization):
+            1. PACKAGED FOOD (Bags/Boxes):
+               - ALWAYS calculate for the ENTIRE package content.
+               - Set quantity: {"value": 1.0, "unit": "PACK"}.
+               - Set labelMeta: {"servingsPerContainer": [Actual number from label], "basis": "WHOLE_PACKAGE"}.
+            2. BOTTLED/CANNED BEVERAGE:
+               - ALWAYS calculate for the ENTIRE bottle/can.
+               - Set quantity: {"value": 1.0, "unit": "BOTTLE" or "CAN"}.
+               - Set labelMeta: {"servingsPerContainer": [Actual number from label], "basis": "WHOLE_PACKAGE"}.
+
             Please help me calculate the entire serving of "nutrients" REQUIRED JSON FORMAT:
             {
               "foodName": "string",
