@@ -481,7 +481,14 @@ public final class GeminiPromptFactory {
             "If the total net weight or servings per package is NOT visible anywhere in the image, calculate the nutrients based on the visible reference unit (e.g., per 100g or per 1 serving), set 'value' to 1.0, and explain this assumption in '_reasoning'."
 
             VISUAL STRATEGY:
-            1. MULTI-LANGUAGE KEYWORDS: Match labels in any language (e.g., '碳水化合物'/'炭水化物'=carbs, '糖'/'糖類'/'糖分'=sugar, '膳食纖維'=fiber, '鈉'/'ナトリウム'=sodium, '食塩相当量'=salt_equivalent).
+            1. MULTI-LANGUAGE LABEL HANDLING:
+               - Match common nutrition labels across multilingual and bilingual packaging.
+               - Use nutrient-concept matching rather than exact spelling only.
+               - Text may be horizontal, vertical, rotated, curved on bottles, or right-to-left.
+               - Do not assume left-to-right row or column order.
+               - Recognize equivalent nutrient terms across languages and scripts for energy, protein, fat, carbohydrates, fiber, sugar, sodium, and salt equivalent.
+               - If recognition is uncertain, lower confidence and add warnings instead of guessing.
+               - For non-Latin scripts (e.g., Arabic, Cyrillic, Thai), focus on the relative position of numbers to the nutrient keywords, as space-based segmentation may fail.
             2. HIERARCHY & NESTED ITEMS: Tables often have indented sub-items (e.g., 'Saturated Fat' under 'Fat'). These are frequently prefixed with structural symbols like dashes, dots, or bullets (e.g., '-', 'ー', '・', '>'). You MUST treat these prefixes strictly as indentation markers. NEVER interpret a leading dash as a negative sign or a reason to skip the row. Continue scanning until you reach the absolute end of the macro-nutrient list (e.g., 'Sodium', 'Salt', or '食塩相当量').
             3. INCLUDED CONTENTS PRIORITY: If a row presents multiple values (e.g., "0.6g (0.0g)"), intelligently select the value representing the product WITH all its INCLUDED sauces/seasoning packets.\s
                - DO select the total value of the package contents.
@@ -491,6 +498,27 @@ public final class GeminiPromptFactory {
             5. SKIP INTERRUPTIONS: Ignore non-target rows (Gluten, Vitamins, or marketing text) without stopping the scan. Ensure 'sodium' is captured even if it is at the very bottom or slightly distorted.
             6. TYPOGRAPHICAL NOISE: Ignore all decorative characters used for alignment, such as leader dots (....) or decorative separators. Crucially, disregard internal whitespace used for text justification. (e.g., '糖  質' must be read as '糖質', and '- of which  sugars' as 'sugars'). If a word is split by symbols or spaces to fit a column, recombine it into the standard nutrient name before matching.
             7. INEQUALITY HANDLING (Upper Bound Principle): > If a nutrient value contains inequality symbols such as '<' (less than) or '≤' (less than or equal to), you MUST treat the numeric value following the symbol as the base value for calculation (e.g., treat '<1g' as '1.0g'). This ensures a conservative "upper bound" estimate for total package nutrition, which is safer for dietary tracking. Do NOT estimate a lower value or treat it as zero unless the numeric value itself is 0.
+            8. NUMBER NORMALIZATION:
+               - Interpret decimal commas as decimal points when used inside a number (e.g., "12,3g" -> 12.3g).
+               - Ignore thousands separators.
+               - Prefer numeric values with explicit nutrient units (kcal, kJ, g, mg, ml).
+            
+            9. PERCENTAGE IGNORE RULE:
+               - Ignore all percentage-only values such as %% DV, %% NRV, %% RI, %% daily value.
+               - If a row contains both an absolute amount and a percentage, extract only the absolute amount.
+           
+            10. PREPARED VS AS SOLD:
+               - Prefer values representing the product as sold, or the full contents included inside the package.
+               - Exclude values requiring external ingredients not included in the package, such as milk, eggs, oil, meat, or water added by the consumer unless the package clearly defines the sold item as ready-to-drink or ready-to-eat.
+               - Included seasoning/sauce packets that come inside the package SHOULD be counted.
+            
+            11. SODIUM PRIORITY:
+               - If Sodium is explicitly provided, use it directly.
+               - Else if only Salt / Salt Equivalent / 食塩相当量 is provided, convert salt grams to sodium mg.
+               - Never double-convert when both are shown.
+            
+            12. LABEL NOISE FILTER:
+               - Ignore cholesterol, vitamins, minerals, amino acids, claims, slogans, marketing text, QR codes, and serving suggestion text unless they are needed to identify the correct nutrition basis.
 
             HEALTH EVALUATION (1-10):
             - Evaluate based on "Nutrient Density" vs "Empty Calories".
@@ -504,7 +532,7 @@ public final class GeminiPromptFactory {
             - BEVERAGE RULE: Be stricter with liquid sugar; beverages with >10g sugar per 100ml should rarely score above 5.
 
             DATA CONVERSIONS:
-            - Energy: kJ to kcal (kcal = kJ / 4.184).
+            - Energy: If both 'kcal' and 'kJ' are present, extract the 'kcal' value directly and ignore 'kJ'. If ONLY 'kJ' is visible, calculate kcal (kcal = kJ / 4.184).
             - Sodium: If ONLY "Salt" is provided, calculate Sodium (mg) = (salt_g * 393.4). If "Sodium (mg)" is explicitly printed, use that value directly.
             - Defaults: Use 0.0 for missing nutrients.
             - Names: Preserve the original visible product name from the package whenever possible. Do NOT force translation. Do NOT translate brand names. No weights/units in foodName.
@@ -516,7 +544,9 @@ public final class GeminiPromptFactory {
             - Use SERVING only if container type is unknown.
 
             SANITY CHECKS:
-            - Fiber <= Carbs. Sugar <= Carbs. Confidence should be low if the image is blurry or numbers are unreadable.
+            - Fiber vs Carbs: In EU/UK/Australia/Asia, 'Carbohydrate' usually refers to Net Carbs (excluding fiber). If Fiber > Carbs, assume the label uses Net Carbs and output values as printed. DO NOT force Fiber <= Carbs in these regions.
+            - Sugar <= Carbs (unless Carbs is missing).
+            - Confidence should be low if image is blurry or numbers are unreadable.
 
             CORE LOGIC (Entity Normalization):
             1. PACKAGED FOOD (Bags/Boxes):
