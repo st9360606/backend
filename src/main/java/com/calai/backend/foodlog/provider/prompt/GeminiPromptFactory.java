@@ -477,11 +477,8 @@ public final class GeminiPromptFactory {
 
             PRIMARY GOAL:
             Calculate the total nutritional content for the entire package.
-            1. REFERENCE COLUMN SELECTION: If multiple data columns exist (e.g., "Per 100g" and "Per Serving/30g"), ALWAYS prioritize the "Per 100g/ml" column for calculation to ensure maximum precision, unless the total net weight is missing but servings are known.
-            2. CALCULATION:\s
-               - If using "Per 100g/ml": Total = (Value / 100) * Total Net Weight.
-               - If Total Net Weight is UNKNOWN: Use the "Per 100g" values directly as the base, set 'value' to 1.0, and unit to 'SERVING'.
-               - If ONLY "Per Serving" is visible: Multiply by "Servings per Package".
+            If the label provides "Per Serving" and "Servings per Package", multiply them ONCE to get the total. If "Per 100g/ml" is provided, multiply by (Total Net Weight / 100).
+            "If the total net weight or servings per package is NOT visible anywhere in the image, calculate the nutrients based on the visible reference unit (e.g., per 100g or per 1 serving), set 'value' to 1.0, and explain this assumption in '_reasoning'."
 
             VISUAL STRATEGY:
             1. MULTI-LANGUAGE KEYWORDS: Match labels in any language (e.g., '碳水化合物'/'炭水化物'=carbs, '糖'/'糖類'/'糖分'=sugar, '膳食纖維'=fiber, '鈉'/'ナトリウム'=sodium, '食塩相当量'=salt_equivalent).
@@ -494,14 +491,7 @@ public final class GeminiPromptFactory {
             5. SKIP INTERRUPTIONS: Ignore non-target rows (Gluten, Vitamins, or marketing text) without stopping the scan. Ensure 'sodium' is captured even if it is at the very bottom or slightly distorted.
             6. TYPOGRAPHICAL NOISE: Ignore all decorative characters used for alignment, such as leader dots (....) or decorative separators. Crucially, disregard internal whitespace used for text justification. (e.g., '糖  質' must be read as '糖質', and '- of which  sugars' as 'sugars'). If a word is split by symbols or spaces to fit a column, recombine it into the standard nutrient name before matching.
             7. INEQUALITY HANDLING (Upper Bound Principle): > If a nutrient value contains inequality symbols such as '<' (less than) or '≤' (less than or equal to), you MUST treat the numeric value following the symbol as the base value for calculation (e.g., treat '<1g' as '1.0g'). This ensures a conservative "upper bound" estimate for total package nutrition, which is safer for dietary tracking. Do NOT estimate a lower value or treat it as zero unless the numeric value itself is 0.
-            8. COMPLEX MULTILINGUAL & UNIT NOISE HANDLING:
-               - MULTI-SLASH KEYS: Labels in regions like EU or Middle East often list 3-5 languages separated by slashes (e.g., 'Karbonhidrat / Carbohydrate / Sacharidy'). Treat the entire multilingual block before the first numeric value as a single nutrient key.
-               - COLUMN ALIGNMENT: In multi-language tables, the values (e.g., '69,1g') might be far to the right of the start of the text. Do not stop scanning until you find the numeric columns (typically 'Per 100g' and 'Per Serving').
-               - UNIT & SYMBOL STRIPPING: Extract ONLY numeric values. Ignore non-standard unit suffixes or noise attached to numbers (e.g., treat '11,3g(q)' as '11.3', '5.0g/гр' as '5.0', '11,3(q)' as '11.3').
-               - COMMA AS DECIMAL: Treat commas in numeric strings as decimal points (e.g., '3,6g' = 3.6).
-               - LAST ROW VIGILANCE: Salt/Sodium (Tuz/Salt/Sare) is usually the final row. Ensure the scan reaches the absolute bottom of the table.
-               - SALT-TO-SODIUM MANDATE: If only 'Salt' (Tuz, Sol, Sare, Sal) is provided in grams, you MUST calculate: Sodium (mg) = Salt (g) * 393.4.
-           
+
             HEALTH EVALUATION (1-10):
             - Evaluate based on "Nutrient Density" vs "Empty Calories".
             - GREEN FLAGS (Score +): High protein, high dietary fiber, low sugar-to-carb ratio, contains healthy fats.
