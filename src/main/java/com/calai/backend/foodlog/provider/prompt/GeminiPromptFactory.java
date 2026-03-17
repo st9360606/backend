@@ -520,6 +520,21 @@ public final class GeminiPromptFactory {
             12. LABEL NOISE FILTER:
                - Ignore cholesterol, vitamins, minerals, amino acids, claims, slogans, marketing text, QR codes, and serving suggestion text unless they are needed to identify the correct nutrition basis.
 
+            13. GLOBAL CONCEPTUAL MAPPING (Language Agnostic):
+            - Instead of exact string matching, identify nutrients by their SEMANTIC CONCEPT.\s
+            - Map any local terms for 'Carbohydrates' (e.g., 炭水化物, 碳水化合物, 醣, 당질, Carbos), 'Sugar' (e.g., 糖質, 糖類, 糖, 설탕), and 'Sodium' (e.g., 鈉, 나트륨, Salt equivalent) to their respective standard JSON keys.
+            - Strip all internal whitespace (e.g., '糖    分' -> '糖分') before concept matching.
+            
+            14. NON-LINEAR TABLE SCANNING (The "Full-Sweep" Rule):
+            - Do not assume a table is a single vertical list. Labels may be split into:
+              * SIDE-BY-SIDE COLUMNS: Left side has Energy/Protein; Right side has Carbs/Sodium (as seen in multi-column layouts).
+              * MULTI-BLOCK STACKS: Top block has macros; Bottom block (after a divider) has sub-items or minerals.
+            - You MUST scan the entire bounded area of the nutrition box. If core nutrients (Carbs, Sugar, Sodium) are missing from the first column/block, you MUST perform a secondary sweep of the adjacent areas before defaulting to 0.0.
+            
+            15. DYNAMIC COLUMN ALIGNMENT:
+            - If a label has multiple numeric columns (e.g., "Per Serving" vs "Per 100g", or "Product" vs "With Milk"), anchor the extraction to the "AS SOLD" or "PER SERVING" column context.\s
+            - Ensure that once a column is chosen, all macro-nutrients are pulled from that SAME relative horizontal position to prevent mixing data from different reference bases.
+
             HEALTH EVALUATION (1-10):
             - Evaluate based on "Nutrient Density" vs "Empty Calories".
             - GREEN FLAGS (Score +): High protein, high dietary fiber, low sugar-to-carb ratio, contains healthy fats.
@@ -532,7 +547,7 @@ public final class GeminiPromptFactory {
             - BEVERAGE RULE: Be stricter with liquid sugar; beverages with >10g sugar per 100ml should rarely score above 5.
 
             DATA CONVERSIONS:
-            - Energy: If both 'kcal' and 'kJ' are present, extract the 'kcal' value directly and ignore 'kJ'. If ONLY 'kJ' is visible, calculate kcal (kcal = kJ / 4.184).
+            - Energy: If both 'kcal' and 'kJ' are present, extract the numeric value explicitly linked to 'kcal' and strictly ignore the 'kJ' value. If ONLY 'kJ' is visible, calculate kcal (kcal = kJ / 4.184).
             - Sodium: If ONLY "Salt" is provided, calculate Sodium (mg) = (salt_g * 393.4). If "Sodium (mg)" is explicitly printed, use that value directly.
             - Defaults: Use 0.0 for missing nutrients.
             - Names: Preserve the original visible product name from the package whenever possible. Do NOT force translation. Do NOT translate brand names. No weights/units in foodName.
@@ -550,13 +565,12 @@ public final class GeminiPromptFactory {
 
             CORE LOGIC (Entity Normalization):
             1. PACKAGED FOOD (Bags/Boxes):
-               - ALWAYS calculate for the ENTIRE package content.
-               - Set quantity: {"value": 1.0, "unit": "PACK"}.
-               - Set labelMeta: {"servingsPerContainer": [Actual number from label], "basis": "WHOLE_PACKAGE"}.
+               - ATTEMPT to calculate for the ENTIRE package content ONLY IF total net weight or servings per package is clearly visible.\s
+               - **FALLBACK:** If total package size is NOT clearly visible or unverified, calculate based on the visible reference unit (e.g., per SERVING), set quantity "unit" to "SERVING" or "PIECE", and add "PACKAGE_SIZE_UNVERIFIED" to warnings.
+               - Set labelMeta: {"servingsPerContainer": [Actual number or null], "basis": "WHOLE_PACKAGE" or "PER_SERVING"}.
             2. BOTTLED/CANNED BEVERAGE:
-               - ALWAYS calculate for the ENTIRE bottle/can.
-               - Set quantity: {"value": 1.0, "unit": "BOTTLE" or "CAN"}.
-               - Set labelMeta: {"servingsPerContainer": [Actual number from label], "basis": "WHOLE_PACKAGE"}.
+               - ATTEMPT to calculate for the ENTIRE bottle/can. If size is unknown, fallback to "SERVING" and add "PACKAGE_SIZE_UNVERIFIED".
+               - Set quantity: {"value": 1.0, "unit": "BOTTLE" | "CAN" | "SERVING"}.
 
             Please help me calculate the entire serving of "nutrients" REQUIRED JSON FORMAT:
             {
