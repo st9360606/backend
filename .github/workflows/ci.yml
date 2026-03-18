@@ -9,6 +9,17 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,9 +33,7 @@ jobs:
 
       - name: Run tests
         env:
-          # ✅ 測試不需要真實 key（你 WireMock 已接管）
           GEMINI_API_KEY: "dummy"
-          # ✅ 確保 CI 不會意外開 dev endpoints
           APP_FEATURES_DEV_DEBUG_ENDPOINTS: "false"
           APP_FEATURES_DEV_IMAGE_ENDPOINT: "false"
           TESTCONTAINERS_RYUK_DISABLED: "false"
