@@ -56,16 +56,15 @@ public class IdempotencyService {
     public void failAndReleaseIfNeeded(
             Long userId,
             String requestId,
-            String code,
-            String msg,
             boolean releaseIfNotAttached
     ) {
         if (requestId == null || requestId.isBlank()) return;
 
-        repo.markFailed(userId, requestId, code, msg, clock.instant());
-
         if (releaseIfNotAttached) {
             repo.releaseIfNotAttached(userId, requestId);
+            return;
         }
+
+        repo.releaseIfNotAttached(userId, requestId);
     }
 }

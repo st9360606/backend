@@ -4,11 +4,13 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.List;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record FoodLogListResponse(
         List<Item> items,
         Page page,
         FoodLogEnvelope.Trace trace
 ) {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Item(
             String foodLogId,
             String status,
@@ -30,9 +32,15 @@ public record FoodLogListResponse(
             Integer healthScore,
             Double confidence,
             List<String> warnings,
-            String degradedReason
+            String degradedReason,
+            String foodCategory,
+            String foodSubCategory,
+            String _reasoning,
+            FoodLogEnvelope.LabelMeta labelMeta,
+            FoodLogEnvelope.AiMetaView aiMeta
     ) {}
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Page(
             int page,
             int size,

@@ -206,12 +206,9 @@ CREATE TABLE IF NOT EXISTS food_log_requests
 (
     id              BIGINT       NOT NULL AUTO_INCREMENT,
     user_id         BIGINT       NOT NULL,
-    request_id      VARCHAR(64)  NOT NULL,  -- 你 RequestIdFilter 產生的 UUID 字串
-    food_log_id     CHAR(36)     NULL,      -- attach 後才有
+    request_id      VARCHAR(64)  NOT NULL,
+    food_log_id     CHAR(36)     NULL,
     status          VARCHAR(16)  NOT NULL,  -- RESERVED/ATTACHED/FAILED
-    error_code      VARCHAR(64)  NULL,
-    error_message   TEXT         NULL,
-
     created_at_utc  DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at_utc  DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 

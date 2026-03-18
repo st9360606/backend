@@ -103,11 +103,17 @@ public class FoodLogHistoryService {
 
         List<String> warnings = null;
         String degradedReason = null;
+        String foodCategory = null;
+        String foodSubCategory = null;
+        String reasoning = null;
+        FoodLogEnvelope.LabelMeta labelMeta = null;
+        FoodLogEnvelope.AiMetaView aiMeta = null;
 
         if (eff != null && eff.isObject()) {
             foodName = textOrNull(eff.get("foodName"));
             healthScore = intOrNull(eff.get("healthScore"));
             confidence = doubleOrNull(eff.get("confidence"));
+            reasoning = textOrNull(eff.get("_reasoning"));
 
             JsonNode n = eff.get("nutrients");
             if (n != null && n.isObject()) {
@@ -120,7 +126,6 @@ public class FoodLogHistoryService {
                 sodium = doubleOrNull(n.get("sodium"));
             }
 
-            // warnings（array -> List<String>）只回白名單
             JsonNode w = eff.get("warnings");
             if (w != null && w.isArray()) {
                 warnings = new java.util.ArrayList<>();
@@ -132,21 +137,74 @@ public class FoodLogHistoryService {
                 if (warnings.isEmpty()) warnings = null;
             }
 
-            // degradedReason：優先讀 aiMeta.degradedReason；沒有就 fallback 看 warnings
-            JsonNode aiMeta = eff.get("aiMeta");
-            if (aiMeta != null && aiMeta.isObject()) {
-                degradedReason = textOrNull(aiMeta.get("degradedReason"));
+            labelMeta = toLabelMeta(eff.get("labelMeta"));
+
+            JsonNode aiMetaNode = eff.get("aiMeta");
+            if (aiMetaNode != null && aiMetaNode.isObject()) {
+                aiMeta = toAiMetaView(aiMetaNode);
+                degradedReason = textOrNull(aiMetaNode.get("degradedReason"));
+                foodCategory = textOrNull(aiMetaNode.get("foodCategory"));
+                foodSubCategory = textOrNull(aiMetaNode.get("foodSubCategory"));
             }
-            if (degradedReason == null && warnings != null) {
-                if (warnings.contains("NO_FOOD_DETECTED")) {
-                    degradedReason = "NO_FOOD";
-                } else if (warnings.contains("UNKNOWN_FOOD")) {
-                    degradedReason = "UNKNOWN_FOOD";
-                } else if (warnings.contains("NO_LABEL_DETECTED")) {
-                    degradedReason = "NO_LABEL";
-                } else if (warnings.contains("MISSING_NUTRITION_FACTS")) {
-                    degradedReason = "MISSING_NUTRITION_FACTS";
+
+            String method = e.getMethod() == null ? "" : e.getMethod().trim().toUpperCase(java.util.Locale.ROOT);
+
+            if (warnings != null) {
+                if ("LABEL".equals(method)) {
+                    // LABEL 模式下，允許用 warnings 覆蓋掉 aiMeta 先前寫錯的 NO_FOOD
+                    if (warnings.contains("NO_LABEL_DETECTED")) {
+                        degradedReason = "NO_LABEL";
+                    } else if (warnings.contains("MISSING_NUTRITION_FACTS")) {
+                        degradedReason = "MISSING_NUTRITION_FACTS";
+                    } else if (warnings.contains("NO_FOOD_DETECTED")) {
+                        degradedReason = "NO_LABEL";
+                    } else if (warnings.contains("UNKNOWN_FOOD")) {
+                        degradedReason = "UNKNOWN_FOOD";
+                    }
+                } else if (degradedReason == null) {
+                    if (warnings.contains("NO_FOOD_DETECTED")) {
+                        degradedReason = "NO_FOOD";
+                    } else if (warnings.contains("UNKNOWN_FOOD")) {
+                        degradedReason = "UNKNOWN_FOOD";
+                    } else if (warnings.contains("NO_LABEL_DETECTED")) {
+                        degradedReason = "NO_LABEL";
+                    } else if (warnings.contains("MISSING_NUTRITION_FACTS")) {
+                        degradedReason = "MISSING_NUTRITION_FACTS";
+                    }
                 }
+            }
+
+            if ("NO_FOOD".equals(degradedReason)
+                || "UNKNOWN_FOOD".equals(degradedReason)
+                || "NO_LABEL".equals(degradedReason)) {
+                labelMeta = null;
+            }
+
+            if ("MISSING_NUTRITION_FACTS".equals(degradedReason)
+                && warnings != null
+                && warnings.contains("PACKAGE_SIZE_UNVERIFIED")
+                && labelMeta != null
+                && "WHOLE_PACKAGE".equals(labelMeta.basis())) {
+                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
+            }
+
+            if (labelMeta != null
+                && "ESTIMATED_PORTION".equals(labelMeta.basis())
+                && labelMeta.servingsPerContainer() != null
+                && Math.abs(labelMeta.servingsPerContainer() - 1.0d) < 0.0001d) {
+                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
+            }
+            if (aiMeta != null && degradedReason != null) {
+                aiMeta = new FoodLogEnvelope.AiMetaView(
+                        degradedReason,
+                        aiMeta.degradedAtUtc(),
+                        aiMeta.resultFromCache(),
+                        aiMeta.foodCategory(),
+                        aiMeta.foodSubCategory(),
+                        aiMeta.source(),
+                        aiMeta.basis(),
+                        aiMeta.lang()
+                );
             }
         }
 
@@ -167,9 +225,70 @@ public class FoodLogHistoryService {
                         healthScore,
                         confidence,
                         warnings,
-                        degradedReason
+                        degradedReason,
+                        foodCategory,
+                        foodSubCategory,
+                        reasoning,
+                        labelMeta,
+                        aiMeta
                 )
         );
+    }
+
+    private static FoodLogEnvelope.LabelMeta toLabelMeta(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+
+        Double servingsPerContainer = doubleOrNull(node.get("servingsPerContainer"));
+        String basis = textOrNull(node.get("basis"));
+
+        if (servingsPerContainer == null && (basis == null || basis.isBlank())) {
+            return null;
+        }
+
+        return new FoodLogEnvelope.LabelMeta(servingsPerContainer, basis);
+    }
+
+    private static FoodLogEnvelope.AiMetaView toAiMetaView(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+
+        String degradedReason = textOrNull(node.get("degradedReason"));
+        String degradedAtUtc = textOrNull(node.get("degradedAtUtc"));
+        Boolean resultFromCache = booleanOrNull(node.get("resultFromCache"));
+        String foodCategory = textOrNull(node.get("foodCategory"));
+        String foodSubCategory = textOrNull(node.get("foodSubCategory"));
+        String source = textOrNull(node.get("source"));
+        String basis = textOrNull(node.get("basis"));
+        String lang = textOrNull(node.get("lang"));
+
+        if (degradedReason == null
+            && degradedAtUtc == null
+            && resultFromCache == null
+            && foodCategory == null
+            && foodSubCategory == null
+            && source == null
+            && basis == null
+            && lang == null) {
+            return null;
+        }
+
+        return new FoodLogEnvelope.AiMetaView(
+                degradedReason,
+                degradedAtUtc,
+                resultFromCache,
+                foodCategory,
+                foodSubCategory,
+                source,
+                basis,
+                lang
+        );
+    }
+
+    private static Boolean booleanOrNull(JsonNode v) {
+        return (v == null || v.isNull() || !v.isBoolean()) ? null : v.asBoolean();
     }
 
     private static String textOrNull(JsonNode v) {

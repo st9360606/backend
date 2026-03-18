@@ -186,7 +186,7 @@ public class GeminiPhotoAlbumProcessor implements GeminiModeProcessor {
 
         ObjectNode lm = root.putObject("labelMeta");
         lm.putNull("servingsPerContainer");
-        lm.put("basis", "WHOLE_PACKAGE");
+        lm.put("basis", "ESTIMATED_PORTION");
 
         return root;
     }

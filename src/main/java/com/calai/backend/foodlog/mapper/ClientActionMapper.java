@@ -30,10 +30,9 @@ public class ClientActionMapper {
         return switch (code) {
 
             // ===== BARCODE =====
-            case "BARCODE_NOT_FOUND",
-                 "BARCODE_NUTRITION_UNAVAILABLE" -> ClientAction.TRY_LABEL;
-
-            case "BARCODE_LOOKUP_FAILED" -> ClientAction.CHECK_NETWORK;
+            case "BARCODE_NOT_FOUND" -> ClientAction.SCAN_AGAIN;
+            case "BARCODE_NUTRITION_UNAVAILABLE" -> ClientAction.TRY_PHOTO;
+            case "BARCODE_LOOKUP_FAILED" -> ClientAction.RETRY_LATER;
 
             // ===== RATE LIMIT / QUOTA / COOLDOWN =====
             case "COOLDOWN_ACTIVE",

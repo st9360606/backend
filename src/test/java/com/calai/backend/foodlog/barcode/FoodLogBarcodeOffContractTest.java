@@ -88,7 +88,7 @@ class FoodLogBarcodeOffContractTest {
     }
 
     @Test
-    void barcode_not_found_should_return_failed_and_try_label() throws Exception {
+    void barcode_not_found_should_return_failed_and_scan_again() throws Exception {
         String bc = "0000000000000";
 
         when(barcodeLookupService.lookupOff(eq(bc), any()))
@@ -102,8 +102,8 @@ class FoodLogBarcodeOffContractTest {
                 ));
 
         String body = """
-        { "barcode": "%s" }
-        """.formatted(bc);
+    { "barcode": "%s" }
+    """.formatted(bc);
 
         String resp = mvc.perform(post("/api/v1/food-logs/barcode")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -115,7 +115,7 @@ class FoodLogBarcodeOffContractTest {
 
         assertThat(json.path("status").asText()).isEqualTo("FAILED");
         assertThat(json.path("error").path("errorCode").asText()).isEqualTo("BARCODE_NOT_FOUND");
-        assertThat(json.path("error").path("clientAction").asText()).isEqualTo("TRY_LABEL");
+        assertThat(json.path("error").path("clientAction").asText()).isEqualTo("SCAN_AGAIN");
 
         verify(barcodeLookupService, times(1)).lookupOff(eq(bc), any());
     }

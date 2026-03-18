@@ -28,7 +28,7 @@ public class EffectivePostProcessorTest {
           }
         """);
 
-        ObjectNode out = pp.apply(eff, "GEMINI");
+        ObjectNode out = pp.apply(eff, "GEMINI", "PHOTO");
 
         assertThat(out.get("healthScoreMeta")).isNotNull();
         assertThat(out.get("healthScoreMeta").get("version").asText()).isEqualTo("v1");
@@ -49,7 +49,7 @@ public class EffectivePostProcessorTest {
           }
         """);
 
-        ObjectNode out = pp.apply(eff, "GEMINI");
+        ObjectNode out = pp.apply(eff, "GEMINI", "PHOTO");
 
         assertThat(out.get("healthScore")).isNull();
         assertThat(out.get("healthScoreMeta")).isNotNull();
@@ -68,7 +68,7 @@ public class EffectivePostProcessorTest {
           }
         """);
 
-        ObjectNode out = pp.apply(eff, "GEMINI");
+        ObjectNode out = pp.apply(eff, "GEMINI", "PHOTO");
 
         assertThat(out.get("warnings")).isNotNull();
         String w = out.get("warnings").toString();
@@ -104,9 +104,27 @@ public class EffectivePostProcessorTest {
 
         eff.put("confidence", 0.98);
 
-        ObjectNode out = processor.apply(eff, "OPENFOODFACTS");
+        ObjectNode out = processor.apply(eff, "OPENFOODFACTS", "BARCODE");
 
         assertThat(out.path("healthScoreMeta").path("provider").asText()).isEqualTo("OPENFOODFACTS");
         assertThat(out.path("healthScoreMeta").path("confidenceSource").asText()).isEqualTo("OPENFOODFACTS");
+    }
+
+    @Test
+    void apply_when_label_has_no_food_detected_should_map_to_no_label() throws Exception {
+        ObjectNode eff = (ObjectNode) om.readTree("""
+          {
+            "foodName": "Nutrition facts label",
+            "quantity":{"value":1,"unit":"SERVING"},
+            "nutrients":{"kcal":0,"protein":0,"fat":0,"carbs":0,"fiber":0,"sugar":0,"sodium":0},
+            "confidence":0.0,
+            "warnings":["NO_FOOD_DETECTED","NO_LABEL_DETECTED","LOW_CONFIDENCE"]
+          }
+        """);
+
+        ObjectNode out = pp.apply(eff, "GEMINI", "LABEL");
+
+        assertThat(out.path("aiMeta").path("degradedReason").asText()).isEqualTo("NO_LABEL");
+        assertThat(out.path("warnings").toString()).contains(FoodLogWarning.NO_LABEL_DETECTED.name());
     }
 }

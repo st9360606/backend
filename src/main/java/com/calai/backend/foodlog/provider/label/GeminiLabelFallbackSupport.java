@@ -102,6 +102,7 @@ public final class GeminiLabelFallbackSupport {
         Double conf = GeminiEffectiveJsonSupport.parseNumberNodeOrText(root.get("confidence"));
 
         boolean kcalMissing = (kcal == null);
+
         boolean allZeroOrNull =
                 zeroOrNull(kcal) && zeroOrNull(protein) && zeroOrNull(fat) && zeroOrNull(carbs)
                 && zeroOrNull(fiber) && zeroOrNull(sugar) && zeroOrNull(sodium);
@@ -109,9 +110,33 @@ public final class GeminiLabelFallbackSupport {
         boolean coreAllZeroOrNull =
                 zeroOrNull(kcal) && zeroOrNull(protein) && zeroOrNull(fat) && zeroOrNull(carbs);
 
+        int nonZeroCount = 0;
+        if (!zeroOrNull(kcal)) nonZeroCount++;
+        if (!zeroOrNull(protein)) nonZeroCount++;
+        if (!zeroOrNull(fat)) nonZeroCount++;
+        if (!zeroOrNull(carbs)) nonZeroCount++;
+        if (!zeroOrNull(fiber)) nonZeroCount++;
+        if (!zeroOrNull(sugar)) nonZeroCount++;
+        if (!zeroOrNull(sodium)) nonZeroCount++;
+
+        boolean weakPartial =
+                !zeroOrNull(kcal)
+                && !zeroOrNull(protein)
+                && !zeroOrNull(fat)
+                && zeroOrNull(carbs)
+                && zeroOrNull(fiber)
+                && zeroOrNull(sugar)
+                && zeroOrNull(sodium);
+
         if (kcalMissing) return true;
         if (allZeroOrNull) return true;
         if (coreAllZeroOrNull && (conf == null || conf <= 0.35d)) return true;
+
+        // 新增：只抓到前半段巨量營養、後半段全掉光，視為 partial
+        if (weakPartial) return true;
+
+        // 新增：有效非零欄位太少，也視為 partial
+        if (nonZeroCount <= 3 && (conf == null || conf < 0.85d)) return true;
 
         return false;
     }

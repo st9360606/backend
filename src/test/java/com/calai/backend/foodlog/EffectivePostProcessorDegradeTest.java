@@ -17,14 +17,16 @@ class EffectivePostProcessorDegradeTest extends MySqlContainerBaseTest {
 
     @Autowired
     EffectivePostProcessor postProcessor;
-    @Autowired ObjectMapper om;
+
+    @Autowired
+    ObjectMapper om;
 
     @Test
     void unknown_food_should_not_add_non_food_suspect() {
         ObjectNode eff = baseEff(0.2);
         eff.putArray("warnings").add(FoodLogWarning.UNKNOWN_FOOD.name());
 
-        ObjectNode out = postProcessor.apply(eff, "GEMINI");
+        ObjectNode out = postProcessor.apply(eff, "GEMINI", "PHOTO");
 
         assertThat(out.path("aiMeta").path("degradedReason").asText()).isEqualTo("UNKNOWN_FOOD");
 
@@ -44,7 +46,7 @@ class EffectivePostProcessorDegradeTest extends MySqlContainerBaseTest {
         ObjectNode eff = baseEff(0.1);
         eff.putArray("warnings").add(FoodLogWarning.NO_FOOD_DETECTED.name());
 
-        ObjectNode out = postProcessor.apply(eff, "GEMINI");
+        ObjectNode out = postProcessor.apply(eff, "GEMINI", "PHOTO");
 
         assertThat(out.path("aiMeta").path("degradedReason").asText()).isEqualTo("NO_FOOD");
 
@@ -80,6 +82,7 @@ class EffectivePostProcessorDegradeTest extends MySqlContainerBaseTest {
     private java.util.List<String> warnings(ObjectNode eff) {
         ArrayNode w = (ArrayNode) eff.get("warnings");
         if (w == null) return java.util.List.of();
+
         java.util.List<String> out = new java.util.ArrayList<>();
         w.forEach(x -> out.add(x.asText()));
         return out;

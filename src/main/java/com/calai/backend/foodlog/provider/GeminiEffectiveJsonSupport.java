@@ -72,6 +72,19 @@ public final class GeminiEffectiveJsonSupport {
         copyNonNegativeNumberOrZero(n, on, "sugar");
         copyNonNegativeNumberOrZero(n, on, "sodium");
 
+        // _reasoning：保留 Gemini 的簡短理由，供 API / debug 顯示
+        JsonNode reasoningNode = raw.get("_reasoning");
+        if (reasoningNode != null && !reasoningNode.isNull()) {
+            String reasoning = reasoningNode.asText(null);
+            if (reasoning != null && !reasoning.isBlank()) {
+                out.put("_reasoning", reasoning.trim());
+            } else {
+                out.putNull("_reasoning");
+            }
+        } else {
+            out.putNull("_reasoning");
+        }
+
         // confidence：只保留 Gemini 值
         Double conf = parseNumberNodeOrText(raw.get("confidence"));
         conf = normalizeConfidence(conf);

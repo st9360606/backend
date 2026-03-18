@@ -17,7 +17,7 @@ public class EffectivePostProcessor {
 
     private final NutritionSanityChecker sanityChecker;
 
-    public ObjectNode apply(ObjectNode effective, String providerCode) {
+    public ObjectNode apply(ObjectNode effective, String providerCode, String method) {
         if (effective == null) throw new IllegalStateException("PROVIDER_BAD_RESPONSE");
 
         ObjectNode nutrients = getObj(effective, "nutrients");
@@ -57,7 +57,7 @@ public class EffectivePostProcessor {
         }
 
         sanityChecker.apply(effective);
-        setDegradedReasonIfAny(effective);
+        setDegradedReasonIfAny(effective, method);
 
         String provider = norm(providerCode);
 
@@ -93,24 +93,32 @@ public class EffectivePostProcessor {
         return effective;
     }
 
-    private static void setDegradedReasonIfAny(ObjectNode eff) {
+    private static void setDegradedReasonIfAny(ObjectNode eff, String method) {
         boolean noFood = hasWarning(eff, FoodLogWarning.NO_FOOD_DETECTED.name());
         boolean unknown = hasWarning(eff, FoodLogWarning.UNKNOWN_FOOD.name());
         boolean noLabel = hasWarning(eff, FoodLogWarning.NO_LABEL_DETECTED.name());
         boolean missingNutritionFacts = hasWarning(eff, FoodLogWarning.MISSING_NUTRITION_FACTS.name());
 
+        String m = (method == null) ? "" : method.trim().toUpperCase(Locale.ROOT);
+
         String reason = null;
-        if (noFood) reason = "NO_FOOD";
-        else if (unknown) reason = "UNKNOWN_FOOD";
-        else if (noLabel) reason = "NO_LABEL";
-        else if (missingNutritionFacts) reason = "MISSING_NUTRITION_FACTS";
+
+        if ("LABEL".equals(m)) {
+            if (noLabel) reason = "NO_LABEL";
+            else if (missingNutritionFacts) reason = "MISSING_NUTRITION_FACTS";
+            else if (noFood) reason = "NO_LABEL";
+            else if (unknown) reason = "UNKNOWN_FOOD";
+        } else {
+            if (noFood) reason = "NO_FOOD";
+            else if (unknown) reason = "UNKNOWN_FOOD";
+            else if (noLabel) reason = "NO_LABEL";
+            else if (missingNutritionFacts) reason = "MISSING_NUTRITION_FACTS";
+        }
 
         if (reason == null) return;
 
         ObjectNode aiMeta = ensureObj(eff, "aiMeta");
-        if (aiMeta.get("degradedReason") == null || aiMeta.get("degradedReason").isNull()) {
-            aiMeta.put("degradedReason", reason);
-        }
+        aiMeta.put("degradedReason", reason);
         if (aiMeta.get("degradedAtUtc") == null || aiMeta.get("degradedAtUtc").isNull()) {
             aiMeta.put("degradedAtUtc", Instant.now().toString());
         }

@@ -28,6 +28,9 @@ public record FoodLogEnvelope(
             String degradedReason,
             String foodCategory,
             String foodSubCategory,
+            String _reasoning,
+            LabelMeta labelMeta,
+            AiMetaView aiMeta,
             Source source
     ) {}
 
@@ -45,12 +48,24 @@ public record FoodLogEnvelope(
             Double sodium
     ) {}
 
-    /**
-     * ✅ P2-3：
-     * - method：使用者入口（PHOTO / ALBUM / LABEL / BARCODE）
-     * - provider：主 provider（GEMINI / OPENFOODFACTS）
-     * - resolvedBy：實際解析路徑（AUTO_BARCODE / NAME_SEARCH / OPENFOODFACTS / GEMINI）
-     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record LabelMeta(
+            Double servingsPerContainer,
+            String basis
+    ) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record AiMetaView(
+            String degradedReason,
+            String degradedAtUtc,
+            Boolean resultFromCache,
+            String foodCategory,
+            String foodSubCategory,
+            String source,
+            String basis,
+            String lang
+    ) {}
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Source(
             String method,

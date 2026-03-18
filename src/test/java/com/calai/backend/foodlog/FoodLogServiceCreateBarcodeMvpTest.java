@@ -269,7 +269,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
         verify(abuseGuard).onBarcodeAttempt(userId, "device-1", NOW, ZoneOffset.UTC);
         verify(barcodeLookupService).lookupOff(eq(barcode), anyString());
         verify(idem).attach(userId, requestId, "log-bc-no-nutrition", NOW);
-        verify(postProcessor, never()).apply(any(), anyString());
+        verify(postProcessor, never()).apply(any(), anyString(), anyString());
     }
 
     @Test
@@ -399,7 +399,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
                         off
                 ));
 
-        when(postProcessor.apply(any(ObjectNode.class), eq("OPENFOODFACTS")))
+        when(postProcessor.apply(any(ObjectNode.class), eq("OPENFOODFACTS"), eq("BARCODE")))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         mockTxTemplateExecutePassThrough();
@@ -438,7 +438,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
         verify(rateLimiter).checkOrThrow(userId, EntitlementService.Tier.TRIAL, NOW);
         verify(abuseGuard).onBarcodeAttempt(userId, "device-1", NOW, ZoneOffset.UTC);
         verify(barcodeLookupService).lookupOff(eq(barcode), anyString());
-        verify(postProcessor).apply(any(ObjectNode.class), eq("OPENFOODFACTS"));
+        verify(postProcessor).apply(any(ObjectNode.class), eq("OPENFOODFACTS"), eq("BARCODE"));
         verify(idem).attach(userId, requestId, "log-bc-success", NOW);
     }
 
@@ -448,8 +448,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
         String requestId = "req-bc-rate-limited";
         String barcode = "4710018000017";
 
-        RateLimitedException ex = mock(RateLimitedException.class);
-        when(ex.getMessage()).thenReturn("RATE_LIMITED");
+        RateLimitedException ex = new RateLimitedException("RATE_LIMITED", 60, "RETRY_LATER");
 
         when(idem.reserveOrGetExisting(userId, requestId, NOW)).thenReturn(null);
         when(entitlementService.resolveTier(userId, NOW)).thenReturn(EntitlementService.Tier.TRIAL);
@@ -470,8 +469,6 @@ class FoodLogServiceCreateBarcodeMvpTest {
         verify(idem).failAndReleaseIfNeeded(
                 userId,
                 requestId,
-                "RATE_LIMITED",
-                "RATE_LIMITED",
                 true
         );
 
@@ -524,7 +521,7 @@ class FoodLogServiceCreateBarcodeMvpTest {
         verify(idem).attach(userId, requestId, "log-bc-runtime", NOW);
 
         // 這個 case 會被內層 catch(Exception) 轉成 FAILED envelope，不會走 outer catch
-        verify(idem, never()).failAndReleaseIfNeeded(anyLong(), anyString(), anyString(), anyString(), anyBoolean());
+        verify(idem, never()).failAndReleaseIfNeeded(anyLong(), anyString(), anyBoolean());
     }
 
     @Test
@@ -562,8 +559,6 @@ class FoodLogServiceCreateBarcodeMvpTest {
         verify(idem).failAndReleaseIfNeeded(
                 userId,
                 requestId,
-                "CREATE_BARCODE_FAILED",
-                "tx boom",
                 true
         );
     }

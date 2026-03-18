@@ -38,12 +38,6 @@ public class FoodLogRequestEntity {
     @Column(nullable = false, length = 16)
     private ReqStatus status = ReqStatus.RESERVED;
 
-    @Column(name = "error_code", length = 64)
-    private String errorCode;
-
-    @Column(name = "error_message", columnDefinition = "TEXT")
-    private String errorMessage;
-
     @Column(name = "created_at_utc", nullable = false)
     private Instant createdAtUtc;
 

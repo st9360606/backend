@@ -220,18 +220,18 @@ class FoodLogTaskWorkerTest {
 
         ObjectMapper om = new ObjectMapper();
         ObjectNode eff = (ObjectNode) om.readTree("""
-            {
-              "foodName":"White Bread",
-              "quantity":{"value":1,"unit":"SERVING"},
-              "nutrients":{"kcal":75,"protein":2.5,"fat":1,"carbs":14,"fiber":0.8,"sugar":1.5,"sodium":140},
-              "confidence":0.9
-            }
-            """);
+        {
+          "foodName":"White Bread",
+          "quantity":{"value":1,"unit":"SERVING"},
+          "nutrients":{"kcal":75,"protein":2.5,"fat":1,"carbs":14,"fiber":0.8,"sugar":1.5,"sodium":140},
+          "confidence":0.9
+        }
+        """);
 
         Mockito.when(provider.process(eq(log), eq(storage)))
                 .thenReturn(new ProviderClient.ProviderResult(eff, "GEMINI"));
 
-        Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI")))
+        Mockito.when(postProcessor.apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO")))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
@@ -245,6 +245,6 @@ class FoodLogTaskWorkerTest {
         assertEquals("GEMINI", log.getProvider());
 
         Mockito.verify(postProcessor, Mockito.times(1))
-                .apply(any(ObjectNode.class), eq("GEMINI"));
+                .apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO"));
     }
 }

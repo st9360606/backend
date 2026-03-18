@@ -19,6 +19,8 @@ import com.calai.backend.foodlog.task.ProviderTelemetry;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
@@ -305,6 +307,8 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
     ) {
         finalizeEffective(rawForFinalize, effective);
         normalizeWholePackageQuantity(effective);
+        normalizeLabelFoodName(effective);
+        sanitizeLabelWarnings(effective);
 
         telemetry.ok(
                 "GEMINI",
@@ -348,6 +352,63 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
             }
         }
         return count;
+    }
+
+    private static void normalizeLabelFoodName(ObjectNode effective) {
+        if (effective == null) return;
+
+        JsonNode foodNameNode = effective.get("foodName");
+        if (foodNameNode == null || foodNameNode.isNull()) {
+            effective.put("foodName", "Nutrition facts label");
+            return;
+        }
+
+        String foodName = foodNameNode.asText(null);
+        if (foodName == null) {
+            effective.put("foodName", "Nutrition facts label");
+            return;
+        }
+
+        String v = foodName.trim();
+        if (v.isEmpty()
+            || "UNKNOWN FOOD".equalsIgnoreCase(v)
+            || "UNKNOWN".equalsIgnoreCase(v)
+            || "FOOD".equalsIgnoreCase(v)
+            || "UNNAMED PRODUCT".equalsIgnoreCase(v)) {
+            effective.put("foodName", "Nutrition facts label");
+        }
+    }
+
+    private static void sanitizeLabelWarnings(ObjectNode effective) {
+        if (effective == null) return;
+
+        JsonNode warningsNode = effective.get("warnings");
+        if (!(warningsNode instanceof ArrayNode warnings)) {
+            return;
+        }
+
+        boolean hasNoLabel = false;
+        for (JsonNode it : warnings) {
+            if (it != null && "NO_LABEL_DETECTED".equalsIgnoreCase(it.asText())) {
+                hasNoLabel = true;
+                break;
+            }
+        }
+
+        if (!hasNoLabel) {
+            return;
+        }
+        ArrayNode cleaned = JsonNodeFactory.instance.arrayNode();
+
+        for (JsonNode it : warnings) {
+            if (it == null || it.isNull()) continue;
+            String code = it.asText();
+            if ("NO_FOOD_DETECTED".equalsIgnoreCase(code)) {
+                continue;
+            }
+            cleaned.add(code);
+        }
+        effective.set("warnings", cleaned);
     }
 
     private static int nutrientCountSafe(JsonNode root) {

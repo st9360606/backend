@@ -105,8 +105,6 @@ class FoodLogServiceGuardTest {
         doNothing().when(idem).failAndReleaseIfNeeded(
                 anyLong(),
                 anyString(),
-                anyString(),
-                anyString(),
                 anyBoolean()
         );
 
@@ -141,8 +139,6 @@ class FoodLogServiceGuardTest {
         verify(idem, atLeastOnce()).failAndReleaseIfNeeded(
                 eq(1L),
                 eq("rid-1"),
-                eq("UPLOAD_FAILED"),
-                anyString(),
                 eq(true)
         );
 

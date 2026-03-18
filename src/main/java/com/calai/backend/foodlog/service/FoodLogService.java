@@ -149,7 +149,7 @@ public class FoodLogService {
             } catch (Exception ex) {
                 StorageCleanup.safeDeleteQuietly(storage, tempKey);
                 if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
-                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), true);
+                idem.failAndReleaseIfNeeded(userId, requestId,  true);
                 throw ex;
             }
 
@@ -191,7 +191,7 @@ public class FoodLogService {
                     e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
                     markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -237,7 +237,7 @@ public class FoodLogService {
 
             } catch (Exception ex) {
                 cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
-                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_ALBUM_FAILED", safeMsg(ex), true);
+                idem.failAndReleaseIfNeeded(userId, requestId,  true);
                 throw ex;
             }
 
@@ -291,7 +291,7 @@ public class FoodLogService {
             } catch (Exception ex) {
                 StorageCleanup.safeDeleteQuietly(storage, tempKey);
                 if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
-                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), true);
+                idem.failAndReleaseIfNeeded(userId, requestId, true);
                 throw ex;
             }
 
@@ -345,7 +345,7 @@ public class FoodLogService {
                     ObjectNode copied = hit.get().getEffective().deepCopy();
 
                     // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
                     markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -395,7 +395,7 @@ public class FoodLogService {
             } catch (Exception ex) {
                 // ✅ retain 後若後續失敗，只清 tempKey；blob orphan 留給背景 cleaner
                 cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
-                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_PHOTO_FAILED", safeMsg(ex), true);
+                idem.failAndReleaseIfNeeded(userId, requestId,  true);
                 throw ex;
             }
 
@@ -449,7 +449,7 @@ public class FoodLogService {
                 StorageCleanup.safeDeleteQuietly(storage, tempKey);
                 if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
 
-                idem.failAndReleaseIfNeeded(userId, requestId, "UPLOAD_FAILED", safeMsg(ex), true);
+                idem.failAndReleaseIfNeeded(userId, requestId,  true);
                 throw ex;
             }
 
@@ -497,7 +497,7 @@ public class FoodLogService {
                     e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
 
                     ObjectNode copied = hit.get().getEffective().deepCopy();
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider());
+                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
                     markResultFromCache(processed);
                     e.setEffective(processed);
                     e.setStatus(FoodLogStatus.DRAFT);
@@ -547,7 +547,7 @@ public class FoodLogService {
 
             } catch (Exception ex) {
                 cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
-                idem.failAndReleaseIfNeeded(userId, requestId, "CREATE_LABEL_FAILED", safeMsg(ex), true);
+                idem.failAndReleaseIfNeeded(userId, requestId, true);
                 throw ex;
             }
 
@@ -679,8 +679,6 @@ public class FoodLogService {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    ex.getMessage(),
-                    safeMsg(ex),
                     true
             );
             throw ex;
@@ -688,8 +686,6 @@ public class FoodLogService {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    "CREATE_BARCODE_FAILED",
-                    safeMsg(ex),
                     true
             );
             throw ex;
@@ -731,7 +727,6 @@ public class FoodLogService {
         FoodLogEnvelope out = txTemplate.execute(status -> {
             OffResult off = r.off();
 
-            // ===== 查到：建立 DRAFT + effective =====
             FoodLogEntity e = new FoodLogEntity();
             e.setUserId(userId);
             e.setMethod("BARCODE");
@@ -749,7 +744,6 @@ public class FoodLogService {
             String resolvedRaw = firstNonBlank(bcRaw, r.barcodeRaw());
             String resolvedNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
 
-            // ✅ DB 一律存 normalized
             e.setBarcode(resolvedNorm);
 
             ObjectNode eff = JsonNodeFactory.instance.objectNode();
@@ -760,6 +754,9 @@ public class FoodLogService {
             eff.put("foodName", name);
 
             String basis = OffEffectiveBuilder.applyPortion(eff, off, true);
+
+            BarcodePortionCanonicalizer.canonicalize(eff, off, basis);
+
             eff.putArray("warnings");
 
             boolean hasCoreNutrition = OffEffectiveBuilder.hasCoreNutrition(off);
@@ -782,7 +779,7 @@ public class FoodLogService {
             aiMeta.put("foodCategory", resolvedCategory.category().name());
             aiMeta.put("foodSubCategory", resolvedCategory.subCategory().name());
 
-            ObjectNode processed = postProcessor.apply(eff, e.getProvider());
+            ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
             e.setEffective(processed);
 
             e.setStatus(FoodLogStatus.DRAFT);
@@ -875,26 +872,21 @@ public class FoodLogService {
         return toEnvelope(e, t, requestId);
     }
 
-    // ===== FoodLogService.toEnvelope()：
-    // 1) task 只回 meaningful（QUEUED/RUNNING/FAILED）
-    // 2) FAILED 時 error 一定回；retryAfterSec 優先 nextRetryAt，其次從 lastErrorMessage 解析 =====
     private FoodLogEnvelope toEnvelope(FoodLogEntity e, FoodLogTaskEntity t, String requestId) {
         Instant now = clock.instant();
 
         JsonNode eff = e.getEffective();
 
-        // ✅ quota / degrade 觀點
         String tierUsed = resolveTierUsedDisplay(e);
-
-        // ✅ 是否結果重用
         boolean fromCache = resolveResultFromCache(eff);
 
         FoodLogEnvelope.NutritionResult nr = null;
         List<String> warnings = null;
         String degradedReason = null;
+        String reasoning = null;
+        FoodLogEnvelope.LabelMeta labelMeta = null;
+        FoodLogEnvelope.AiMetaView aiMetaView = null;
 
-        // ✅ P2-3：實際解析路徑
-        // 優先取 effective.aiMeta.source；沒有就 fallback provider
         String resolvedBy = null;
 
         if (eff != null && eff.isObject()) {
@@ -909,12 +901,12 @@ public class FoodLogService {
                 if (warnings.isEmpty()) warnings = null;
             }
 
+            reasoning = textOrNull(eff, "_reasoning");
+            labelMeta = toLabelMeta(eff.get("labelMeta"));
+
             JsonNode aiMeta = eff.get("aiMeta");
             if (aiMeta != null && aiMeta.isObject()) {
-                JsonNode dr = aiMeta.get("degradedReason");
-                if (dr != null && !dr.isNull()) {
-                    degradedReason = dr.asText(null);
-                }
+                aiMetaView = toAiMetaView(aiMeta);
 
                 JsonNode src = aiMeta.get("source");
                 if (src != null && !src.isNull()) {
@@ -925,16 +917,72 @@ public class FoodLogService {
                 }
             }
 
-            if (degradedReason == null && warnings != null) {
-                if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) {
-                    degradedReason = "NO_FOOD";
-                } else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) {
-                    degradedReason = "UNKNOWN_FOOD";
-                } else if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) {
-                    degradedReason = "NO_LABEL";
-                } else if (warnings.stream().anyMatch("MISSING_NUTRITION_FACTS"::equalsIgnoreCase)) {
-                    degradedReason = "MISSING_NUTRITION_FACTS";
+            // 這裡不要直接信任 aiMeta.degradedReason，統一重新 canonicalize
+            if (warnings != null) {
+                String method = e.getMethod() == null ? "" : e.getMethod().trim().toUpperCase(java.util.Locale.ROOT);
+
+                if ("LABEL".equals(method)) {
+                    if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) {
+                        degradedReason = "NO_LABEL";
+                    } else if (warnings.stream().anyMatch("MISSING_NUTRITION_FACTS"::equalsIgnoreCase)) {
+                        degradedReason = "MISSING_NUTRITION_FACTS";
+                    } else if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) {
+                        degradedReason = "NO_LABEL";
+                    } else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) {
+                        degradedReason = "UNKNOWN_FOOD";
+                    }
+                } else {
+                    if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) {
+                        degradedReason = "NO_FOOD";
+                    } else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) {
+                        degradedReason = "UNKNOWN_FOOD";
+                    } else if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) {
+                        degradedReason = "NO_LABEL";
+                    } else if (warnings.stream().anyMatch("MISSING_NUTRITION_FACTS"::equalsIgnoreCase)) {
+                        degradedReason = "MISSING_NUTRITION_FACTS";
+                    }
                 }
+            }
+
+            // 若 warnings 沒推導出來，再 fallback 到 aiMeta.degradedReason
+            if (degradedReason == null && aiMetaView != null) {
+                degradedReason = aiMetaView.degradedReason();
+            }
+
+            // degraded case：不要帶誤導性的 labelMeta
+            if ("NO_FOOD".equals(degradedReason)
+                || "UNKNOWN_FOOD".equals(degradedReason)
+                || "NO_LABEL".equals(degradedReason)) {
+                labelMeta = null;
+            }
+
+            if ("MISSING_NUTRITION_FACTS".equals(degradedReason)
+                && warnings != null
+                && warnings.contains("PACKAGE_SIZE_UNVERIFIED")
+                && labelMeta != null
+                && "WHOLE_PACKAGE".equals(labelMeta.basis())) {
+                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
+            }
+
+            if (labelMeta != null
+                && "ESTIMATED_PORTION".equals(labelMeta.basis())
+                && labelMeta.servingsPerContainer() != null
+                && Math.abs(labelMeta.servingsPerContainer() - 1.0d) < 0.0001d) {
+                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
+            }
+
+            // 同步修正 aiMetaView，避免 response 內 degradedReason 與 aiMeta.degradedReason 打架
+            if (aiMetaView != null && degradedReason != null) {
+                aiMetaView = new FoodLogEnvelope.AiMetaView(
+                        degradedReason,
+                        aiMetaView.degradedAtUtc(),
+                        aiMetaView.resultFromCache(),
+                        aiMetaView.foodCategory(),
+                        aiMetaView.foodSubCategory(),
+                        aiMetaView.source(),
+                        aiMetaView.basis(),
+                        aiMetaView.lang()
+                );
             }
         }
 
@@ -964,6 +1012,9 @@ public class FoodLogService {
                     degradedReason,
                     aiMetaTextOrNull(eff, "foodCategory"),
                     aiMetaTextOrNull(eff, "foodSubCategory"),
+                    reasoning,
+                    labelMeta,
+                    aiMetaView,
                     new FoodLogEnvelope.Source(
                             e.getMethod(),
                             e.getProvider(),
@@ -972,7 +1023,6 @@ public class FoodLogService {
             );
         }
 
-        // ✅ task：只在「還會自動跑」時回給前端
         FoodLogEnvelope.Task task = null;
         boolean taskMeaningful = (t != null);
 
@@ -981,7 +1031,6 @@ public class FoodLogService {
             task = new FoodLogEnvelope.Task(t.getId(), poll);
         }
 
-        // ✅ FAILED 才回 error
         FoodLogEnvelope.ApiError err = null;
         if (e.getStatus() == FoodLogStatus.FAILED) {
 
@@ -1010,7 +1059,6 @@ public class FoodLogService {
             );
         }
 
-        // ✅ 成功態提示改走 hints
         List<FoodLogEnvelope.Hint> hints = null;
 
         if (e.getStatus() == FoodLogStatus.DRAFT && nr != null && warnings != null) {
@@ -1048,6 +1096,65 @@ public class FoodLogService {
                 hints,
                 new FoodLogEnvelope.Trace(requestId)
         );
+    }
+
+    private static FoodLogEnvelope.LabelMeta toLabelMeta(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+
+        Double servingsPerContainer = doubleOrNull(node, "servingsPerContainer");
+        String basis = textOrNull(node, "basis");
+
+        if (servingsPerContainer == null && (basis == null || basis.isBlank())) {
+            return null;
+        }
+
+        return new FoodLogEnvelope.LabelMeta(servingsPerContainer, basis);
+    }
+
+    private static FoodLogEnvelope.AiMetaView toAiMetaView(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+
+        String degradedReason = textOrNull(node, "degradedReason");
+        String degradedAtUtc = textOrNull(node, "degradedAtUtc");
+        Boolean resultFromCache = booleanOrNull(node, "resultFromCache");
+        String foodCategory = textOrNull(node, "foodCategory");
+        String foodSubCategory = textOrNull(node, "foodSubCategory");
+        String source = textOrNull(node, "source");
+        String basis = textOrNull(node, "basis");
+        String lang = textOrNull(node, "lang");
+
+        if (degradedReason == null
+            && degradedAtUtc == null
+            && resultFromCache == null
+            && foodCategory == null
+            && foodSubCategory == null
+            && source == null
+            && basis == null
+            && lang == null) {
+            return null;
+        }
+
+        return new FoodLogEnvelope.AiMetaView(
+                degradedReason,
+                degradedAtUtc,
+                resultFromCache,
+                foodCategory,
+                foodSubCategory,
+                source,
+                basis,
+                lang
+        );
+    }
+
+    private static Boolean booleanOrNull(JsonNode node, String field) {
+        if (node == null || node.isNull()) return null;
+        JsonNode v = node.get(field);
+        if (v == null || v.isNull()) return null;
+        return v.isBoolean() ? v.asBoolean() : null;
     }
 
     private static boolean resolveResultFromCache(JsonNode effective) {
@@ -1192,8 +1299,6 @@ public class FoodLogService {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    ex.getMessage(),
-                    safeMsg(ex),
                     true
             );
             throw ex;
@@ -1213,8 +1318,6 @@ public class FoodLogService {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    ex.getMessage(),
-                    safeMsg(ex),
                     true
             );
             throw ex;
@@ -1222,8 +1325,6 @@ public class FoodLogService {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    "PRECHECK_FAILED",
-                    safeMsg(ex),
                     true
             );
             throw ex;
@@ -1275,8 +1376,6 @@ public class FoodLogService {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    ex.getMessage(),
-                    safeMsg(ex),
                     true
             );
             throw ex;
@@ -1284,8 +1383,6 @@ public class FoodLogService {
             idem.failAndReleaseIfNeeded(
                     userId,
                     requestId,
-                    "INFLIGHT_ACQUIRE_FAILED",
-                    safeMsg(ex),
                     true
             );
             throw ex;

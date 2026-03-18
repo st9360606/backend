@@ -114,6 +114,6 @@ class FoodLogTaskWorkerRateLimitedTest {
         assertThat(log.getLastErrorCode()).isEqualTo("PROVIDER_RATE_LIMITED");
         assertThat(log.getLastErrorMessage()).contains("suggestedRetryAfterSec=34");
 
-        verify(postProcessor, never()).apply(any(), anyString());
+        verify(postProcessor, never()).apply(any(), anyString(), anyString());
     }
 }

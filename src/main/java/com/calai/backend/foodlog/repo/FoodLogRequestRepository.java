@@ -59,24 +59,6 @@ public interface FoodLogRequestRepository extends JpaRepository<FoodLogRequestEn
                @Param("foodLogId") String foodLogId,
                @Param("now") Instant now);
 
-    @Modifying
-    @Query(
-            value = """
-            UPDATE food_log_requests
-            SET status='FAILED',
-                error_code=:code,
-                error_message=:msg,
-                updated_at_utc=:now
-            WHERE user_id=:userId AND request_id=:requestId
-            """,
-            nativeQuery = true
-    )
-    int markFailed(@Param("userId") Long userId,
-                   @Param("requestId") String requestId,
-                   @Param("code") String code,
-                   @Param("msg") String msg,
-                   @Param("now") Instant now);
-
     /** 失敗時可選擇釋放（讓同 requestId 可重送重做） */
     @Modifying
     @Query(

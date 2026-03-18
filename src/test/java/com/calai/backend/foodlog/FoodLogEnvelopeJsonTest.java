@@ -38,6 +38,9 @@ class FoodLogEnvelopeJsonTest {
                         "UNKNOWN_FOOD",
                         null, // foodCategory
                         null, // foodSubCategory
+                        "model could not confidently identify the food", // _reasoning
+                        null, // labelMeta
+                        null, // aiMeta
                         new FoodLogEnvelope.Source(
                                 "ALBUM",
                                 "GEMINI",
@@ -66,5 +69,8 @@ class FoodLogEnvelopeJsonTest {
         // Source 新欄位驗收
         assertThat(json).contains("\"source\"");
         assertThat(json).contains("\"resolvedBy\"");
+
+        // 新增欄位驗收
+        assertThat(json).contains("\"_reasoning\"");
     }
 }
