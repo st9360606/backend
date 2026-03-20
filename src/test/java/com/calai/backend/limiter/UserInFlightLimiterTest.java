@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.service.limiter;
 
-import com.calai.backend.foodlog.web.TooManyInFlightException;
+import com.calai.backend.foodlog.web.error.TooManyInFlightException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;

@@ -6,7 +6,7 @@ import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.controller.FoodLogController;
 import com.calai.backend.foodlog.controller.FoodLogImageController;
 import com.calai.backend.foodlog.service.FoodLogService;
-import com.calai.backend.foodlog.web.FoodLogExceptionAdvice;
+import com.calai.backend.foodlog.web.advice.FoodLogExceptionAdvice;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;

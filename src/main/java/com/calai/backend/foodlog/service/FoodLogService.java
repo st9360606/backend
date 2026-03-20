@@ -2,10 +2,10 @@ package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.barcode.*;
-import com.calai.backend.foodlog.config.FoodLogTierResolver;
+import com.calai.backend.foodlog.quota.support.DegradeLevelToModelTierResolver;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.mapper.OffCategoryResolver;
-import com.calai.backend.foodlog.mapper.OffEffectiveBuilder;
+import com.calai.backend.foodlog.barcode.off.OpenFoodFactsCategoryResolver;
+import com.calai.backend.foodlog.barcode.off.OpenFoodFactsEffectiveBuilder;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
@@ -23,10 +23,10 @@ import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
-import com.calai.backend.foodlog.task.ProviderClient;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
-import com.calai.backend.foodlog.web.ModelRefusedException;
+import com.calai.backend.foodlog.web.error.ModelRefusedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
-import com.calai.backend.foodlog.service.cleanup.StorageCleanup;
+import com.calai.backend.foodlog.storage.support.StorageCleanup;
 import java.io.InputStream;
 import java.io.PushbackInputStream;
 import java.math.BigDecimal;
@@ -45,9 +45,9 @@ import java.util.Optional;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import com.calai.backend.foodlog.web.RateLimitedException;
-import com.calai.backend.foodlog.web.TooManyInFlightException;
-import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.web.error.RateLimitedException;
+import com.calai.backend.foodlog.web.error.TooManyInFlightException;
+import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -90,7 +90,7 @@ public class FoodLogService {
     private final ImageBlobService blobService;
     private final UserInFlightLimiter inFlight;
     private final UserRateLimiter rateLimiter;
-    private final EffectivePostProcessor postProcessor;
+    private final FoodLogEffectivePostProcessor postProcessor;
     private final ClientActionMapper clientActionMapper;
     private final Clock clock;
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
@@ -659,7 +659,7 @@ public class FoodLogService {
                 );
             }
 
-            if (!OffEffectiveBuilder.hasUsableNutrition(r.off())) {
+            if (!OpenFoodFactsEffectiveBuilder.hasUsableNutrition(r.off())) {
                 String failRaw = firstNonBlank(r.barcodeRaw(), bcRaw);
                 String failNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
 
@@ -753,7 +753,7 @@ public class FoodLogService {
                     : off.productName();
             eff.put("foodName", name);
 
-            String basis = OffEffectiveBuilder.applyPortion(eff, off, true);
+            String basis = OpenFoodFactsEffectiveBuilder.applyPortion(eff, off, true);
 
             BarcodePortionCanonicalizer.canonicalize(eff, off, basis);
 
@@ -762,14 +762,14 @@ public class FoodLogService {
 
             eff.putArray("warnings");
 
-            boolean hasCoreNutrition = OffEffectiveBuilder.hasCoreNutrition(off);
+            boolean hasCoreNutrition = OpenFoodFactsEffectiveBuilder.hasCoreNutrition(off);
             eff.put("confidence", hasCoreNutrition ? 0.98 : 0.92);
 
             if (!hasCoreNutrition) {
                 eff.withArray("warnings").add(FoodLogWarning.LOW_CONFIDENCE.name());
             }
 
-            OffCategoryResolver.Resolved resolvedCategory = OffCategoryResolver.resolve(off);
+            OpenFoodFactsCategoryResolver.Resolved resolvedCategory = OpenFoodFactsCategoryResolver.resolve(off);
 
             ObjectNode aiMeta = ensureObj(eff, "aiMeta");
             aiMeta.put("barcodeRaw", resolvedRaw);
@@ -1530,7 +1530,7 @@ public class FoodLogService {
             return "BARCODE";
         }
 
-        ModelTier mt = FoodLogTierResolver.resolve(e.getDegradeLevel());
+        ModelTier mt = DegradeLevelToModelTierResolver.resolve(e.getDegradeLevel());
         return (mt == null) ? null : mt.name();
     }
 

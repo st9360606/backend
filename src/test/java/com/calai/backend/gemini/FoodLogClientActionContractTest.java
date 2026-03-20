@@ -2,7 +2,7 @@ package com.calai.backend.gemini;
 
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
-import com.calai.backend.foodlog.task.FoodLogTaskWorker;
+import com.calai.backend.foodlog.job.worker.FoodLogTaskWorker;
 
 import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.JsonNode;

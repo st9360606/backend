@@ -2,7 +2,11 @@ package com.calai.backend.foodlog.task;
 
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.job.worker.FoodLogTaskWorker;
 import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.provider.routing.ProviderRouter;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
@@ -32,10 +36,13 @@ class FoodLogTaskWorkerRateLimitedTest {
 
     @Mock FoodLogTaskRepository taskRepo;
     @Mock FoodLogRepository logRepo;
-    @Mock ProviderRouter router;
+    @Mock
+    ProviderRouter router;
     @Mock StorageService storage;
-    @Mock EffectivePostProcessor postProcessor;
-    @Mock ProviderClient providerClient;
+    @Mock
+    FoodLogEffectivePostProcessor postProcessor;
+    @Mock
+    ProviderClient providerClient;
     @Mock PlatformTransactionManager txManager;
 
     @Test

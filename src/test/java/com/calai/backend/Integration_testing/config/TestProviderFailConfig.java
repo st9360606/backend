@@ -2,8 +2,8 @@ package com.calai.backend.Integration_testing.config;
 
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.ProviderClient;
-import com.calai.backend.foodlog.task.ProviderRouter;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
+import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;

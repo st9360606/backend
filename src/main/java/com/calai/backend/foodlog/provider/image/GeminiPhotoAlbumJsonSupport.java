@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.provider.image;
 
-import com.calai.backend.foodlog.provider.GeminiEffectiveJsonSupport;
+import com.calai.backend.foodlog.provider.gemini.support.GeminiEffectiveJsonSupport;
 import com.calai.backend.foodlog.unit.NutritionBasis;
 import com.calai.backend.foodlog.unit.QuantityUnit;
 import com.fasterxml.jackson.databind.JsonNode;

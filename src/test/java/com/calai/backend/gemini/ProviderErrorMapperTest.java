@@ -1,6 +1,6 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
+import com.calai.backend.foodlog.provider.support.ProviderErrorMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.client.RestClientException;

@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.service.cleanup.StorageCleanup;
+import com.calai.backend.foodlog.storage.support.StorageCleanup;
 import com.calai.backend.foodlog.storage.StorageService;
 import org.junit.jupiter.api.Test;
 

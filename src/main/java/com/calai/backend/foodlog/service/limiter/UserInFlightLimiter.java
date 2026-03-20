@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.service.limiter;
 
-import com.calai.backend.foodlog.web.TooManyInFlightException;
+import com.calai.backend.foodlog.web.error.TooManyInFlightException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;

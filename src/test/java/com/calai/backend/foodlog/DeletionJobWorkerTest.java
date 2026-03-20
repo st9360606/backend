@@ -6,7 +6,7 @@ import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.service.ImageBlobService;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.DeletionJobWorker;
+import com.calai.backend.foodlog.job.worker.DeletionJobWorker;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;

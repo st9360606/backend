@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.service.limiter;
 
 import com.calai.backend.entitlement.service.EntitlementService;
-import com.calai.backend.foodlog.web.RateLimitedException;
+import com.calai.backend.foodlog.web.error.RateLimitedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -9,7 +9,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Instant;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

@@ -1,8 +1,8 @@
 package com.calai.backend.gemini;
 
 import com.calai.backend.foodlog.provider.config.GeminiProperties;
-import com.calai.backend.foodlog.provider.GeminiProviderClient;
-import com.calai.backend.foodlog.task.ProviderTelemetry;
+import com.calai.backend.foodlog.provider.gemini.GeminiProviderClient;
+import com.calai.backend.foodlog.provider.support.ProviderTelemetry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;

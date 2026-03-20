@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog;
 
-import com.calai.backend.foodlog.task.EffectivePostProcessor;
+import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EffectivePostProcessorDegradeTest extends MySqlContainerBaseTest {
 
     @Autowired
-    EffectivePostProcessor postProcessor;
+    FoodLogEffectivePostProcessor postProcessor;
 
     @Autowired
     ObjectMapper om;

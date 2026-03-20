@@ -1,8 +1,8 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.storage.LocalDiskStorageService;
-import com.calai.backend.foodlog.task.LocalTempBlobCleaner;
-import com.calai.backend.foodlog.task.config.LocalTempBlobCleanerProperties;
+import com.calai.backend.foodlog.job.cleanup.LocalTempBlobCleaner;
+import com.calai.backend.foodlog.job.config.LocalTempBlobCleanerProperties;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

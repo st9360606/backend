@@ -6,7 +6,7 @@ import com.calai.backend.foodlog.quota.model.CooldownReason;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.quota.repo.UserAiQuotaStateRepository;
 import com.calai.backend.foodlog.quota.web.CooldownActiveException;
-import com.calai.backend.foodlog.web.SubscriptionRequiredException;
+import com.calai.backend.foodlog.web.error.SubscriptionRequiredException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;

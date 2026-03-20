@@ -15,7 +15,7 @@ public class GeminiProperties {
     /** 預設 Gemini API base url */
     private String baseUrl = "https://generativelanguage.googleapis.com";
 
-    /** 預設 model（保底用；實際 PHOTO/TEXT 仍以 AiModelRouter 為主） */
+    /** 預設 model（保底用；實際 PHOTO/TEXT 仍以 AiModelTierRouter 為主） */
     private String model = "gemini-3.1-flash-lite-preview";
 
     /** 用環境變數帶入：GEMINI_API_KEY */

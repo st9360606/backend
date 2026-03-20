@@ -2,8 +2,8 @@ package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.repo.ImageBlobRepository;
 import com.calai.backend.foodlog.storage.LocalDiskStorageService;
-import com.calai.backend.foodlog.task.Sha256BlobOrphanCleaner;
-import com.calai.backend.foodlog.task.config.Sha256BlobOrphanCleanerProperties;
+import com.calai.backend.foodlog.job.cleanup.Sha256BlobOrphanCleaner;
+import com.calai.backend.foodlog.job.config.Sha256BlobOrphanCleanerProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

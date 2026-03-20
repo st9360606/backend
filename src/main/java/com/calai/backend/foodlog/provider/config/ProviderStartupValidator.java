@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.provider.config;
 
-import com.calai.backend.foodlog.task.ProviderClient;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

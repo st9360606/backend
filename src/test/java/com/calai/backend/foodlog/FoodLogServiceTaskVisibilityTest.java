@@ -18,8 +18,8 @@ import com.calai.backend.foodlog.service.ImageBlobService;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.EffectivePostProcessor;
-import com.calai.backend.foodlog.task.ProviderClient;
+import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,7 +45,8 @@ class FoodLogServiceTaskVisibilityTest {
     @Mock ImageBlobService imageBlobService;
     @Mock UserInFlightLimiter inFlight;
     @Mock UserRateLimiter rateLimiter;
-    @Mock EffectivePostProcessor postProcessor;
+    @Mock
+    FoodLogEffectivePostProcessor postProcessor;
     @Mock ClientActionMapper clientActionMapper;
     @Mock BarcodeLookupService barcodeLookupService;
     @Mock AbuseGuardService abuseGuard;

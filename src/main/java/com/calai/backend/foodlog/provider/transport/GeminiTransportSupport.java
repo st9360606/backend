@@ -1,10 +1,10 @@
 package com.calai.backend.foodlog.provider.transport;
 
-import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
+import com.calai.backend.foodlog.provider.support.ProviderErrorMapper;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
 import com.calai.backend.foodlog.provider.config.GeminiEnabledComponent;
 import com.calai.backend.foodlog.provider.config.GeminiProperties;
-import com.calai.backend.foodlog.web.ModelRefusedException;
+import com.calai.backend.foodlog.web.error.ModelRefusedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;

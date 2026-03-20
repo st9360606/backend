@@ -1,7 +1,7 @@
 package com.calai.backend.testsupport;
 
-import com.calai.backend.foodlog.task.ProviderClient;
-import com.calai.backend.foodlog.task.ProviderRouter;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
+import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

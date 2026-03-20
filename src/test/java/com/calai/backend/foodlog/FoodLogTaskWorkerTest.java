@@ -6,10 +6,10 @@ import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.EffectivePostProcessor;
-import com.calai.backend.foodlog.task.FoodLogTaskWorker;
-import com.calai.backend.foodlog.task.ProviderClient;
-import com.calai.backend.foodlog.task.ProviderRouter;
+import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.job.worker.FoodLogTaskWorker;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
+import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -53,7 +53,7 @@ class FoodLogTaskWorkerTest {
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         StorageService storage = Mockito.mock(StorageService.class);
-        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -93,7 +93,7 @@ class FoodLogTaskWorkerTest {
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
-        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -144,7 +144,7 @@ class FoodLogTaskWorkerTest {
         FoodLogRepository logRepo = Mockito.mock(FoodLogRepository.class);
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         StorageService storage = Mockito.mock(StorageService.class);
-        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -192,7 +192,7 @@ class FoodLogTaskWorkerTest {
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
-        EffectivePostProcessor postProcessor = Mockito.mock(EffectivePostProcessor.class);
+        FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();

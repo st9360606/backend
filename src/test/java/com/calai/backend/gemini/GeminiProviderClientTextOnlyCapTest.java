@@ -1,10 +1,10 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.config.AiModelRouter;
+import com.calai.backend.foodlog.provider.routing.AiModelTierRouter;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.model.ModelMode;
-import com.calai.backend.foodlog.provider.GeminiJsonParsingSupport;
-import com.calai.backend.foodlog.provider.GeminiProviderClient;
+import com.calai.backend.foodlog.provider.gemini.support.GeminiJsonParsingSupport;
+import com.calai.backend.foodlog.provider.gemini.GeminiProviderClient;
 import com.calai.backend.foodlog.provider.config.GeminiProperties;
 import com.calai.backend.foodlog.provider.image.GeminiPhotoAlbumProcessor;
 import com.calai.backend.foodlog.provider.prompt.GeminiPromptFactory;
@@ -12,7 +12,7 @@ import com.calai.backend.foodlog.provider.transport.GeminiRequestBuilder;
 import com.calai.backend.foodlog.provider.transport.GeminiTransportSupport;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.ProviderTelemetry;
+import com.calai.backend.foodlog.provider.support.ProviderTelemetry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import org.junit.jupiter.api.Test;
@@ -112,9 +112,9 @@ class GeminiProviderClientTextOnlyCapTest {
 
         ProviderTelemetry telemetry = mock(ProviderTelemetry.class);
 
-        AiModelRouter router = mock(AiModelRouter.class);
+        AiModelTierRouter router = mock(AiModelTierRouter.class);
         when(router.resolveOrThrow(eq(ModelTier.MODEL_TIER_HIGH), eq(ModelMode.VISION)))
-                .thenReturn(new AiModelRouter.Resolved("GEMINI", "gemini-vision"));
+                .thenReturn(new AiModelTierRouter.Resolved("GEMINI", "gemini-vision"));
 
         GeminiRequestBuilder requestBuilder = new GeminiRequestBuilder(om, props);
         GeminiTransportSupport transportSupport = new GeminiTransportSupport(http, props, requestBuilder);

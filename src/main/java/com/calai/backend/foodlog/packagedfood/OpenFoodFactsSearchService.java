@@ -2,7 +2,7 @@ package com.calai.backend.foodlog.packagedfood;
 
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper;
 import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
-import com.calai.backend.foodlog.mapper.OffEffectiveBuilder;
+import com.calai.backend.foodlog.barcode.off.OpenFoodFactsEffectiveBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -142,7 +142,7 @@ public class OpenFoodFactsSearchService {
             for (JsonNode p : products) {
                 OffResult off = OpenFoodFactsMapper.mapProduct(p, langKey);
                 if (off == null) continue;
-                if (!OffEffectiveBuilder.hasCoreNutrition(off)) continue;
+                if (!OpenFoodFactsEffectiveBuilder.hasCoreNutrition(off)) continue;
 
                 String productName = firstNonBlank(
                         text(p, "product_name_" + safeLang),
@@ -225,7 +225,7 @@ public class OpenFoodFactsSearchService {
         score += searchPolicy.sizeSimilarityScore(candSize, offQuantity) * 0.05;
 
         // 8) nutrition / package bonus
-        if (OffEffectiveBuilder.hasCoreNutrition(off)) score += 0.10;
+        if (OpenFoodFactsEffectiveBuilder.hasCoreNutrition(off)) score += 0.10;
         if (hasServingOrPackageInfo(off)) score += 0.05;
 
         return Math.min(score, 0.99);

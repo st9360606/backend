@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.provider.label;
 
-import com.calai.backend.foodlog.provider.GeminiEffectiveJsonSupport;
+import com.calai.backend.foodlog.provider.gemini.support.GeminiEffectiveJsonSupport;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

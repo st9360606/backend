@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.service.limiter;
 
 import com.calai.backend.entitlement.service.EntitlementService;
-import com.calai.backend.foodlog.web.RateLimitedException;
+import com.calai.backend.foodlog.web.error.RateLimitedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;

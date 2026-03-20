@@ -1,17 +1,21 @@
 package com.calai.backend.foodlog.provider.image;
 
-import com.calai.backend.foodlog.config.AiModelRouter;
+import com.calai.backend.foodlog.provider.gemini.support.GeminiEffectiveJsonSupport;
+import com.calai.backend.foodlog.provider.gemini.support.GeminiJsonParsingSupport;
+import com.calai.backend.foodlog.provider.gemini.GeminiModeProcessor;
+import com.calai.backend.foodlog.provider.gemini.routing.GeminiVisionRoutePolicy;
+import com.calai.backend.foodlog.provider.routing.AiModelTierRouter;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
-import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
+import com.calai.backend.foodlog.provider.support.ProviderErrorMapper;
 import com.calai.backend.foodlog.model.ModelMode;
-import com.calai.backend.foodlog.provider.*;
 import com.calai.backend.foodlog.provider.config.GeminiEnabledComponent;
 import com.calai.backend.foodlog.provider.prompt.GeminiPromptFactory;
 import com.calai.backend.foodlog.provider.transport.GeminiTransportSupport;
+import com.calai.backend.foodlog.provider.util.ImageMimeResolver;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.ProviderClient;
-import com.calai.backend.foodlog.task.ProviderTelemetry;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
+import com.calai.backend.foodlog.provider.support.ProviderTelemetry;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,7 +49,7 @@ public class GeminiPhotoAlbumProcessor implements GeminiModeProcessor {
     private final GeminiPromptFactory promptFactory;
     private final ObjectMapper om;
     private final ProviderTelemetry telemetry;
-    private final AiModelRouter modelRouter;
+    private final AiModelTierRouter modelRouter;
 
     public GeminiPhotoAlbumProcessor(
             GeminiTransportSupport transportSupport,
@@ -53,7 +57,7 @@ public class GeminiPhotoAlbumProcessor implements GeminiModeProcessor {
             GeminiPromptFactory promptFactory,
             ObjectMapper om,
             ProviderTelemetry telemetry,
-            AiModelRouter modelRouter
+            AiModelTierRouter modelRouter
     ) {
         this.transportSupport = transportSupport;
         this.jsonParsingSupport = jsonParsingSupport;
@@ -239,7 +243,7 @@ public class GeminiPhotoAlbumProcessor implements GeminiModeProcessor {
 
     private String resolveModelIdVision(FoodLogEntity entity) {
         ModelTier tier = resolveTierFromDegradeLevel(entity.getDegradeLevel());
-        AiModelRouter.Resolved resolved = modelRouter.resolveOrThrow(tier, ModelMode.VISION);
+        AiModelTierRouter.Resolved resolved = modelRouter.resolveOrThrow(tier, ModelMode.VISION);
         return resolved.modelId();
     }
 

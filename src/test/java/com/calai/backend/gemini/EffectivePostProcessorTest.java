@@ -1,7 +1,7 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.task.EffectivePostProcessor;
-import com.calai.backend.foodlog.task.NutritionSanityChecker;
+import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.processing.nutrition.NutritionSanityChecker;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -14,7 +14,7 @@ public class EffectivePostProcessorTest {
 
     private final ObjectMapper om = new ObjectMapper();
     private final NutritionSanityChecker sanity = new NutritionSanityChecker();
-    private final EffectivePostProcessor pp = new EffectivePostProcessor(sanity);
+    private final FoodLogEffectivePostProcessor pp = new FoodLogEffectivePostProcessor(sanity);
 
     @Test
     void apply_should_keep_healthScore_and_add_healthScoreMeta_when_healthScore_present() throws Exception {
@@ -88,7 +88,7 @@ public class EffectivePostProcessorTest {
     @Test
     void apply_should_use_actual_provider_as_meta_source() {
         NutritionSanityChecker checker = new NutritionSanityChecker();
-        EffectivePostProcessor processor = new EffectivePostProcessor(checker);
+        FoodLogEffectivePostProcessor processor = new FoodLogEffectivePostProcessor(checker);
 
         ObjectNode eff = JsonNodeFactory.instance.objectNode();
         eff.put("foodName", "Test");

@@ -3,7 +3,7 @@ package com.calai.backend.Integration_testing;
 import com.calai.backend.Integration_testing.config.TestAuthConfig;
 import com.calai.backend.foodlog.quota.repo.UserAiQuotaStateRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
-import com.calai.backend.foodlog.task.FoodLogTaskWorker;
+import com.calai.backend.foodlog.job.worker.FoodLogTaskWorker;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

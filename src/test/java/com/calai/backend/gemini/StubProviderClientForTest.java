@@ -2,7 +2,7 @@ package com.calai.backend.gemini;
 
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.ProviderClient;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 

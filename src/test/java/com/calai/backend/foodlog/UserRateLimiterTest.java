@@ -2,13 +2,12 @@ package com.calai.backend.foodlog;
 
 import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
-import com.calai.backend.foodlog.web.RateLimitedException;
+import com.calai.backend.foodlog.web.error.RateLimitedException;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Instant;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;

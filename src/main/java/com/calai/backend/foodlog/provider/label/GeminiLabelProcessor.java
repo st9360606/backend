@@ -1,21 +1,21 @@
 package com.calai.backend.foodlog.provider.label;
 
-import com.calai.backend.foodlog.config.AiModelRouter;
+import com.calai.backend.foodlog.provider.routing.AiModelTierRouter;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
-import com.calai.backend.foodlog.mapper.ProviderErrorMapper;
+import com.calai.backend.foodlog.provider.support.ProviderErrorMapper;
 import com.calai.backend.foodlog.model.ModelMode;
-import com.calai.backend.foodlog.provider.GeminiEffectiveJsonSupport;
-import com.calai.backend.foodlog.provider.GeminiJsonParsingSupport;
-import com.calai.backend.foodlog.provider.GeminiModeProcessor;
-import com.calai.backend.foodlog.provider.GeminiVisionRoutePolicy;
-import com.calai.backend.foodlog.provider.ImageMimeResolver;
+import com.calai.backend.foodlog.provider.gemini.support.GeminiEffectiveJsonSupport;
+import com.calai.backend.foodlog.provider.gemini.support.GeminiJsonParsingSupport;
+import com.calai.backend.foodlog.provider.gemini.GeminiModeProcessor;
+import com.calai.backend.foodlog.provider.gemini.routing.GeminiVisionRoutePolicy;
+import com.calai.backend.foodlog.provider.util.ImageMimeResolver;
 import com.calai.backend.foodlog.provider.config.GeminiEnabledComponent;
 import com.calai.backend.foodlog.provider.prompt.GeminiPromptFactory;
 import com.calai.backend.foodlog.provider.transport.GeminiTransportSupport;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.task.ProviderClient;
-import com.calai.backend.foodlog.task.ProviderTelemetry;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
+import com.calai.backend.foodlog.provider.support.ProviderTelemetry;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +35,7 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
 
     private final ObjectMapper om;
     private final ProviderTelemetry telemetry;
-    private final AiModelRouter modelRouter;
+    private final AiModelTierRouter modelRouter;
     private final GeminiJsonParsingSupport jsonParsingSupport;
     private final GeminiLabelFallbackSupport labelFallbackSupport;
     private final GeminiTransportSupport transportSupport;
@@ -44,7 +44,7 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
     public GeminiLabelProcessor(
             ObjectMapper om,
             ProviderTelemetry telemetry,
-            AiModelRouter modelRouter,
+            AiModelTierRouter modelRouter,
             GeminiJsonParsingSupport jsonParsingSupport,
             GeminiTransportSupport transportSupport,
             GeminiPromptFactory promptFactory
@@ -267,7 +267,7 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
 
     private String resolveModelIdVision(FoodLogEntity entity) {
         ModelTier tier = resolveTierFromDegradeLevel(entity.getDegradeLevel());
-        AiModelRouter.Resolved r = modelRouter.resolveOrThrow(tier, ModelMode.VISION);
+        AiModelTierRouter.Resolved r = modelRouter.resolveOrThrow(tier, ModelMode.VISION);
         return r.modelId();
     }
 

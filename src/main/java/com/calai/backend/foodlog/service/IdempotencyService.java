@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.repo.FoodLogRequestRepository;
-import com.calai.backend.foodlog.web.RequestInProgressException;
+import com.calai.backend.foodlog.web.error.RequestInProgressException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
