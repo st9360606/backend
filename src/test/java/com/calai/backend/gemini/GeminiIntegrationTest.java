@@ -32,13 +32,13 @@ class GeminiIntegrationTest {
 
         // ✅ model tiers（Map bracket 版）
         r.add("app.ai.model-tiers[MODEL_TIER_HIGH][VISION].provider", () -> "GEMINI");
-        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][VISION].model-id", () -> "gemini-3-flash-preview");
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][VISION].model-id", () -> "gemini-3.1-flash-lite-preview");
 
         r.add("app.ai.model-tiers[MODEL_TIER_LOW][VISION].provider", () -> "GEMINI");
         r.add("app.ai.model-tiers[MODEL_TIER_LOW][VISION].model-id", () -> "gemini-2.5-flash-lite");
 
         r.add("app.ai.model-tiers[MODEL_TIER_HIGH][TEXT].provider", () -> "GEMINI");
-        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][TEXT].model-id", () -> "gemini-3-flash-preview");
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][TEXT].model-id", () -> "gemini-3.1-flash-lite-preview");
 
         r.add("app.ai.model-tiers[MODEL_TIER_LOW][TEXT].provider", () -> "GEMINI");
         r.add("app.ai.model-tiers[MODEL_TIER_LOW][TEXT].model-id", () -> "gemini-2.5-flash-lite");

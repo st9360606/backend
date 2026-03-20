@@ -34,4 +34,4 @@ public record FoodLogErrorResponse(
                 null, null, null, null, null);
     }
 }
-// END CHANGE
+

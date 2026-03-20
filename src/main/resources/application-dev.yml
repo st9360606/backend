@@ -75,8 +75,8 @@ app:
         premium-limit: 15  # trialPremiumLimit
         total-limit: 30    # trialTotalLimit
       paid:
-        premium-limit: 600 # paidPremiumLimit
-        total-limit: 1000  # paidTotalLimit
+        premium-limit: 400 # paidPremiumLimit
+        total-limit: 800  # paidTotalLimit
     abuse-guard:
       enabled: true
       window: 60m
@@ -90,14 +90,14 @@ app:
       MODEL_TIER_HIGH:
         VISION:
           provider: GEMINI
-          modelId: "gemini-3-flash-preview"   # ✅ 修正：不是 gemini-3-flash
+          modelId: "gemini-3.1-flash-lite-preview"
         TEXT:
           provider: GEMINI
-          modelId: "gemini-3-flash-preview"
+          modelId: "gemini-3.1-flash-lite-preview"
       MODEL_TIER_LOW:
         VISION:
           provider: GEMINI
-          modelId: "gemini-2.5-flash-lite"    # ✅ 穩定可用
+          modelId: "gemini-2.5-flash-lite"
         TEXT:
           provider: GEMINI
           modelId: "gemini-2.5-flash-lite"

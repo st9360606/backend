@@ -757,6 +757,9 @@ public class FoodLogService {
 
             BarcodePortionCanonicalizer.canonicalize(eff, off, basis);
 
+            // ✅ 只限 BARCODE：將 nutrients 的 null / 缺值補成 0.0
+            BarcodeNutrientsNormalizer.fillMissingWithZero(eff);
+
             eff.putArray("warnings");
 
             boolean hasCoreNutrition = OffEffectiveBuilder.hasCoreNutrition(off);
@@ -993,19 +996,38 @@ public class FoodLogService {
         if (eff != null && !eff.isNull()) {
             JsonNode n = eff.get("nutrients");
             JsonNode q = eff.get("quantity");
+            boolean barcodeZeroFill = "BARCODE".equalsIgnoreCase(e.getMethod());
+
+            FoodLogEnvelope.Nutrients nutrientsView;
+
+            if (barcodeZeroFill) {
+                // ✅ BARCODE：即使整個 nutrients 缺失，也要回全 0.0
+                nutrientsView = new FoodLogEnvelope.Nutrients(
+                        round1(BarcodeNutrientsNormalizer.readNumber(n, "kcal", true)),
+                        round1(BarcodeNutrientsNormalizer.readNumber(n, "protein", true)),
+                        round1(BarcodeNutrientsNormalizer.readNumber(n, "fat", true)),
+                        round1(BarcodeNutrientsNormalizer.readNumber(n, "carbs", true)),
+                        round1(BarcodeNutrientsNormalizer.readNumber(n, "fiber", true)),
+                        round1(BarcodeNutrientsNormalizer.readNumber(n, "sugar", true)),
+                        round1(BarcodeNutrientsNormalizer.readNumber(n, "sodium", true))
+                );
+            } else {
+                // ✅ 非 BARCODE：維持原本行為
+                nutrientsView = (n == null) ? null : new FoodLogEnvelope.Nutrients(
+                        round1(doubleOrNull(n, "kcal")),
+                        round1(doubleOrNull(n, "protein")),
+                        round1(doubleOrNull(n, "fat")),
+                        round1(doubleOrNull(n, "carbs")),
+                        round1(doubleOrNull(n, "fiber")),
+                        round1(doubleOrNull(n, "sugar")),
+                        round1(doubleOrNull(n, "sodium"))
+                );
+            }
 
             nr = new FoodLogEnvelope.NutritionResult(
-                    textOrNull(eff, "foodName"),
+                    FoodLogDisplayNameResolver.resolve(e.getMethod(), degradedReason, eff),
                     q == null ? null : new FoodLogEnvelope.Quantity(doubleOrNull(q, "value"), textOrNull(q, "unit")),
-                    n == null ? null : new FoodLogEnvelope.Nutrients(
-                            round1(doubleOrNull(n, "kcal")),
-                            round1(doubleOrNull(n, "protein")),
-                            round1(doubleOrNull(n, "fat")),
-                            round1(doubleOrNull(n, "carbs")),
-                            round1(doubleOrNull(n, "fiber")),
-                            round1(doubleOrNull(n, "sugar")),
-                            round1(doubleOrNull(n, "sodium"))
-                    ),
+                    nutrientsView,
                     intOrNull(eff, "healthScore"),
                     doubleOrNull(eff, "confidence"),
                     warnings,

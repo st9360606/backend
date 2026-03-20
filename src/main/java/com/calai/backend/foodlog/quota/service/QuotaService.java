@@ -36,10 +36,10 @@ public class QuotaService {
     @Value("${app.ai.quota.trial.total-limit:30}")
     private int trialTotalLimit;
 
-    @Value("${app.ai.quota.paid.premium-limit:600}")
+    @Value("${app.ai.quota.paid.premium-limit:400}")
     private int paidPremiumLimit;
 
-    @Value("${app.ai.quota.paid.total-limit:1000}")
+    @Value("${app.ai.quota.paid.total-limit:800}")
     private int paidTotalLimit;
 
     private static final DateTimeFormatter DAY_KEY_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");

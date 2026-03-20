@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.service;
 
+import com.calai.backend.foodlog.barcode.BarcodeNutrientsNormalizer;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.model.FoodLogStatus;
@@ -116,7 +117,19 @@ public class FoodLogHistoryService {
             reasoning = textOrNull(eff.get("_reasoning"));
 
             JsonNode n = eff.get("nutrients");
-            if (n != null && n.isObject()) {
+            boolean barcodeZeroFill = "BARCODE".equalsIgnoreCase(e.getMethod());
+
+            if (barcodeZeroFill) {
+                // ✅ BARCODE：即使 nutrients 不存在，也補全 0.0
+                kcal = BarcodeNutrientsNormalizer.readNumber(n, "kcal", true);
+                protein = BarcodeNutrientsNormalizer.readNumber(n, "protein", true);
+                fat = BarcodeNutrientsNormalizer.readNumber(n, "fat", true);
+                carbs = BarcodeNutrientsNormalizer.readNumber(n, "carbs", true);
+                fiber = BarcodeNutrientsNormalizer.readNumber(n, "fiber", true);
+                sugar = BarcodeNutrientsNormalizer.readNumber(n, "sugar", true);
+                sodium = BarcodeNutrientsNormalizer.readNumber(n, "sodium", true);
+            } else if (n != null && n.isObject()) {
+                // ✅ 非 BARCODE：維持原本行為
                 kcal = doubleOrNull(n.get("kcal"));
                 protein = doubleOrNull(n.get("protein"));
                 fat = doubleOrNull(n.get("fat"));
@@ -206,6 +219,8 @@ public class FoodLogHistoryService {
                         aiMeta.lang()
                 );
             }
+            // ✅ 最終顯示名稱：與 toEnvelope() 保持一致
+            foodName = FoodLogDisplayNameResolver.resolve(e.getMethod(), degradedReason, eff);
         }
 
         return new FoodLogListResponse.Item(
