@@ -88,7 +88,10 @@ public final class BarcodeNutrientsNormalizer {
 
         if (v.isNumber()) {
             double d = v.asDouble();
-            return Double.isFinite(d) ? d : (zeroIfMissing ? 0.0 : null);
+            if (Double.isFinite(d)) {
+                return d;
+            }
+            return zeroIfMissing ? 0.0 : null;
         }
 
         if (v.isTextual()) {
@@ -98,7 +101,10 @@ public final class BarcodeNutrientsNormalizer {
             }
             try {
                 double d = Double.parseDouble(raw.trim());
-                return Double.isFinite(d) ? d : (zeroIfMissing ? 0.0 : null);
+                if (Double.isFinite(d)) {
+                    return d;
+                }
+                return zeroIfMissing ? 0.0 : null;
             } catch (NumberFormatException ignore) {
                 return zeroIfMissing ? 0.0 : null;
             }
