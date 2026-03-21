@@ -1,8 +1,9 @@
 package com.calai.backend.foodlog.service;
 
-import com.calai.backend.foodlog.barcode.BarcodeNutrientsNormalizer;
+import com.calai.backend.foodlog.barcode.normalize.BarcodeNutrientsNormalizer;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
+import com.calai.backend.foodlog.mapper.FoodLogDisplayNameResolver;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;

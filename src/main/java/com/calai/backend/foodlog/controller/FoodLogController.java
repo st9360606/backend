@@ -2,7 +2,7 @@ package com.calai.backend.foodlog.controller;
 
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.common.web.RequestIdFilter;
-import com.calai.backend.foodlog.barcode.OpenFoodFactsLang;
+import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsLang;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;

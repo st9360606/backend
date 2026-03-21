@@ -6,7 +6,7 @@ import com.calai.backend.foodlog.controller.FoodLogImageController;
 import com.calai.backend.foodlog.dto.FoodLogErrorResponse;
 import com.calai.backend.foodlog.dto.ModelRefusedResponse;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
-import com.calai.backend.foodlog.quota.web.CooldownActiveException;
+import com.calai.backend.foodlog.web.error.CooldownActiveException;
 import com.calai.backend.foodlog.web.error.*;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;

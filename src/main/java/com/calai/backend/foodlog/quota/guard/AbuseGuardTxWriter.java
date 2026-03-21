@@ -4,7 +4,7 @@ import com.calai.backend.foodlog.quota.config.AbuseGuardProperties;
 import com.calai.backend.foodlog.quota.entity.UserAiQuotaStateEntity;
 import com.calai.backend.foodlog.quota.model.CooldownReason;
 import com.calai.backend.foodlog.quota.repo.UserAiQuotaStateRepository;
-import com.calai.backend.foodlog.quota.web.CooldownActiveException;
+import com.calai.backend.foodlog.web.error.CooldownActiveException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;

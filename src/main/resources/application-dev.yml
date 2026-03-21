@@ -158,9 +158,9 @@ app:
       negative-ttl: "PT12H"         # not found: 6–24小時（你可調）
       purge-delay: "PT1H"
     name-search:
-      page-size: 8
-      accept-min-score: 0.78
-      low-confidence-score: 0.90
+
+
+
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000

@@ -1,6 +1,6 @@
 package com.calai.backend.foodlog.model;
 
-import com.calai.backend.foodlog.util.FoodCategoryUtil;
+import com.calai.backend.foodlog.processing.category.FoodCategoryUtil;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;

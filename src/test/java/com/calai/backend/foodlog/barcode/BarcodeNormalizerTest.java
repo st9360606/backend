@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.barcode;
 
+import com.calai.backend.foodlog.barcode.normalize.BarcodeNormalizer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;

@@ -2,7 +2,7 @@ package com.calai.backend.foodlog.barcode;
 
 import com.calai.backend.Integration_testing.config.TestAuthConfig;
 import com.calai.backend.foodlog.barcode.BarcodeLookupService.LookupResult;
-import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
+import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.mapper;
 
-import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
-import com.calai.backend.foodlog.barcode.off.OpenFoodFactsCategoryResolver;
+import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
+import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsCategoryResolver;
 import com.calai.backend.foodlog.model.FoodCategory;
 import com.calai.backend.foodlog.model.FoodSubCategory;
 import org.junit.jupiter.api.Test;

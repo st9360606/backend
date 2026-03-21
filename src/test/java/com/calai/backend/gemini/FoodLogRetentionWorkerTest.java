@@ -4,7 +4,7 @@ import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
-import com.calai.backend.foodlog.retention.FoodLogRetentionWorker;
+import com.calai.backend.foodlog.job.retention.FoodLogRetentionWorker;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;

@@ -1,7 +1,15 @@
 package com.calai.backend.foodlog.barcode;
 
-import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper;
-import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
+import com.calai.backend.foodlog.barcode.cache.BarcodeCacheStore;
+import com.calai.backend.foodlog.barcode.cache.BarcodeLookupCacheEntity;
+import com.calai.backend.foodlog.barcode.lock.RedisBarcodeLock;
+import com.calai.backend.foodlog.barcode.openfoodfacts.error.OffHttpException;
+import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper;
+import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
+import com.calai.backend.foodlog.barcode.normalize.BarcodeNormalizer;
+import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsClient;
+import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsFields;
+import com.calai.backend.foodlog.barcode.openfoodfacts.rate.OffGlobalRateLimiterRedis;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;

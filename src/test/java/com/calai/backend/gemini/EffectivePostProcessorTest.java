@@ -1,6 +1,6 @@
 package com.calai.backend.gemini;
 
-import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.processing.nutrition.NutritionSanityChecker;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.ObjectMapper;

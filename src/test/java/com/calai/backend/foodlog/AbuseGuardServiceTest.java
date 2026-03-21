@@ -3,7 +3,7 @@ package com.calai.backend.foodlog;
 import com.calai.backend.foodlog.quota.config.AbuseGuardProperties;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardTxWriter;
-import com.calai.backend.foodlog.quota.web.CooldownActiveException;
+import com.calai.backend.foodlog.web.error.CooldownActiveException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

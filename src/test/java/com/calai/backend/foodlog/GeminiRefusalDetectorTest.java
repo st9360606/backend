@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
-import com.calai.backend.foodlog.provider.transport.GeminiRefusalDetector;
+import com.calai.backend.foodlog.provider.gemini.transport.GeminiRefusalDetector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

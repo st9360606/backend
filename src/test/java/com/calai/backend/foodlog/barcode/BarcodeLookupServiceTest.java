@@ -1,5 +1,9 @@
 package com.calai.backend.foodlog.barcode;
 
+import com.calai.backend.foodlog.barcode.cache.BarcodeLookupCacheEntity;
+import com.calai.backend.foodlog.barcode.cache.BarcodeLookupCacheRepository;
+import com.calai.backend.foodlog.barcode.normalize.BarcodeNormalizer;
+import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -18,10 +22,12 @@ import static org.mockito.Mockito.*;
 class BarcodeLookupServiceTest {
 
     @Autowired BarcodeLookupService svc;
-    @Autowired BarcodeLookupCacheRepository repo;
+    @Autowired
+    BarcodeLookupCacheRepository repo;
     @Autowired ObjectMapper om;
 
-    @MockitoBean OpenFoodFactsClient offClient;
+    @MockitoBean
+    OpenFoodFactsClient offClient;
 
     @Test
     void cache_hit_should_not_call_off() {

@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.provider.gemini;
 
 import com.calai.backend.foodlog.entity.FoodLogEntity;
+import com.calai.backend.foodlog.provider.gemini.spi.GeminiModeProcessor;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 

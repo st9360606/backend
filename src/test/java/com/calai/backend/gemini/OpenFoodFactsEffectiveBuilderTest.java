@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.mapper;
 
-import com.calai.backend.foodlog.barcode.mapper.OpenFoodFactsMapper.OffResult;
-import com.calai.backend.foodlog.barcode.off.OpenFoodFactsEffectiveBuilder;
+import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
+import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsEffectiveBuilder;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.barcode;
 
+import com.calai.backend.foodlog.barcode.normalize.BarcodeNutrientsNormalizer;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DisplayName;

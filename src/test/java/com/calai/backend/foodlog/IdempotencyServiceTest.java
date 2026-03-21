@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog;
 
 import com.calai.backend.foodlog.repo.FoodLogRequestRepository;
-import com.calai.backend.foodlog.service.IdempotencyService;
+import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.web.error.RequestInProgressException;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;

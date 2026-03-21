@@ -9,7 +9,7 @@ import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;

@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.provider.config;
 
-import com.calai.backend.foodlog.provider.gemini.GeminiModeProcessor;
+import com.calai.backend.foodlog.provider.gemini.spi.GeminiModeProcessor;
+import com.calai.backend.foodlog.provider.gemini.config.GeminiProperties;
 import com.calai.backend.foodlog.provider.routing.AiModelTierRouter;
 import com.calai.backend.foodlog.model.ModelMode;
 import com.calai.backend.foodlog.provider.gemini.GeminiProviderClient;

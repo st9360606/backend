@@ -4,7 +4,7 @@ import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.job.worker.FoodLogTaskWorker;
 import com.calai.backend.foodlog.model.FoodLogStatus;
-import com.calai.backend.foodlog.processing.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
