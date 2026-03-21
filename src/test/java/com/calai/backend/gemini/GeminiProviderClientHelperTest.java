@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class GeminiLabelFallbackSupportHelperTest {
+class GeminiProviderClientHelperTest {
 
     @Test
     void extractSodiumMgFromText_should_convert_g_to_mg() {

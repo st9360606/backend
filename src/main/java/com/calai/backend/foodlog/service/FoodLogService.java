@@ -1,64 +1,41 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
-import com.calai.backend.foodlog.barcode.*;
-import com.calai.backend.foodlog.barcode.normalize.BarcodeNormalizer;
-import com.calai.backend.foodlog.barcode.normalize.BarcodeNutrientsNormalizer;
-import com.calai.backend.foodlog.barcode.normalize.BarcodePortionCanonicalizer;
-import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsLang;
-import com.calai.backend.foodlog.barcode.openfoodfacts.error.OffHttpException;
-import com.calai.backend.foodlog.barcode.openfoodfacts.error.OffParseException;
-import com.calai.backend.foodlog.mapper.FoodLogDisplayNameResolver;
-import com.calai.backend.foodlog.quota.support.DegradeLevelToModelTierResolver;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsCategoryResolver;
-import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsEffectiveBuilder;
-import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
-import com.calai.backend.foodlog.model.FoodLogStatus;
-import com.calai.backend.foodlog.model.ProviderRefuseReason;
-import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
-import com.calai.backend.foodlog.image.ImageSniffer;
-import com.calai.backend.foodlog.mapper.ClientActionMapper;
-import com.calai.backend.foodlog.model.ClientAction;
-import com.calai.backend.foodlog.quota.model.ModelTier;
+import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
+import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.service.QuotaService;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.service.barcode.FoodLogBarcodeService;
+import com.calai.backend.foodlog.service.command.FoodLogRetryService;
+import com.calai.backend.foodlog.service.image.FoodLogImageAccessService;
+import com.calai.backend.foodlog.service.image.ImageOpenResult;
 import com.calai.backend.foodlog.service.limiter.UserInFlightLimiter;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
+import com.calai.backend.foodlog.service.query.FoodLogQueryService;
 import com.calai.backend.foodlog.service.request.IdempotencyService;
+import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
+import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.unit.FoodLogWarning;
-import com.calai.backend.foodlog.provider.spi.ProviderClient;
+import com.calai.backend.foodlog.storage.support.StorageCleanup;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
-import com.calai.backend.foodlog.web.error.ModelRefusedException;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
-import com.calai.backend.foodlog.storage.support.StorageCleanup;
+
 import java.io.InputStream;
-import java.io.PushbackInputStream;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.*;
 import java.util.List;
-import java.util.Optional;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import com.calai.backend.foodlog.web.error.RateLimitedException;
-import com.calai.backend.foodlog.web.error.TooManyInFlightException;
-import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import java.util.Optional;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -95,22 +72,33 @@ public class FoodLogService {
     private final StorageService storage;
     private final QuotaService quota;
     private final IdempotencyService idem;
-    private final ImageBlobService blobService;
     private final UserInFlightLimiter inFlight;
     private final UserRateLimiter rateLimiter;
-    private final FoodLogEffectivePostProcessor postProcessor;
-    private final ClientActionMapper clientActionMapper;
     private final Clock clock;
     private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
-    public record OpenedImage(String objectKey, String contentType, long sizeBytes) {}
     private final AbuseGuardService abuseGuard;
     private final EntitlementService entitlementService;
-    private final BarcodeLookupService barcodeLookupService;
-    private final TransactionTemplate txTemplate;
+    private final FoodLogEnvelopeAssembler envelopeAssembler;
+    private final FoodLogQueryService queryService;
+    private final FoodLogImageAccessService imageAccessService;
+    private final FoodLogRetryService retryService;
+    private final FoodLogBarcodeService barcodeService;
+    private final FoodLogCreateSupport createSupport;
 
-    // =========================
-    // S4-05：ALBUM
-    // =========================
+    /**
+     * createAlbum / createPhoto / createLabel 已經能一眼看懂：
+     * 先 reserve
+     * validate
+     * rate limit / in-flight
+     * upload
+     * dedupe
+     * anti-abuse
+     * 建 base entity
+     * hit → draft
+     * miss → pending
+     * finalize result
+     */
+
     @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createAlbum(
             Long userId,
@@ -141,34 +129,18 @@ public class FoodLogService {
         try {
             lease = acquireInFlightOrRelease(userId, requestId);
 
-            ImageSniffer.Detection det;
-            StorageService.SaveResult saved;
+            FoodLogCreateSupport.UploadTempResult upload = createSupport.uploadTempImage(
+                    userId,
+                    requestId,
+                    file
+            );
 
-            // 1) 上傳 → tempKey
-            try (InputStream raw = file.getInputStream();
-                 PushbackInputStream in = new PushbackInputStream(raw, 16)) {
-
-                det = ImageSniffer.detect(in);
-                if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
-
-                tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();
-                saved = storage.save(tempKey, in, det.contentType());
-
-            } catch (Exception ex) {
-                StorageCleanup.safeDeleteQuietly(storage, tempKey);
-                if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
-                idem.failAndReleaseIfNeeded(userId, requestId,  true);
-                throw ex;
-            }
+            tempKey = upload.tempKey();
+            StorageService.SaveResult saved = upload.saved();
 
             try {
                 // 2) 去重命中（不扣 quota）
-                var hit = repo.findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
-                        userId,
-                        DEDUPE_METHODS_PHOTO_ALBUM,
-                        saved.sha256(),
-                        List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
-                );
+                var hit = findReusableHit(userId, DEDUPE_METHODS_PHOTO_ALBUM, saved.sha256());
 
                 boolean cacheHit = hit.isPresent()
                                    && hit.get().getEffective() != null
@@ -181,67 +153,25 @@ public class FoodLogService {
                 // ✅ ALBUM：固定用「上傳時間」當作 capturedAtUtc
                 LocalDate todayLocal = ZonedDateTime.ofInstant(serverNow, captureTz).toLocalDate();
 
-                FoodLogEntity e = new FoodLogEntity();
-                e.setUserId(userId);
-                e.setMethod("ALBUM");
-                e.setDegradeLevel("DG-0");
-
-                e.setCapturedAtUtc(serverNow);
-                e.setCapturedTz(captureTz.getId());
-                e.setCapturedLocalDate(todayLocal);
-                e.setServerReceivedAtUtc(serverNow);
-
-                e.setTimeSource(TimeSource.SERVER_RECEIVED);
-                e.setTimeSuspect(false);
-
-                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
-                    e.setProvider(hit.get().getProvider());
-                    e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
-
-                    ObjectNode copied = hit.get().getEffective().deepCopy();
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-                    markResultFromCache(processed);
-                    e.setEffective(processed);
-                    e.setStatus(FoodLogStatus.DRAFT);
-                } else {
-                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
-                    e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
-                    e.setProvider(defaultProvider());
-                    e.setEffective(null);
-                    e.setStatus(FoodLogStatus.PENDING);
-                }
-
-                repo.save(e);
-                idem.attach(userId, requestId, e.getId(), serverNow);
-
-                // 3) temp -> blob + refCount
-                ImageBlobService.RetainResult retained = blobService.retainFromTemp(
+                FoodLogEntity e = createSupport.newBaseEntity(
                         userId,
-                        tempKey,
-                        saved.sha256(),
-                        det.ext(),
-                        saved.contentType(),
-                        saved.sizeBytes()
+                        "ALBUM",
+                        serverNow,
+                        captureTz.getId(),
+                        todayLocal,
+                        serverNow,
+                        TimeSource.SERVER_RECEIVED,
+                        false
                 );
 
-                e.setImageObjectKey(retained.objectKey());
-                e.setImageSha256(retained.sha256());
-                e.setImageContentType(saved.contentType());
-                e.setImageSizeBytes(saved.sizeBytes());
-                repo.save(e);
-
-                if (e.getStatus() == FoodLogStatus.DRAFT) {
-                    return toEnvelope(e, null, requestId);
+                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
+                    createSupport.applyCacheHitDraft(e, hit.get());
+                } else {
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
+                    createSupport.applyPendingMiss(e, d.tierUsed(), defaultProvider());
                 }
 
-                FoodLogTaskEntity t = new FoodLogTaskEntity();
-                t.setFoodLogId(e.getId());
-                t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-                t.setPollAfterSec(2);
-                t.setNextRetryAtUtc(null);
-                taskRepo.save(t);
-
-                return toEnvelope(e, t, requestId);
+                return finalizeCreateResult(userId, requestId, serverNow, e, upload);
 
             } catch (Exception ex) {
                 cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
@@ -281,27 +211,14 @@ public class FoodLogService {
         try {
             lease = acquireInFlightOrRelease(userId, requestId);
 
-            ImageSniffer.Detection det;
-            StorageService.SaveResult saved;
+            FoodLogCreateSupport.UploadTempResult upload = createSupport.uploadTempImage(
+                    userId,
+                    requestId,
+                    file
+            );
 
-            // 1) 上傳 → tempKey
-            try (InputStream raw = file.getInputStream();
-                 PushbackInputStream in = new PushbackInputStream(raw, 16)) {
-
-                det = ImageSniffer.detect(in);
-                if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
-
-                // ✅ detect 成功就先決定 tempKey（帶 ext）
-                tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();
-
-                saved = storage.save(tempKey, in, det.contentType());
-
-            } catch (Exception ex) {
-                StorageCleanup.safeDeleteQuietly(storage, tempKey);
-                if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
-                idem.failAndReleaseIfNeeded(userId, requestId, true);
-                throw ex;
-            }
+            tempKey = upload.tempKey();
+            StorageService.SaveResult saved = upload.saved();
 
             try {
                 // 2) EXIF（從 tempKey 再 open 一次讀）
@@ -314,12 +231,7 @@ public class FoodLogService {
                 CapturedTimeResolver.Result r = timeResolver.resolve(exifUtc.orElse(null), deviceUtc, serverNow);
 
                 // 5) 去重命中（不扣 quota）
-                var hit = repo.findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
-                        userId,
-                        DEDUPE_METHODS_PHOTO_ALBUM,
-                        saved.sha256(),
-                        List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
-                );
+                var hit = findReusableHit(userId, DEDUPE_METHODS_PHOTO_ALBUM, saved.sha256());
 
                 // ✅ NEW：判斷 cacheHit（必須 effective 是 object 才算真正命中）
                 boolean cacheHit = hit.isPresent()
@@ -333,72 +245,25 @@ public class FoodLogService {
                 // 6) 建 log（capturedLocalDate 用 resolved capturedAtUtc + client tz）
                 LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), captureTz).toLocalDate();
 
-                FoodLogEntity e = new FoodLogEntity();
-                e.setUserId(userId);
-                e.setMethod("PHOTO");
-                e.setDegradeLevel("DG-0");
-
-                e.setCapturedAtUtc(r.capturedAtUtc());
-                e.setCapturedTz(captureTz.getId());
-                e.setCapturedLocalDate(localDate);
-                e.setServerReceivedAtUtc(serverNow);
-
-                e.setTimeSource(TimeSource.valueOf(r.source().name()));
-                e.setTimeSuspect(r.suspect());
-
-                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
-                    e.setProvider(hit.get().getProvider());
-                    e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
-
-                    ObjectNode copied = hit.get().getEffective().deepCopy();
-
-                    // ✅ 讓 “去重命中” 也套用同一套後處理（healthScore/meta/non-food）
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-                    markResultFromCache(processed);
-                    e.setEffective(processed);
-                    e.setStatus(FoodLogStatus.DRAFT);
-                } else {
-                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
-                    // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
-                    e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
-                    e.setProvider(defaultProvider());
-                    e.setEffective(null);
-                    e.setStatus(FoodLogStatus.PENDING);
-                }
-
-                repo.save(e);
-                idem.attach(userId, requestId, e.getId(), serverNow);
-
-                // 7) temp -> blob + refCount
-                ImageBlobService.RetainResult retained = blobService.retainFromTemp(
+                FoodLogEntity e = createSupport.newBaseEntity(
                         userId,
-                        tempKey,
-                        saved.sha256(),
-                        det.ext(),
-                        saved.contentType(),
-                        saved.sizeBytes()
+                        "PHOTO",
+                        r.capturedAtUtc(),
+                        captureTz.getId(),
+                        localDate,
+                        serverNow,
+                        TimeSource.valueOf(r.source().name()),
+                        r.suspect()
                 );
 
-                e.setImageObjectKey(retained.objectKey());
-                e.setImageSha256(retained.sha256());
-                e.setImageContentType(saved.contentType());
-                e.setImageSizeBytes(saved.sizeBytes());
-                repo.save(e);
-
-                // 8) 命中：不建 task
-                if (e.getStatus() == FoodLogStatus.DRAFT) {
-                    return toEnvelope(e, null, requestId);
+                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
+                    createSupport.applyCacheHitDraft(e, hit.get());
+                } else {
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
+                    createSupport.applyPendingMiss(e, d.tierUsed(), defaultProvider());
                 }
 
-                // 9) 未命中：建 task
-                FoodLogTaskEntity t = new FoodLogTaskEntity();
-                t.setFoodLogId(e.getId());
-                t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-                t.setPollAfterSec(2);
-                t.setNextRetryAtUtc(null);
-                taskRepo.save(t);
-
-                return toEnvelope(e, t, requestId);
+                return finalizeCreateResult(userId, requestId, serverNow, e, upload);
 
             } catch (Exception ex) {
                 // ✅ retain 後若後續失敗，只清 tempKey；blob orphan 留給背景 cleaner
@@ -440,26 +305,14 @@ public class FoodLogService {
         try {
             lease = acquireInFlightOrRelease(userId, requestId);
 
-            ImageSniffer.Detection det;
-            StorageService.SaveResult saved;
+            FoodLogCreateSupport.UploadTempResult upload = createSupport.uploadTempImage(
+                    userId,
+                    requestId,
+                    file
+            );
 
-            // 1) 上傳 → tempKey
-            try (InputStream raw = file.getInputStream();
-                 PushbackInputStream in = new PushbackInputStream(raw, 16)) {
-
-                det = ImageSniffer.detect(in);
-                if (det == null) throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
-
-                tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();
-                saved = storage.save(tempKey, in, det.contentType());
-
-            } catch (Exception ex) {
-                StorageCleanup.safeDeleteQuietly(storage, tempKey);
-                if (tempKey == null) StorageCleanup.safeDeleteTempUploadFallback(storage, userId, requestId);
-
-                idem.failAndReleaseIfNeeded(userId, requestId,  true);
-                throw ex;
-            }
+            tempKey = upload.tempKey();
+            StorageService.SaveResult saved = upload.saved();
 
             try {
                 // 2) EXIF / device / server time resolve（沿用 photo 規則）
@@ -468,12 +321,7 @@ public class FoodLogService {
                 CapturedTimeResolver.Result r = timeResolver.resolve(exifUtc.orElse(null), deviceUtc, serverNow);
 
                 // 3) 去重命中（不扣 quota）
-                var hit = repo.findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
-                        userId,
-                        DEDUPE_METHODS_LABEL,
-                        saved.sha256(),
-                        List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
-                );
+                var hit = findReusableHit(userId, DEDUPE_METHODS_LABEL, saved.sha256());
 
                 // ✅ NEW：判斷 cacheHit（必須 effective 是 object 才算真正命中）
                 boolean cacheHit = hit.isPresent()
@@ -486,72 +334,25 @@ public class FoodLogService {
 
                 LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), captureTz).toLocalDate();
 
-                FoodLogEntity e = new FoodLogEntity();
-                e.setUserId(userId);
-                e.setMethod("LABEL");
-                e.setDegradeLevel("DG-0");
-
-                e.setCapturedAtUtc(r.capturedAtUtc());
-                e.setCapturedTz(captureTz.getId());
-                e.setCapturedLocalDate(localDate);
-                e.setServerReceivedAtUtc(serverNow);
-
-                e.setTimeSource(TimeSource.valueOf(r.source().name()));
-                e.setTimeSuspect(r.suspect());
-
-                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
-                    // ✅ 命中：直接複製 effective，不扣 quota、不建 task
-                    e.setProvider(hit.get().getProvider());
-                    e.setDegradeLevel(hit.get().getDegradeLevel() == null ? "DG-0" : hit.get().getDegradeLevel());
-
-                    ObjectNode copied = hit.get().getEffective().deepCopy();
-                    ObjectNode processed = postProcessor.apply(copied, e.getProvider(), e.getMethod());
-                    markResultFromCache(processed);
-                    e.setEffective(processed);
-                    e.setStatus(FoodLogStatus.DRAFT);
-                } else {
-                    // ✅ 未命中：扣 AI quota，provider 由實際 ProviderClient 決定
-                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
-                    // 先用 degradeLevel 反映 tier，方便你立刻觀測（Step 2 才會真正選模型）
-                    e.setDegradeLevel(d.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2");
-                    e.setProvider(defaultProvider());
-                    e.setEffective(null);
-                    e.setStatus(FoodLogStatus.PENDING);
-                }
-
-                repo.save(e);
-                idem.attach(userId, requestId, e.getId(), serverNow);
-
-                // 4) temp -> blob + refCount
-                ImageBlobService.RetainResult retained = blobService.retainFromTemp(
+                FoodLogEntity e = createSupport.newBaseEntity(
                         userId,
-                        tempKey,
-                        saved.sha256(),
-                        det.ext(),
-                        saved.contentType(),
-                        saved.sizeBytes()
+                        "LABEL",
+                        r.capturedAtUtc(),
+                        captureTz.getId(),
+                        localDate,
+                        serverNow,
+                        TimeSource.valueOf(r.source().name()),
+                        r.suspect()
                 );
 
-                e.setImageObjectKey(retained.objectKey());
-                e.setImageSha256(retained.sha256());
-                e.setImageContentType(saved.contentType());
-                e.setImageSizeBytes(saved.sizeBytes());
-                repo.save(e);
-
-                // 5) 命中：不建 task
-                if (e.getStatus() == FoodLogStatus.DRAFT) {
-                    return toEnvelope(e, null, requestId);
+                if (hit.isPresent() && hit.get().getEffective() != null && hit.get().getEffective().isObject()) {
+                    createSupport.applyCacheHitDraft(e, hit.get());
+                } else {
+                    QuotaService.Decision d = quota.consumeOperationOrThrow(userId, tier, quotaTz, serverNow);
+                    createSupport.applyPendingMiss(e, d.tierUsed(), defaultProvider());
                 }
 
-                // 6) 未命中：建 task（worker 會跑 GEMINI）
-                FoodLogTaskEntity t = new FoodLogTaskEntity();
-                t.setFoodLogId(e.getId());
-                t.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-                t.setPollAfterSec(2);
-                t.setNextRetryAtUtc(null);
-                taskRepo.save(t);
-
-                return toEnvelope(e, t, requestId);
+                return finalizeCreateResult(userId, requestId, serverNow, e, upload);
 
             } catch (Exception ex) {
                 cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
@@ -572,756 +373,42 @@ public class FoodLogService {
             String preferredLangTag,
             String requestId
     ) {
-        Instant now = clock.instant();
-
-        if (barcode == null || barcode.isBlank()) {
-            throw new IllegalArgumentException("BARCODE_REQUIRED");
-        }
-
-        // ✅ normalizeOrThrow 已完成格式/長度/digits 驗證
-        // raw 保留給 trace/aiMeta；norm 才是查詢/DB key
-        var bn = BarcodeNormalizer.normalizeOrThrow(barcode);
-        String bcRaw = bn.rawInput();
-        String bcNorm = bn.normalized();
-
-        // ✅ 1) 先做 cheap validation / normalize，再做 idempotency reserve
-        // invalid barcode 不佔 requestId；真正要進 lookup / 寫 DB 的請求才占位
-        String existingLogId = idem.reserveOrGetExisting(userId, requestId, now);
-        if (existingLogId != null) return getOne(userId, existingLogId, requestId);
-
-        try {
-            ZoneId captureTz = parseTzOrUtc(clientTz);
-            ZoneId quotaTz = resolveQuotaTz();
-            LocalDate localDate = ZonedDateTime.ofInstant(now, captureTz).toLocalDate();
-
-            // ✅ 2) deviceId normalize
-            String did = normalizeDeviceId(userId, deviceId);
-
-            // ✅ 3) rate limit（交易外）
-            EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
-            rateLimiter.checkOrThrow(userId, tier, now);
-
-            // ✅ 4) barcode cheap op（交易外）
-            abuseGuard.onBarcodeAttempt(userId, did, now, quotaTz);
-
-            // ✅ 5) lang normalize（交易外）
-            String langKey = OpenFoodFactsLang.normalizeLangKey(preferredLangTag);
-
-            // ✅ 6) lookup（交易外：OFF + cache + redis lock）
-            BarcodeLookupService.LookupResult r;
-            try {
-                r = barcodeLookupService.lookupOff(bcRaw, langKey);
-
-            } catch (OffHttpException ex) {
-                boolean providerLimited = (ex.getStatus() == 429 || ex.getStatus() == 403);
-
-                if (providerLimited) {
-                    return persistBarcodeFailedEnvelopeTx(
-                            userId, bcNorm, requestId, now, captureTz, localDate,
-                            "PROVIDER_RATE_LIMITED",
-                            "openfoodfacts rate-limited/banned risk. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
-                    );
-                }
-
-                return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, captureTz, localDate,
-                        "BARCODE_LOOKUP_FAILED",
-                        "openfoodfacts http error. status=" + ex.getStatus() + ", msg=" + safeMsg(ex)
-                );
-
-            } catch (OffParseException ex) {
-
-                return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, captureTz, localDate,
-                        "BARCODE_LOOKUP_FAILED",
-                        "openfoodfacts parse error. code=" + ex.getCode() + ", msg=" + safeMsg(ex)
-                );
-
-            } catch (Exception ex) {
-
-                return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, captureTz, localDate,
-                        "BARCODE_LOOKUP_FAILED",
-                        "openfoodfacts unknown error: " + safeMsg(ex)
-                );
-            }
-
-            // ✅ 防呆：service 回 null
-            if (r == null) {
-                return persistBarcodeFailedEnvelopeTx(
-                        userId, bcNorm, requestId, now, captureTz, localDate,
-                        "BARCODE_LOOKUP_FAILED",
-                        "barcode lookup returned null result"
-                );
-            }
-
-            // ✅ 找不到（含 negative cache）
-            if (!r.found() || r.off() == null) {
-                String failRaw = firstNonBlank(r.barcodeRaw(), bcRaw);
-                String failNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
-
-                return persistBarcodeFailedEnvelopeTx(
-                        userId, failNorm, requestId, now, captureTz, localDate,
-                        "BARCODE_NOT_FOUND",
-                        "openfoodfacts not found. raw=" + failRaw + ", norm=" + failNorm
-                );
-            }
-
-            if (!OpenFoodFactsEffectiveBuilder.hasUsableNutrition(r.off())) {
-                String failRaw = firstNonBlank(r.barcodeRaw(), bcRaw);
-                String failNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
-
-                return persistBarcodeFailedEnvelopeTx(
-                        userId, failNorm, requestId, now, captureTz, localDate,
-                        "BARCODE_NUTRITION_UNAVAILABLE",
-                        "openfoodfacts found identity but no usable nutrition. raw=" + failRaw + ", norm=" + failNorm
-                );
-            }
-
-            // ✅ 查到 → 短交易寫 DB + attach
-            return persistBarcodeSuccessEnvelopeTx(
-                    userId, bcRaw, bcNorm, requestId, now, captureTz, localDate, r, langKey
-            );
-
-        } catch (RateLimitedException ex) {
-            idem.failAndReleaseIfNeeded(
-                    userId,
-                    requestId,
-                    true
-            );
-            throw ex;
-        } catch (RuntimeException ex) {
-            idem.failAndReleaseIfNeeded(
-                    userId,
-                    requestId,
-                    true
-            );
-            throw ex;
-        }
-    }
-
-    private FoodLogEnvelope persistBarcodeFailedEnvelopeTx(
-            Long userId,
-            String bc,
-            String requestId,
-            Instant now,
-            ZoneId captureTz,
-            LocalDate localDate,
-            String errorCode,
-            String errorMsg
-    ) {
-        FoodLogEnvelope out = txTemplate.execute(status ->
-                buildBarcodeFailedEnvelope(
-                        userId, bc, requestId, now, captureTz, localDate, errorCode, errorMsg
-                )
+        return barcodeService.createBarcodeMvp(
+                userId,
+                clientTz,
+                deviceId,
+                barcode,
+                preferredLangTag,
+                requestId
         );
-        if (out == null) {
-            throw new IllegalStateException("BARCODE_TX_FAILED_EMPTY_RESULT");
-        }
-        return out;
-    }
-
-    private FoodLogEnvelope persistBarcodeSuccessEnvelopeTx(
-            Long userId,
-            String bcRaw,
-            String bcNorm,
-            String requestId,
-            Instant now,
-            ZoneId captureTz,
-            LocalDate localDate,
-            BarcodeLookupService.LookupResult r,
-            String langKey
-    ) {
-        FoodLogEnvelope out = txTemplate.execute(status -> {
-            OffResult off = r.off();
-
-            FoodLogEntity e = new FoodLogEntity();
-            e.setUserId(userId);
-            e.setMethod("BARCODE");
-            e.setProvider("OPENFOODFACTS");
-            e.setDegradeLevel("DG-0");
-
-            e.setCapturedAtUtc(now);
-            e.setCapturedTz(captureTz.getId());
-            e.setCapturedLocalDate(localDate);
-            e.setServerReceivedAtUtc(now);
-
-            e.setTimeSource(TimeSource.SERVER_RECEIVED);
-            e.setTimeSuspect(false);
-
-            String resolvedRaw = firstNonBlank(bcRaw, r.barcodeRaw());
-            String resolvedNorm = firstNonBlank(r.barcodeNorm(), bcNorm);
-
-            e.setBarcode(resolvedNorm);
-
-            ObjectNode eff = JsonNodeFactory.instance.objectNode();
-
-            String name = (off.productName() == null || off.productName().isBlank())
-                    ? "Unknown product"
-                    : off.productName();
-            eff.put("foodName", name);
-
-            String basis = OpenFoodFactsEffectiveBuilder.applyPortion(eff, off, true);
-
-            BarcodePortionCanonicalizer.canonicalize(eff, off, basis);
-
-            // ✅ 只限 BARCODE：將 nutrients 的 null / 缺值補成 0.0
-            BarcodeNutrientsNormalizer.fillMissingWithZero(eff);
-
-            eff.putArray("warnings");
-
-            boolean hasCoreNutrition = OpenFoodFactsEffectiveBuilder.hasCoreNutrition(off);
-            eff.put("confidence", hasCoreNutrition ? 0.98 : 0.92);
-
-            if (!hasCoreNutrition) {
-                eff.withArray("warnings").add(FoodLogWarning.LOW_CONFIDENCE.name());
-            }
-
-            OpenFoodFactsCategoryResolver.Resolved resolvedCategory = OpenFoodFactsCategoryResolver.resolve(off);
-
-            ObjectNode aiMeta = ensureObj(eff, "aiMeta");
-            aiMeta.put("barcodeRaw", resolvedRaw);
-            aiMeta.put("barcodeNorm", resolvedNorm);
-            aiMeta.put("offFromCache", r.fromCache());
-            aiMeta.put("source", "OPENFOODFACTS");
-            aiMeta.put("basis", basis);
-            aiMeta.put("lang", langKey);
-            aiMeta.put("hasCoreNutrition", hasCoreNutrition);
-            aiMeta.put("foodCategory", resolvedCategory.category().name());
-            aiMeta.put("foodSubCategory", resolvedCategory.subCategory().name());
-
-            ObjectNode processed = postProcessor.apply(eff, e.getProvider(), e.getMethod());
-            e.setEffective(processed);
-
-            e.setStatus(FoodLogStatus.DRAFT);
-            e.setLastErrorCode(null);
-            e.setLastErrorMessage(null);
-
-            repo.save(e);
-            idem.attach(userId, requestId, e.getId(), now);
-
-            return toEnvelope(e, null, requestId);
-        });
-
-        if (out == null) {
-            throw new IllegalStateException("BARCODE_TX_FAILED_EMPTY_RESULT");
-        }
-        return out;
-    }
-
-    private static ObjectNode ensureObj(ObjectNode root, String field) {
-        JsonNode n = root.get(field);
-        if (n != null && n.isObject()) return (ObjectNode) n;
-        ObjectNode out = JsonNodeFactory.instance.objectNode();
-        root.set(field, out);
-        return out;
-    }
-
-    private FoodLogEnvelope buildBarcodeFailedEnvelope(
-            Long userId,
-            String bc,
-            String requestId,
-            Instant now,
-            ZoneId captureTz,
-            LocalDate localDate,
-            String errorCode,
-            String errorMsg
-    ) {
-        FoodLogEntity e = new FoodLogEntity();
-        e.setUserId(userId);
-        e.setMethod("BARCODE");
-        e.setProvider("OPENFOODFACTS");
-        e.setDegradeLevel("DG-0");
-        e.setCapturedAtUtc(now);
-        e.setCapturedTz(captureTz.getId());
-        e.setCapturedLocalDate(localDate);
-        e.setServerReceivedAtUtc(now);
-        e.setTimeSource(TimeSource.SERVER_RECEIVED);
-        e.setTimeSuspect(false);
-        e.setBarcode(bc);
-        e.setStatus(FoodLogStatus.FAILED);
-        e.setEffective(null);
-        e.setLastErrorCode(errorCode);
-        e.setLastErrorMessage(errorMsg);
-
-        repo.save(e);
-        idem.attach(userId, requestId, e.getId(), now);
-        return toEnvelope(e, null, requestId);
     }
 
     // ===== FoodLogService.getOne()：只在 QUEUED/RUNNING/FAILED 才回 task =====
-    @Transactional(readOnly = true)
     public FoodLogEnvelope getOne(Long userId, String id, String requestId) {
-        FoodLogEntity e = repo.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
-
-        // Safety/Recitation/Harm 一律回 422（不走 envelope 的 error 欄位）
-        ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(e.getLastErrorCode());
-        if (reason != null) {
-            log.warn("food_log_provider_refused foodLogId={} reason={} code={} msg={}",
-                    e.getId(),
-                    reason,
-                    e.getLastErrorCode(),
-                    e.getLastErrorMessage());
-
-            throw new ModelRefusedException(reason, e.getLastErrorCode());
-        }
-
-        FoodLogTaskEntity t = null;
-        if (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED) {
-            FoodLogTaskEntity tmp = taskRepo.findByFoodLogId(e.getId()).orElse(null);
-
-            if (tmp != null) {
-                var ts = tmp.getTaskStatus();
-                if (ts == FoodLogTaskEntity.TaskStatus.QUEUED
-                    || ts == FoodLogTaskEntity.TaskStatus.RUNNING
-                    || ts == FoodLogTaskEntity.TaskStatus.FAILED) {
-                    t = tmp;
-                }
-            }
-        }
-        return toEnvelope(e, t, requestId);
-    }
-
-    private FoodLogEnvelope toEnvelope(FoodLogEntity e, FoodLogTaskEntity t, String requestId) {
-        Instant now = clock.instant();
-
-        JsonNode eff = e.getEffective();
-
-        String tierUsed = resolveTierUsedDisplay(e);
-        boolean fromCache = resolveResultFromCache(eff);
-
-        FoodLogEnvelope.NutritionResult nr = null;
-        List<String> warnings = null;
-        String degradedReason = null;
-        String reasoning = null;
-        FoodLogEnvelope.LabelMeta labelMeta = null;
-        FoodLogEnvelope.AiMetaView aiMetaView = null;
-
-        String resolvedBy = null;
-
-        if (eff != null && eff.isObject()) {
-            JsonNode w = eff.get("warnings");
-            if (w != null && w.isArray()) {
-                warnings = new java.util.ArrayList<>();
-                for (JsonNode it : w) {
-                    if (it == null || it.isNull()) continue;
-                    String s = it.asText(null);
-                    if (s != null && !s.isBlank()) warnings.add(s);
-                }
-                if (warnings.isEmpty()) warnings = null;
-            }
-
-            reasoning = textOrNull(eff, "_reasoning");
-            labelMeta = toLabelMeta(eff.get("labelMeta"));
-
-            JsonNode aiMeta = eff.get("aiMeta");
-            if (aiMeta != null && aiMeta.isObject()) {
-                aiMetaView = toAiMetaView(aiMeta);
-
-                JsonNode src = aiMeta.get("source");
-                if (src != null && !src.isNull()) {
-                    String s = src.asText(null);
-                    if (s != null && !s.isBlank()) {
-                        resolvedBy = s.trim();
-                    }
-                }
-            }
-
-            // 這裡不要直接信任 aiMeta.degradedReason，統一重新 canonicalize
-            if (warnings != null) {
-                String method = e.getMethod() == null ? "" : e.getMethod().trim().toUpperCase(java.util.Locale.ROOT);
-
-                if ("LABEL".equals(method)) {
-                    if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) {
-                        degradedReason = "NO_LABEL";
-                    } else if (warnings.stream().anyMatch("MISSING_NUTRITION_FACTS"::equalsIgnoreCase)) {
-                        degradedReason = "MISSING_NUTRITION_FACTS";
-                    } else if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) {
-                        degradedReason = "NO_LABEL";
-                    } else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) {
-                        degradedReason = "UNKNOWN_FOOD";
-                    }
-                } else {
-                    if (warnings.stream().anyMatch("NO_FOOD_DETECTED"::equalsIgnoreCase)) {
-                        degradedReason = "NO_FOOD";
-                    } else if (warnings.stream().anyMatch("UNKNOWN_FOOD"::equalsIgnoreCase)) {
-                        degradedReason = "UNKNOWN_FOOD";
-                    } else if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) {
-                        degradedReason = "NO_LABEL";
-                    } else if (warnings.stream().anyMatch("MISSING_NUTRITION_FACTS"::equalsIgnoreCase)) {
-                        degradedReason = "MISSING_NUTRITION_FACTS";
-                    }
-                }
-            }
-
-            // 若 warnings 沒推導出來，再 fallback 到 aiMeta.degradedReason
-            if (degradedReason == null && aiMetaView != null) {
-                degradedReason = aiMetaView.degradedReason();
-            }
-
-            // degraded case：不要帶誤導性的 labelMeta
-            if ("NO_FOOD".equals(degradedReason)
-                || "UNKNOWN_FOOD".equals(degradedReason)
-                || "NO_LABEL".equals(degradedReason)) {
-                labelMeta = null;
-            }
-
-            if ("MISSING_NUTRITION_FACTS".equals(degradedReason)
-                && warnings != null
-                && warnings.contains("PACKAGE_SIZE_UNVERIFIED")
-                && labelMeta != null
-                && "WHOLE_PACKAGE".equals(labelMeta.basis())) {
-                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
-            }
-
-            if (labelMeta != null
-                && "ESTIMATED_PORTION".equals(labelMeta.basis())
-                && labelMeta.servingsPerContainer() != null
-                && Math.abs(labelMeta.servingsPerContainer() - 1.0d) < 0.0001d) {
-                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
-            }
-
-            // 同步修正 aiMetaView，避免 response 內 degradedReason 與 aiMeta.degradedReason 打架
-            if (aiMetaView != null && degradedReason != null) {
-                aiMetaView = new FoodLogEnvelope.AiMetaView(
-                        degradedReason,
-                        aiMetaView.degradedAtUtc(),
-                        aiMetaView.resultFromCache(),
-                        aiMetaView.foodCategory(),
-                        aiMetaView.foodSubCategory(),
-                        aiMetaView.source(),
-                        aiMetaView.basis(),
-                        aiMetaView.lang()
-                );
-            }
-        }
-
-        if (resolvedBy == null || resolvedBy.isBlank()) {
-            resolvedBy = e.getProvider();
-        }
-
-        if (eff != null && !eff.isNull()) {
-            JsonNode n = eff.get("nutrients");
-            JsonNode q = eff.get("quantity");
-            boolean barcodeZeroFill = "BARCODE".equalsIgnoreCase(e.getMethod());
-
-            FoodLogEnvelope.Nutrients nutrientsView;
-
-            if (barcodeZeroFill) {
-                // ✅ BARCODE：即使整個 nutrients 缺失，也要回全 0.0
-                nutrientsView = new FoodLogEnvelope.Nutrients(
-                        round1(BarcodeNutrientsNormalizer.readNumber(n, "kcal", true)),
-                        round1(BarcodeNutrientsNormalizer.readNumber(n, "protein", true)),
-                        round1(BarcodeNutrientsNormalizer.readNumber(n, "fat", true)),
-                        round1(BarcodeNutrientsNormalizer.readNumber(n, "carbs", true)),
-                        round1(BarcodeNutrientsNormalizer.readNumber(n, "fiber", true)),
-                        round1(BarcodeNutrientsNormalizer.readNumber(n, "sugar", true)),
-                        round1(BarcodeNutrientsNormalizer.readNumber(n, "sodium", true))
-                );
-            } else {
-                // ✅ 非 BARCODE：維持原本行為
-                nutrientsView = (n == null) ? null : new FoodLogEnvelope.Nutrients(
-                        round1(doubleOrNull(n, "kcal")),
-                        round1(doubleOrNull(n, "protein")),
-                        round1(doubleOrNull(n, "fat")),
-                        round1(doubleOrNull(n, "carbs")),
-                        round1(doubleOrNull(n, "fiber")),
-                        round1(doubleOrNull(n, "sugar")),
-                        round1(doubleOrNull(n, "sodium"))
-                );
-            }
-
-            nr = new FoodLogEnvelope.NutritionResult(
-                    FoodLogDisplayNameResolver.resolve(e.getMethod(), degradedReason, eff),
-                    q == null ? null : new FoodLogEnvelope.Quantity(doubleOrNull(q, "value"), textOrNull(q, "unit")),
-                    nutrientsView,
-                    intOrNull(eff, "healthScore"),
-                    doubleOrNull(eff, "confidence"),
-                    warnings,
-                    degradedReason,
-                    aiMetaTextOrNull(eff, "foodCategory"),
-                    aiMetaTextOrNull(eff, "foodSubCategory"),
-                    reasoning,
-                    labelMeta,
-                    aiMetaView,
-                    new FoodLogEnvelope.Source(
-                            e.getMethod(),
-                            e.getProvider(),
-                            resolvedBy
-                    )
-            );
-        }
-
-        FoodLogEnvelope.Task task = null;
-        boolean taskMeaningful = (t != null);
-
-        if (taskMeaningful && (e.getStatus() == FoodLogStatus.PENDING || e.getStatus() == FoodLogStatus.FAILED)) {
-            int poll = computePollAfterSec(e.getStatus(), t, now);
-            task = new FoodLogEnvelope.Task(t.getId(), poll);
-        }
-
-        FoodLogEnvelope.ApiError err = null;
-        if (e.getStatus() == FoodLogStatus.FAILED) {
-
-            Integer retryAfter = computeRetryAfterSecOrNull(t, now);
-
-            if (retryAfter == null && t != null) {
-                retryAfter = parseRetryAfterFromMessageOrNull(t.getLastErrorMessage());
-            }
-
-            if (retryAfter == null) {
-                retryAfter = parseRetryAfterFromMessageOrNull(e.getLastErrorMessage());
-            }
-
-            if (retryAfter == null && "PROVIDER_RATE_LIMITED".equalsIgnoreCase(e.getLastErrorCode())) {
-                retryAfter = 20;
-            }
-
-            String action = java.util.Optional.ofNullable(clientActionMapper.fromErrorCode(e.getLastErrorCode()))
-                    .orElse(ClientAction.RETRY_LATER)
-                    .name();
-
-            err = new FoodLogEnvelope.ApiError(
-                    e.getLastErrorCode(),
-                    action,
-                    retryAfter
-            );
-        }
-
-        List<FoodLogEnvelope.Hint> hints = null;
-
-        if (e.getStatus() == FoodLogStatus.DRAFT && nr != null && warnings != null) {
-
-            boolean hasServingUnknown = warnings.stream()
-                    .anyMatch("SERVING_SIZE_UNKNOWN"::equalsIgnoreCase);
-
-            boolean isPer100GramOrMl = nr.quantity() != null
-                                       && nr.quantity().unit() != null
-                                       && ("GRAM".equalsIgnoreCase(nr.quantity().unit())
-                                           || "ML".equalsIgnoreCase(nr.quantity().unit()))
-                                       && nr.quantity().value() != null
-                                       && Math.abs(nr.quantity().value() - 100.0) < 0.0001;
-
-            if (hasServingUnknown && isPer100GramOrMl) {
-                hints = List.of(
-                        new FoodLogEnvelope.Hint(
-                                "SERVING_SIZE_UNKNOWN",
-                                ClientAction.RETAKE_PHOTO.name(),
-                                "Please include net weight or serving size in the photo."
-                        )
-                );
-            }
-        }
-
-        return new FoodLogEnvelope(
-                e.getId(),
-                e.getStatus().name(),
-                e.getDegradeLevel(),
-                tierUsed,
-                fromCache,
-                nr,
-                task,
-                err,
-                hints,
-                new FoodLogEnvelope.Trace(requestId)
-        );
-    }
-
-    private static FoodLogEnvelope.LabelMeta toLabelMeta(JsonNode node) {
-        if (node == null || node.isNull() || !node.isObject()) {
-            return null;
-        }
-
-        Double servingsPerContainer = doubleOrNull(node, "servingsPerContainer");
-        String basis = textOrNull(node, "basis");
-
-        if (servingsPerContainer == null && (basis == null || basis.isBlank())) {
-            return null;
-        }
-
-        return new FoodLogEnvelope.LabelMeta(servingsPerContainer, basis);
-    }
-
-    private static FoodLogEnvelope.AiMetaView toAiMetaView(JsonNode node) {
-        if (node == null || node.isNull() || !node.isObject()) {
-            return null;
-        }
-
-        String degradedReason = textOrNull(node, "degradedReason");
-        String degradedAtUtc = textOrNull(node, "degradedAtUtc");
-        Boolean resultFromCache = booleanOrNull(node, "resultFromCache");
-        String foodCategory = textOrNull(node, "foodCategory");
-        String foodSubCategory = textOrNull(node, "foodSubCategory");
-        String source = textOrNull(node, "source");
-        String basis = textOrNull(node, "basis");
-        String lang = textOrNull(node, "lang");
-
-        if (degradedReason == null
-            && degradedAtUtc == null
-            && resultFromCache == null
-            && foodCategory == null
-            && foodSubCategory == null
-            && source == null
-            && basis == null
-            && lang == null) {
-            return null;
-        }
-
-        return new FoodLogEnvelope.AiMetaView(
-                degradedReason,
-                degradedAtUtc,
-                resultFromCache,
-                foodCategory,
-                foodSubCategory,
-                source,
-                basis,
-                lang
-        );
-    }
-
-    private static Boolean booleanOrNull(JsonNode node, String field) {
-        if (node == null || node.isNull()) return null;
-        JsonNode v = node.get(field);
-        if (v == null || v.isNull()) return null;
-        return v.isBoolean() ? v.asBoolean() : null;
-    }
-
-    private static boolean resolveResultFromCache(JsonNode effective) {
-        if (effective == null || effective.isNull() || !effective.isObject()) {
-            return false;
-        }
-        JsonNode aiMeta = effective.get("aiMeta");
-        if (aiMeta == null || !aiMeta.isObject()) {
-            return false;
-        }
-        JsonNode resultCache = aiMeta.get("resultFromCache");
-        return resultCache != null && resultCache.isBoolean() && resultCache.asBoolean();
-    }
-
-    private static void markResultFromCache(ObjectNode effective) {
-        if (effective == null) return;
-        JsonNode aiMetaNode = effective.get("aiMeta");
-        ObjectNode aiMeta;
-        if (aiMetaNode instanceof ObjectNode o) {
-            aiMeta = o;
-        } else {
-            aiMeta = effective.putObject("aiMeta");
-        }
-        // ✅ 新語意：只代表「結果重用」
-        aiMeta.put("resultFromCache", true);
-    }
-
-    private static Double round1(Double v) {
-        if (v == null) return null;
-        if (v.isNaN() || v.isInfinite()) return null; // 保守：避免序列化怪值
-        // ✅ BigDecimal.valueOf 避免 new BigDecimal(double) 的精度陷阱
-        return BigDecimal.valueOf(v)
-                .setScale(1, RoundingMode.HALF_UP)
-                .doubleValue();
-    }
-
-    private static String firstNonBlank(String... values) {
-        if (values == null) return "";
-        for (String v : values) {
-            if (v != null && !v.isBlank()) return v;
-        }
-        return "";
+        return queryService.getOne(userId, id, requestId);
     }
 
     @Transactional(readOnly = true)
-    public OpenedImage openImage(Long userId, String foodLogId) {
-        var log = repo.findByIdAndUserId(foodLogId, userId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
-
-        if (log.getStatus() == FoodLogStatus.DELETED) {
-            throw new IllegalArgumentException("FOOD_LOG_DELETED");
-        }
-        if (log.getImageObjectKey() == null || log.getImageObjectKey().isBlank()) {
-            throw new IllegalStateException("IMAGE_OBJECT_KEY_MISSING");
-        }
-
-        long size = log.getImageSizeBytes() == null ? -1L : log.getImageSizeBytes();
-        return new OpenedImage(log.getImageObjectKey(), log.getImageContentType(), size);
+    public ImageOpenResult openImage(Long userId, String foodLogId) {
+        return imageAccessService.openImage(userId, foodLogId);
     }
 
     public InputStream openImageStream(String objectKey) throws Exception {
-        return storage.open(objectKey).inputStream();
+        return imageAccessService.openImageStream(objectKey);
     }
 
-    @Transactional
     public FoodLogEnvelope retry(
             Long userId,
             String foodLogId,
             String deviceId,
             String requestId
     ) {
-        FoodLogEntity log = repo.findByIdForUpdate(foodLogId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
-
-        if (!userId.equals(log.getUserId())) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
-        }
-
-        if (log.getStatus() == FoodLogStatus.DELETED) {
-            throw new IllegalArgumentException("FOOD_LOG_DELETED");
-        }
-
-        String method = log.getMethod() == null ? "" : log.getMethod().trim().toUpperCase(Locale.ROOT);
-        boolean retryableMethod =
-                "PHOTO".equals(method)
-                        || "ALBUM".equals(method)
-                        || "LABEL".equals(method);
-
-        if (!retryableMethod || log.getStatus() != FoodLogStatus.FAILED) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
-        }
-
-        Instant now = clock.instant();
-        ZoneId quotaTz = resolveQuotaTz();
-        String did = normalizeDeviceId(userId, deviceId);
-
-        // 先做 precheck，失敗時不得有任何 save
-        EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
-        rateLimiter.checkOrThrow(userId, tier, now);
-        abuseGuard.onOperationAttempt(userId, did, false, now, quotaTz);
-
-        QuotaService.Decision decision =
-                quota.consumeOperationOrThrow(userId, tier, quotaTz, now);
-
-        // precheck / quota 都過了，才開始重置 log
-        log.setStatus(FoodLogStatus.PENDING);
-        log.setEffective(null);
-        log.setLastErrorCode(null);
-        log.setLastErrorMessage(null);
-        log.setDegradeLevel(
-                decision.tierUsed() == ModelTier.MODEL_TIER_HIGH ? "DG-0" : "DG-2"
-        );
-
-        FoodLogTaskEntity task = taskRepo.findByFoodLogIdForUpdate(foodLogId)
-                .orElseGet(() -> {
-                    FoodLogTaskEntity t = new FoodLogTaskEntity();
-                    t.setFoodLogId(foodLogId);
-                    return t;
-                });
-
-        task.setTaskStatus(FoodLogTaskEntity.TaskStatus.QUEUED);
-        task.setNextRetryAtUtc(null);
-        task.setPollAfterSec(2);
-        task.setAttempts(0);
-        task.setLastErrorCode(null);
-        task.setLastErrorMessage(null);
-
-        taskRepo.save(task);
-        repo.save(log);
-
-        return toEnvelope(log, task, requestId);
+        return retryService.retry(userId, foodLogId, deviceId, requestId);
     }
 
     // =========================
     // helpers
     // =========================
-
     private void validateUploadBasicsOrRelease(Long userId, String requestId, MultipartFile file) {
         try {
             validateUploadBasics(file);
@@ -1344,13 +431,6 @@ public class FoodLogService {
             EntitlementService.Tier tier = entitlementService.resolveTier(userId, nowUtc);
             rateLimiter.checkOrThrow(userId, tier, nowUtc);
             return tier;
-        } catch (RateLimitedException ex) {
-            idem.failAndReleaseIfNeeded(
-                    userId,
-                    requestId,
-                    true
-            );
-            throw ex;
         } catch (RuntimeException ex) {
             idem.failAndReleaseIfNeeded(
                     userId,
@@ -1359,22 +439,6 @@ public class FoodLogService {
             );
             throw ex;
         }
-    }
-
-    private static String aiMetaTextOrNull(JsonNode effective, String field) {
-        if (effective == null || effective.isNull()) return null;
-
-        JsonNode aiMeta = effective.get("aiMeta");
-        if (aiMeta == null || !aiMeta.isObject()) return null;
-
-        JsonNode v = aiMeta.get(field);
-        if (v == null || v.isNull()) return null;
-
-        String s = v.asText(null);
-        if (s == null) return null;
-
-        s = s.trim();
-        return s.isEmpty() ? null : s;
     }
 
     private static void cleanupUploadOrBlobAfterFailure(
@@ -1402,13 +466,6 @@ public class FoodLogService {
     private UserInFlightLimiter.Lease acquireInFlightOrRelease(Long userId, String requestId) {
         try {
             return inFlight.acquireOrThrow(userId);
-        } catch (TooManyInFlightException ex) {
-            idem.failAndReleaseIfNeeded(
-                    userId,
-                    requestId,
-                    true
-            );
-            throw ex;
         } catch (RuntimeException ex) {
             idem.failAndReleaseIfNeeded(
                     userId,
@@ -1419,36 +476,6 @@ public class FoodLogService {
         }
     }
 
-    // ===== FoodLogService 新增/保留這段 helper：從 message 抽 retryAfterSec =====
-    // 放在 FoodLogService helpers 區塊即可（你原本若已有就用這版覆蓋）
-
-    private static final Pattern P_SUGGESTED_RETRY_AFTER =
-            Pattern.compile("suggestedRetryAfterSec=(\\d+)");
-    private static final java.util.regex.Pattern P_RETRY_AFTER =
-            Pattern.compile("retryAfterSec=(\\d+)");
-
-    private static Integer parseRetryAfterFromMessageOrNull(String msg) {
-        if (msg == null || msg.isBlank()) return null;
-
-        Matcher m1 = P_SUGGESTED_RETRY_AFTER.matcher(msg);
-        if (m1.find()) {
-            try { return clampInt(Integer.parseInt(m1.group(1)), 0, 3600); }
-            catch (Exception ignored) {}
-        }
-
-        Matcher m2 = P_RETRY_AFTER.matcher(msg);
-        if (m2.find()) {
-            try { return clampInt(Integer.parseInt(m2.group(1)), 0, 3600); }
-            catch (Exception ignored) {}
-        }
-
-        return null;
-    }
-
-    private static int clampInt(int v, int min, int max) {
-        return Math.max(min, Math.min(max, v));
-    }
-
     private static Instant parseInstantOrNull(String raw) {
         try {
             if (raw == null || raw.isBlank()) return null;
@@ -1456,11 +483,6 @@ public class FoodLogService {
         } catch (Exception ignored) {
             return null;
         }
-    }
-
-    private static String safeMsg(Throwable t) {
-        String m = t.getMessage();
-        return (m == null || m.isBlank()) ? t.getClass().getSimpleName() : m;
     }
 
     private static void validateUploadBasics(MultipartFile file) {
@@ -1479,125 +501,39 @@ public class FoodLogService {
         return ZoneOffset.UTC;
     }
 
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asText();
+    private Optional<FoodLogEntity> findReusableHit(
+            Long userId,
+            List<String> methods,
+            String sha256
+    ) {
+        return repo.findFirstByUserIdAndMethodInAndImageSha256AndStatusInOrderByCreatedAtUtcDesc(
+                userId,
+                methods,
+                sha256,
+                List.of(FoodLogStatus.DRAFT, FoodLogStatus.SAVED)
+        );
     }
 
-    private static Integer intOrNull(JsonNode node, String field) {
-        if (node == null || node.isNull()) return null;
-        JsonNode v = node.get(field);
-        if (v == null || v.isNull()) return null;
-        if (v.isIntegralNumber()) return v.asInt();
-        if (v.isTextual()) {
-            String s = v.asText(null);
-            if (s == null || s.isBlank()) return null;
-            try {
-                return Integer.parseInt(s.trim());
-            } catch (NumberFormatException ignore) {
-                return null;
-            }
-        }
-        return null;
-    }
+    private FoodLogEnvelope finalizeCreateResult(
+            Long userId,
+            String requestId,
+            Instant serverNow,
+            FoodLogEntity e,
+            FoodLogCreateSupport.UploadTempResult upload
+    ) throws Exception {
+        repo.save(e);
+        idem.attach(userId, requestId, e.getId(), serverNow);
 
-    private static Double doubleOrNull(JsonNode node, String field) {
-        if (node == null || node.isNull()) return null;
-        JsonNode v = node.get(field);
-        if (v == null || v.isNull()) return null;
-        if (v.isNumber()) {
-            double d = v.asDouble();
-            return Double.isFinite(d) ? d : null;
-        }
-        if (v.isTextual()) {
-            String s = v.asText(null);
-            if (s == null || s.isBlank()) return null;
-            try {
-                double d = Double.parseDouble(s.trim());
-                return Double.isFinite(d) ? d : null;
-            } catch (NumberFormatException ignore) {
-                return null;
-            }
-        }
-        return null;
-    }
+        createSupport.retainBlobAndAttach(e, userId, upload);
+        repo.save(e);
 
-    private static Integer computeRetryAfterSecOrNull(FoodLogTaskEntity t, Instant now) {
-        if (t == null || t.getNextRetryAtUtc() == null) return null;
-        long sec = Duration.between(now, t.getNextRetryAtUtc()).getSeconds();
-        if (sec < 0) sec = 0;
-        if (sec > Integer.MAX_VALUE) sec = Integer.MAX_VALUE;
-        return (int) sec;
-    }
-
-    static String resolveTierUsedDisplay(FoodLogEntity e) {
-        if (e == null) return null;
-
-        String method = e.getMethod();
-        if (method != null && "BARCODE".equalsIgnoreCase(method.trim())) {
-            return "BARCODE";
+        if (e.getStatus() == FoodLogStatus.DRAFT) {
+            return envelopeAssembler.assemble(e, null, requestId);
         }
 
-        ModelTier mt = DegradeLevelToModelTierResolver.resolve(e.getDegradeLevel());
-        return (mt == null) ? null : mt.name();
-    }
+        FoodLogTaskEntity t = createSupport.createQueuedTask(e.getId());
+        taskRepo.save(t);
 
-
-    private static int computePollAfterSec(FoodLogStatus status, FoodLogTaskEntity t, Instant now) {
-        if (t == null) return 2;
-
-        Integer pollAfterObj = t.getPollAfterSec();
-        int base = Math.max(1, pollAfterObj == null ? 2 : pollAfterObj);
-
-        FoodLogTaskEntity.TaskStatus ts = t.getTaskStatus();
-
-        // ✅ FAILED：用 nextRetryAtUtc 算剩餘秒數
-        if (status == FoodLogStatus.FAILED) {
-            Integer retryAfter = computeRetryAfterSecOrNull(t, now);
-            int v = (retryAfter == null) ? 5 : retryAfter;
-            return clamp(v, 2, 60);
-        }
-
-        // ✅ PENDING：針對 QUEUED 做「排隊退避」
-        if (status == FoodLogStatus.PENDING) {
-
-            // 1) QUEUED：依排隊時間退避（>30s→5、>60s→8、>120s→10）
-            if (ts == FoodLogTaskEntity.TaskStatus.QUEUED) {
-                Instant created = t.getCreatedAtUtc();
-                if (created == null) {
-                    // createdAt 不存在：保守回 base（通常 2）
-                    return clamp(base, 2, 10);
-                }
-
-                long queuedSec = Duration.between(created, now).getSeconds();
-                if (queuedSec < 0) queuedSec = 0;
-
-                int v;
-                if (queuedSec > 120) v = 10;
-                else if (queuedSec > 60) v = 8;
-                else if (queuedSec > 30) v = 5;
-                else v = base; // 通常 2
-
-                return clamp(v, 2, 10);
-            }
-
-            // 2) RUNNING：維持原本（Demo 體感好）
-            if (ts == FoodLogTaskEntity.TaskStatus.RUNNING) {
-                return clamp(base, 2, 10);
-            }
-
-            // 3) 其他狀態（理論上少見）：輕度退避
-            Integer attemptsObj = t.getAttempts();
-            int attempts = Math.max(0, attemptsObj == null ? 0 : attemptsObj);
-            int v = base + Math.min(attempts, 6);
-            return clamp(v, 2, 10);
-        }
-
-        // ✅ 其他狀態（理論上不會走到）：保守
-        return clamp(base, 2, 10);
-    }
-
-    private static int clamp(int v, int min, int max) {
-        return Math.max(min, Math.min(max, v));
+        return envelopeAssembler.assemble(e, t, requestId);
     }
 }

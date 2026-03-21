@@ -75,7 +75,7 @@ app:
         premium-limit: 15  # trialPremiumLimit
         total-limit: 30    # trialTotalLimit
       paid:
-        premium-limit: 400 # paidPremiumLimit
+        premium-limit: 300 # paidPremiumLimit
         total-limit: 800  # paidTotalLimit
     abuse-guard:
       enabled: true

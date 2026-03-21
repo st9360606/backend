@@ -36,7 +36,7 @@ public class QuotaService {
     @Value("${app.ai.quota.trial.total-limit:30}")
     private int trialTotalLimit;
 
-    @Value("${app.ai.quota.paid.premium-limit:400}")
+    @Value("${app.ai.quota.paid.premium-limit:300}")
     private int paidPremiumLimit;
 
     @Value("${app.ai.quota.paid.total-limit:800}")
