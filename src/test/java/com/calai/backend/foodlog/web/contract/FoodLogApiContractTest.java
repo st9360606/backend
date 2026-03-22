@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.web.contract;
 
 import com.calai.backend.foodlog.job.worker.FoodLogTaskWorker;
-import com.calai.backend.foodlog.provider.gemini.testsupport.MySqlContainerBaseTest;
+import com.calai.backend.testsupport.db.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;

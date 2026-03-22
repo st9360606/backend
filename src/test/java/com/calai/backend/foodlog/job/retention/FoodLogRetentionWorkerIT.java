@@ -6,7 +6,7 @@ import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
-import com.calai.backend.foodlog.provider.gemini.testsupport.MySqlContainerBaseTest;
+import com.calai.backend.testsupport.db.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
