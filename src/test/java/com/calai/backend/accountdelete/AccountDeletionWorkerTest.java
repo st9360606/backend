@@ -9,7 +9,7 @@ import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
-import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
+import com.calai.backend.foodlog.provider.gemini.testsupport.MySqlContainerBaseTest;
 import com.calai.backend.users.user.entity.User;
 import com.calai.backend.users.user.repo.UserRepo;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -1,7 +1,7 @@
 package com.calai.backend.foodlog.processing.effective;
 
 import com.calai.backend.foodlog.unit.FoodLogWarning;
-import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
+import com.calai.backend.foodlog.provider.gemini.testsupport.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;

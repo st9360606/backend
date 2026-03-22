@@ -2,7 +2,7 @@ package com.calai.backend.entitlement;
 
 import com.calai.backend.entitlement.dto.EntitlementSyncRequest;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
-import com.calai.backend.gemini.testsupport.MySqlContainerBaseTest;
+import com.calai.backend.foodlog.provider.gemini.testsupport.MySqlContainerBaseTest;
 import com.calai.backend.users.user.entity.User;
 import com.calai.backend.users.user.repo.UserRepo;
 import com.calai.backend.entitlement.service.SubscriptionVerifier;

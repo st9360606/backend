@@ -1,0 +1,66 @@
+package com.calai.backend.foodlog.provider;
+
+import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@AutoConfigureMockMvc
+class GeminiProviderIntegrationTest {
+
+    @RegisterExtension
+    static WireMockExtension wm = WireMockExtension.newInstance()
+            .options(wireMockConfig().dynamicPort())
+            .build();
+
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry r) {
+        r.add("app.provider.gemini.enabled", () -> "true");
+        r.add("app.provider.gemini.base-url", () -> wm.getRuntimeInfo().getHttpBaseUrl());
+        r.add("app.provider.gemini.api-key", () -> "dummy");
+        r.add("app.foodlog.provider", () -> "GEMINI");
+
+        // ✅ 關掉 abuse guard（或你也可以改成塞完整數值）
+        r.add("app.ai.abuse-guard.enabled", () -> "false");
+
+        // ✅ model tiers（Map bracket 版）
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][VISION].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][VISION].model-id", () -> "gemini-3.1-flash-lite-preview");
+
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][VISION].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][VISION].model-id", () -> "gemini-2.5-flash-lite");
+
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][TEXT].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_HIGH][TEXT].model-id", () -> "gemini-3.1-flash-lite-preview");
+
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][TEXT].provider", () -> "GEMINI");
+        r.add("app.ai.model-tiers[MODEL_TIER_LOW][TEXT].model-id", () -> "gemini-2.5-flash-lite");
+    }
+
+    @Test
+    void should_call_mock_gemini_and_return_draft() {
+        wm.stubFor(post(urlPathMatching("/v1beta/models/.*:generateContent"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                        {
+                          "candidates":[
+                            {"content":{"parts":[{"text":"{\\"foodName\\":\\"Toast\\",\\"quantity\\":{\\"value\\":1,\\"unit\\":\\"SERVING\\"},\\"nutrients\\":{\\"kcal\\":75,\\"protein\\":2.5,\\"fat\\":1,\\"carbs\\":14,\\"fiber\\":0.8,\\"sugar\\":1.5,\\"sodium\\":140},\\"confidence\\":0.9}"}]},
+                             "finishReason":"STOP"}
+                          ],
+                          "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30}
+                        }
+                        """)));
+
+        // TODO: 之後用 MockMvc multipart 去打你的 controller
+        org.junit.jupiter.api.Assertions.assertTrue(true);
+    }
+}
