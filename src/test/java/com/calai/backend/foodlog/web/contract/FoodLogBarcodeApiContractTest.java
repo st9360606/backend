@@ -50,13 +50,10 @@ class FoodLogBarcodeApiContractTest {
                 null,
                 null,
                 null,
-
                 // per serving
                 null, null, null, null, null, null, null,
-
                 // package size
                 null, null,
-
                 // category tags
                 List.of() // ✅ 新增
         );
