@@ -2,6 +2,7 @@ package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.service.QuotaService;
@@ -17,6 +18,7 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,7 +57,7 @@ FoodLogServiceGuardTest {
     @Mock FoodLogRetryService retryService;
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
-
+    @Mock CapturedTimeResolver timeResolver;
     private FoodLogService svc;
 
     @BeforeEach
@@ -70,6 +72,7 @@ FoodLogServiceGuardTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,
@@ -109,8 +112,8 @@ FoodLogServiceGuardTest {
         }).when(createSupport).uploadTempImage(1L, "rid-1", file);
 
         // act + assert
-        IllegalArgumentException ex = assertThrows(
-                IllegalArgumentException.class,
+        FoodLogAppException ex = assertThrows(
+                FoodLogAppException.class,
                 () -> svc.createPhoto(1L, "Asia/Taipei", "dev-1", null, file, "rid-1")
         );
 
@@ -151,7 +154,7 @@ FoodLogServiceGuardTest {
         // 也不應 attach / retain / create task
         verify(idem, never()).attach(anyLong(), anyString(), anyString(), any());
         verify(createSupport, never()).retainBlobAndAttach(any(), anyLong(), any());
-        verify(createSupport, never()).newBaseEntity(anyLong(), anyString(), any(), anyString(), any(), any(), any(), anyBoolean());
+        verify(createSupport, never()).newBaseEntity(anyLong(), any(FoodLogMethod.class), any(), anyString(), any(), any(), any(), anyBoolean());
         verify(createSupport, never()).applyCacheHitDraft(any(), any());
         verify(createSupport, never()).applyPendingMiss(any(), any(), anyString());
         verify(createSupport, never()).createQueuedTask(anyString());

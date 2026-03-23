@@ -16,6 +16,8 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +45,7 @@ import static org.mockito.Mockito.*;
  * 4. acquireInFlightOrRelease() 失敗 -> idem.failAndReleaseIfNeeded()
  */
 @ExtendWith(MockitoExtension.class)
-class FoodLogServiceCreateGuardFailureTest {
+class FoodLogServiceCreateGuardTest {
 
     @Mock ProviderClient providerClient;
     @Mock FoodLogRepository repo;
@@ -62,7 +64,7 @@ class FoodLogServiceCreateGuardFailureTest {
     @Mock FoodLogRetryService retryService;
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
-
+    @Mock CapturedTimeResolver timeResolver;
     private FoodLogService svc;
 
     @BeforeEach
@@ -77,6 +79,7 @@ class FoodLogServiceCreateGuardFailureTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,
@@ -348,8 +351,8 @@ class FoodLogServiceCreateGuardFailureTest {
         when(clock.instant()).thenReturn(fixedNow);
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
 
-        IllegalArgumentException ex = assertThrows(
-                IllegalArgumentException.class,
+        FoodLogAppException ex = assertThrows(
+                FoodLogAppException.class,
                 () -> invoker.invoke(file, requestId)
         );
 

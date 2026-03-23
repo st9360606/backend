@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.mapper;
 
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Locale;
@@ -13,8 +14,8 @@ public final class FoodLogDisplayNameResolver {
 
     public static String resolve(String method, String degradedReason, JsonNode effective) {
         String rawName = textOrNull(effective, "foodName");
-        String normalizedMethod = normalize(method);
         String normalizedReason = normalize(degradedReason);
+        FoodLogMethod m = FoodLogMethod.from(method);
 
         switch (normalizedReason) {
             case "NO_FOOD" -> {
@@ -32,13 +33,15 @@ public final class FoodLogDisplayNameResolver {
             return rawName;
         }
 
-        return switch (normalizedMethod) {
-            case "LABEL" -> "Nutrition Facts Label";
-            case "PHOTO", "ALBUM" -> "Unknown Food";
-            case "BARCODE" -> "Unknown Product";
-            default -> null;
-        };
+        if (m == null) {
+            return null;
+        }
 
+        return switch (m) {
+            case LABEL -> "Nutrition Facts Label";
+            case PHOTO, ALBUM -> "Unknown Food";
+            case BARCODE -> "Unknown Product";
+        };
     }
 
     private static String textOrNull(JsonNode node, String field) {

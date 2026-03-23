@@ -1,5 +1,6 @@
 package com.calai.backend.foodlog.processing.effective;
 
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.processing.nutrition.NutritionSanityChecker;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -100,11 +101,11 @@ public class FoodLogEffectivePostProcessor {
         boolean noLabel = hasWarning(eff, FoodLogWarning.NO_LABEL_DETECTED.name());
         boolean missingNutritionFacts = hasWarning(eff, FoodLogWarning.MISSING_NUTRITION_FACTS.name());
 
-        String m = (method == null) ? "" : method.trim().toUpperCase(Locale.ROOT);
+        FoodLogMethod m = FoodLogMethod.from(method);
 
         String reason = null;
 
-        if ("LABEL".equals(m)) {
+        if (m != null && m.isLabel()) {
             if (noLabel) reason = "NO_LABEL";
             else if (missingNutritionFacts) reason = "MISSING_NUTRITION_FACTS";
             else if (noFood) reason = "NO_LABEL";

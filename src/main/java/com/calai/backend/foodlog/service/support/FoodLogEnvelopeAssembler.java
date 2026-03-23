@@ -7,6 +7,7 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.mapper.ClientActionMapper;
 import com.calai.backend.foodlog.mapper.FoodLogDisplayNameResolver;
 import com.calai.backend.foodlog.model.ClientAction;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.quota.model.ModelTier;
 import com.calai.backend.foodlog.quota.support.DegradeLevelToModelTierResolver;
@@ -20,7 +21,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -62,6 +62,7 @@ public class FoodLogEnvelopeAssembler {
         Instant now = clock.instant();
 
         JsonNode eff = e.getEffective();
+        FoodLogMethod method = FoodLogMethod.from(e.getMethod());
 
         String tierUsed = resolveTierUsedDisplay(e);
         boolean fromCache = resolveResultFromCache(eff);
@@ -105,9 +106,7 @@ public class FoodLogEnvelopeAssembler {
 
             // 不直接信任 aiMeta.degradedReason，統一重新 canonicalize
             if (warnings != null) {
-                String method = e.getMethod() == null ? "" : e.getMethod().trim().toUpperCase(Locale.ROOT);
-
-                if ("LABEL".equals(method)) {
+                if (method != null && method.isLabel()) {
                     if (warnings.stream().anyMatch("NO_LABEL_DETECTED"::equalsIgnoreCase)) {
                         degradedReason = "NO_LABEL";
                     } else if (warnings.stream().anyMatch("MISSING_NUTRITION_FACTS"::equalsIgnoreCase)) {
@@ -156,7 +155,7 @@ public class FoodLogEnvelopeAssembler {
         if (eff != null && !eff.isNull()) {
             JsonNode n = eff.get("nutrients");
             JsonNode q = eff.get("quantity");
-            boolean barcodeZeroFill = "BARCODE".equalsIgnoreCase(e.getMethod());
+            boolean barcodeZeroFill = method != null && method.isBarcode();
 
             FoodLogEnvelope.Nutrients nutrientsView;
 
@@ -393,9 +392,9 @@ public class FoodLogEnvelopeAssembler {
     private static String resolveTierUsedDisplay(FoodLogEntity e) {
         if (e == null) return null;
 
-        String method = e.getMethod();
-        if (method != null && "BARCODE".equalsIgnoreCase(method.trim())) {
-            return "BARCODE";
+        FoodLogMethod method = FoodLogMethod.from(e.getMethod());
+        if (method != null && method.isBarcode()) {
+            return FoodLogMethod.BARCODE.code();
         }
 
         ModelTier mt = DegradeLevelToModelTierResolver.resolve(e.getDegradeLevel());

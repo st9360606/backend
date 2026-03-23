@@ -4,6 +4,7 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
@@ -20,6 +21,7 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,7 +32,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
-
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -81,7 +83,7 @@ class FoodLogServiceCreateEdgeCaseTest {
     @Mock FoodLogRetryService retryService;
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
-
+    @Mock CapturedTimeResolver timeResolver;
     private FoodLogService svc;
 
     @BeforeEach
@@ -96,6 +98,7 @@ class FoodLogServiceCreateEdgeCaseTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,
@@ -163,6 +166,7 @@ class FoodLogServiceCreateEdgeCaseTest {
         );
     }
 
+
     /**
      * reusable hit 存在，但 effective 不是 object：
      * 應被視為 miss，而不是 cache hit。
@@ -178,6 +182,8 @@ class FoodLogServiceCreateEdgeCaseTest {
         String requestId = "rid-non-object-hit";
         String tempKey = "temp/u1/rid-non-object-hit.jpg";
         String sha256 = "sha-non-object-hit";
+
+        stubResolvedTime(fixedNow);
 
         UserInFlightLimiter.Lease lease = new UserInFlightLimiter.Lease(1L, "lease-non-object-hit");
 
@@ -229,7 +235,7 @@ class FoodLogServiceCreateEdgeCaseTest {
 
         when(createSupport.newBaseEntity(
                 eq(1L),
-                anyString(),
+                any(FoodLogMethod.class),
                 any(Instant.class),
                 eq("Asia/Taipei"),
                 any(),
@@ -247,7 +253,6 @@ class FoodLogServiceCreateEdgeCaseTest {
 
         when(providerClient.providerCode()).thenReturn("gemini");
 
-        // fallback miss 路徑：手動把 status 補成 PENDING
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.PENDING);
@@ -272,7 +277,6 @@ class FoodLogServiceCreateEdgeCaseTest {
 
             assertSame(expected, actual);
 
-            // reusable hit 雖存在，但因 effective 非 object，應 fallback 成 miss
             verify(createSupport, never()).applyCacheHitDraft(any(), any());
 
             verify(abuseGuard).onOperationAttempt(
@@ -322,6 +326,8 @@ class FoodLogServiceCreateEdgeCaseTest {
         String tempKey = "temp/u1/rid-failed-status.jpg";
         String sha256 = "sha-failed-status";
 
+        stubResolvedTime(fixedNow);
+
         UserInFlightLimiter.Lease lease = new UserInFlightLimiter.Lease(1L, "lease-failed-status");
 
         MultipartFile validFile = new MockMultipartFile(
@@ -367,7 +373,7 @@ class FoodLogServiceCreateEdgeCaseTest {
 
         when(createSupport.newBaseEntity(
                 eq(1L),
-                anyString(),
+                any(FoodLogMethod.class),
                 any(Instant.class),
                 eq("Asia/Taipei"),
                 any(),
@@ -385,7 +391,6 @@ class FoodLogServiceCreateEdgeCaseTest {
 
         when(providerClient.providerCode()).thenReturn("gemini");
 
-        // 故意把 status 設成 FAILED，驗證目前 finalize 仍會建 task
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.FAILED);
@@ -444,6 +449,17 @@ class FoodLogServiceCreateEdgeCaseTest {
             verify(idem, never()).failAndReleaseIfNeeded(anyLong(), anyString(), any(Boolean.class));
             verify(inFlight).release(lease);
         }
+    }
+
+
+    private void stubResolvedTime(Instant resolvedAtUtc) {
+        CapturedTimeResolver.Result resolved = mock(CapturedTimeResolver.Result.class, RETURNS_DEEP_STUBS);
+
+        when(resolved.capturedAtUtc()).thenReturn(resolvedAtUtc);
+        when(resolved.source().name()).thenReturn("SERVER_RECEIVED");
+        when(resolved.suspect()).thenReturn(false);
+
+        when(timeResolver.resolve(any(), any(), eq(resolvedAtUtc))).thenReturn(resolved);
     }
 
     @FunctionalInterface

@@ -14,6 +14,7 @@ import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsEffe
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
@@ -82,7 +83,6 @@ public class FoodLogBarcodeService {
             EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
 
             rateLimiter.checkOrThrow(userId, tier, now);
-
             abuseGuard.onBarcodeAttempt(userId, did, now, quotaTz);
 
             String langKey = OpenFoodFactsLang.normalizeLangKey(preferredLangTag);
@@ -199,7 +199,7 @@ public class FoodLogBarcodeService {
 
             FoodLogEntity e = new FoodLogEntity();
             e.setUserId(userId);
-            e.setMethod("BARCODE");
+            e.setMethod(FoodLogMethod.BARCODE.code());
             e.setProvider("OPENFOODFACTS");
             e.setDegradeLevel("DG-0");
             e.setCapturedAtUtc(now);
@@ -276,7 +276,7 @@ public class FoodLogBarcodeService {
     ) {
         FoodLogEntity e = new FoodLogEntity();
         e.setUserId(userId);
-        e.setMethod("BARCODE");
+        e.setMethod(FoodLogMethod.BARCODE.code());
         e.setProvider("OPENFOODFACTS");
         e.setDegradeLevel("DG-0");
         e.setCapturedAtUtc(now);
@@ -316,5 +316,4 @@ public class FoodLogBarcodeService {
         String m = t.getMessage();
         return (m == null || m.isBlank()) ? t.getClass().getSimpleName() : m;
     }
-
 }

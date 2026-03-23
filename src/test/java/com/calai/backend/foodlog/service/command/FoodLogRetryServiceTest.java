@@ -4,6 +4,7 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
@@ -12,6 +13,7 @@ import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.calai.backend.foodlog.web.error.RateLimitedException;
 import com.calai.backend.foodlog.web.error.SubscriptionRequiredException;
 import org.junit.jupiter.api.BeforeEach;
@@ -176,8 +178,11 @@ class FoodLogRetryServiceTest {
         when(repo.findByIdForUpdate(foodLogId)).thenReturn(Optional.of(log));
 
         assertThatThrownBy(() -> service.retry(userId, foodLogId, null, "req-x"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("FOOD_LOG_DELETED");
+                .isInstanceOfSatisfying(FoodLogAppException.class, ex -> {
+                    assertThat(ex.getErrorCode()).isEqualTo(FoodLogErrorCode.FOOD_LOG_DELETED);
+                    assertThat(ex.code()).isEqualTo("FOOD_LOG_DELETED");
+                    assertThat(ex.getMessage()).isEqualTo("FOOD_LOG_DELETED");
+                });
 
         verifyNoInteractions(entitlementService, rateLimiter, abuseGuard, quota, envelopeAssembler);
         verify(taskRepo, never()).save(any());
@@ -196,8 +201,11 @@ class FoodLogRetryServiceTest {
         when(repo.findByIdForUpdate(foodLogId)).thenReturn(Optional.of(log));
 
         assertThatThrownBy(() -> service.retry(userId, foodLogId, null, "req-status"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("FOOD_LOG_NOT_RETRYABLE");
+                .isInstanceOfSatisfying(FoodLogAppException.class, ex -> {
+                    assertThat(ex.getErrorCode()).isEqualTo(FoodLogErrorCode.FOOD_LOG_NOT_RETRYABLE);
+                    assertThat(ex.code()).isEqualTo("FOOD_LOG_NOT_RETRYABLE");
+                    assertThat(ex.getMessage()).isEqualTo("FOOD_LOG_NOT_RETRYABLE");
+                });
 
         verifyNoInteractions(entitlementService, rateLimiter, abuseGuard, quota, envelopeAssembler);
     }
@@ -212,8 +220,11 @@ class FoodLogRetryServiceTest {
         when(repo.findByIdForUpdate(foodLogId)).thenReturn(Optional.of(log));
 
         assertThatThrownBy(() -> service.retry(userId, foodLogId, null, "req-barcode"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("FOOD_LOG_NOT_RETRYABLE");
+                .isInstanceOfSatisfying(FoodLogAppException.class, ex -> {
+                    assertThat(ex.getErrorCode()).isEqualTo(FoodLogErrorCode.FOOD_LOG_NOT_RETRYABLE);
+                    assertThat(ex.code()).isEqualTo("FOOD_LOG_NOT_RETRYABLE");
+                    assertThat(ex.getMessage()).isEqualTo("FOOD_LOG_NOT_RETRYABLE");
+                });
 
         verifyNoInteractions(entitlementService, rateLimiter, abuseGuard, quota, envelopeAssembler);
     }

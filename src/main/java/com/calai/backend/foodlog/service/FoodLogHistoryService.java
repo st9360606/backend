@@ -5,6 +5,7 @@ import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.mapper.FoodLogDisplayNameResolver;
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
@@ -16,8 +17,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import java.util.List;
+
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Locale;
 
 // NOTE:
@@ -35,13 +37,25 @@ public class FoodLogHistoryService {
     public FoodLogEnvelope save(Long userId, String foodLogId, String requestId) {
         FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
                 .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
-        if (!userId.equals(log.getUserId())) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
+        if (!userId.equals(log.getUserId())) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
+        }
 
-        if (log.getStatus() == FoodLogStatus.DELETED) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
-        if (log.getStatus() == FoodLogStatus.SAVED) return foodLogService.getOne(userId, foodLogId, requestId);
-        if (log.getStatus() == FoodLogStatus.PENDING) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_READY);
-        if (log.getStatus() == FoodLogStatus.FAILED) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_FAILED);
-        if (log.getStatus() != FoodLogStatus.DRAFT) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_SAVABLE);
+        if (log.getStatus() == FoodLogStatus.DELETED) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
+        }
+        if (log.getStatus() == FoodLogStatus.SAVED) {
+            return foodLogService.getOne(userId, foodLogId, requestId);
+        }
+        if (log.getStatus() == FoodLogStatus.PENDING) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_READY);
+        }
+        if (log.getStatus() == FoodLogStatus.FAILED) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_FAILED);
+        }
+        if (log.getStatus() != FoodLogStatus.DRAFT) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_SAVABLE);
+        }
 
         log.setStatus(FoodLogStatus.SAVED);
         logRepo.save(log);
@@ -76,23 +90,36 @@ public class FoodLogHistoryService {
         if (size > 50) throw new FoodLogAppException(FoodLogErrorCode.PAGE_SIZE_TOO_LARGE);
         if (page < 0) page = 0;
 
-        if (fromLocalDate == null || toLocalDate == null) throw new FoodLogAppException(FoodLogErrorCode.DATE_RANGE_REQUIRED);
-        if (fromLocalDate.isAfter(toLocalDate)) throw new FoodLogAppException(FoodLogErrorCode.DATE_RANGE_INVALID);
+        if (fromLocalDate == null || toLocalDate == null) {
+            throw new FoodLogAppException(FoodLogErrorCode.DATE_RANGE_REQUIRED);
+        }
+        if (fromLocalDate.isAfter(toLocalDate)) {
+            throw new FoodLogAppException(FoodLogErrorCode.DATE_RANGE_INVALID);
+        }
 
         var pageable = PageRequest.of(page, size);
-        var p = logRepo.findByUserIdAndStatusAndCapturedLocalDateRange(userId, status, fromLocalDate, toLocalDate, pageable);
+        var p = logRepo.findByUserIdAndStatusAndCapturedLocalDateRange(
+                userId, status, fromLocalDate, toLocalDate, pageable
+        );
 
         var items = p.getContent().stream().map(this::toItem).toList();
 
         return new FoodLogListResponse(
                 items,
-                new FoodLogListResponse.Page(p.getNumber(), p.getSize(), p.getTotalElements(), p.getTotalPages()),
+                new FoodLogListResponse.Page(
+                        p.getNumber(),
+                        p.getSize(),
+                        p.getTotalElements(),
+                        p.getTotalPages()
+                ),
                 new FoodLogEnvelope.Trace(requestId)
         );
     }
 
     private static FoodLogStatus parseStatusOrThrow(String raw) {
-        if (raw == null) throw new FoodLogAppException(FoodLogErrorCode.BAD_REQUEST);
+        if (raw == null) {
+            throw new FoodLogAppException(FoodLogErrorCode.BAD_REQUEST);
+        }
         String v = raw.trim().toUpperCase(Locale.ROOT);
         try {
             return FoodLogStatus.valueOf(v);
@@ -103,6 +130,7 @@ public class FoodLogHistoryService {
 
     private FoodLogListResponse.Item toItem(FoodLogEntity e) {
         JsonNode eff = e.getEffective();
+        FoodLogMethod method = FoodLogMethod.from(e.getMethod());
 
         String foodName = null;
 
@@ -125,7 +153,7 @@ public class FoodLogHistoryService {
             reasoning = textOrNull(eff.get("_reasoning"));
 
             JsonNode n = eff.get("nutrients");
-            boolean barcodeZeroFill = "BARCODE".equalsIgnoreCase(e.getMethod());
+            boolean barcodeZeroFill = method != null && method.isBarcode();
 
             if (barcodeZeroFill) {
                 // ✅ BARCODE：即使 nutrients 不存在，也補全 0.0
@@ -168,10 +196,8 @@ public class FoodLogHistoryService {
                 foodSubCategory = textOrNull(aiMetaNode.get("foodSubCategory"));
             }
 
-            String method = e.getMethod() == null ? "" : e.getMethod().trim().toUpperCase(java.util.Locale.ROOT);
-
             if (warnings != null) {
-                if ("LABEL".equals(method)) {
+                if (method != null && method.isLabel()) {
                     // LABEL 模式下，允許用 warnings 覆蓋掉 aiMeta 先前寫錯的 NO_FOOD
                     if (warnings.contains("NO_LABEL_DETECTED")) {
                         degradedReason = "NO_LABEL";

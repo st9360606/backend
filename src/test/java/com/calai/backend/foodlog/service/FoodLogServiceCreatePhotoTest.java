@@ -20,6 +20,7 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +47,7 @@ import static org.mockito.Mockito.*;
  * 2. cache miss -> PENDING -> 扣 quota、建 task
  */
 @ExtendWith(MockitoExtension.class)
-class FoodLogServiceCreatePhotoFlowTest {
+class FoodLogServiceCreatePhotoTest {
 
     @Mock ProviderClient providerClient;
     @Mock FoodLogRepository repo;
@@ -65,7 +66,7 @@ class FoodLogServiceCreatePhotoFlowTest {
     @Mock FoodLogRetryService retryService;
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
-
+    @Mock CapturedTimeResolver timeResolver;
     private FoodLogService svc;
 
     @BeforeEach
@@ -80,6 +81,7 @@ class FoodLogServiceCreatePhotoFlowTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,

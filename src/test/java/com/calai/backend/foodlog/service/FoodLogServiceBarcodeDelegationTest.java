@@ -17,8 +17,10 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -45,7 +47,7 @@ class FoodLogServiceBarcodeDelegationTest {
     private FoodLogRetryService retryService = mock(FoodLogRetryService.class);
     private FoodLogBarcodeService barcodeService = mock(FoodLogBarcodeService.class);
     private FoodLogCreateSupport createSupport = mock(FoodLogCreateSupport.class);
-
+    private CapturedTimeResolver timeResolver = mock(CapturedTimeResolver.class);
     private FoodLogService service;
 
     @BeforeEach
@@ -60,6 +62,7 @@ class FoodLogServiceBarcodeDelegationTest {
                 inFlight,
                 rateLimiter,
                 Clock.fixed(Instant.parse("2026-03-20T08:00:00Z"), ZoneOffset.UTC),
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,

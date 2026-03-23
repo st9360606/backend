@@ -18,6 +18,7 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -98,6 +99,9 @@ class FoodLogServiceDelegationTest {
     @Mock
     private FoodLogCreateSupport createSupport;
 
+    @Mock
+    CapturedTimeResolver timeResolver;
+
     private FoodLogService service;
 
     @BeforeEach
@@ -112,6 +116,7 @@ class FoodLogServiceDelegationTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,

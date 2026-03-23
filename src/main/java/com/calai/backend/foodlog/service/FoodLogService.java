@@ -5,6 +5,7 @@ import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
@@ -56,8 +57,15 @@ public class FoodLogService {
     }
 
     private static final long MAX_IMAGE_BYTES = 15L * 1024 * 1024;
-    private static final List<String> DEDUPE_METHODS_PHOTO_ALBUM = List.of("PHOTO", "ALBUM");
-    private static final List<String> DEDUPE_METHODS_LABEL = List.of("LABEL");
+
+    private static final List<String> DEDUPE_METHODS_PHOTO_ALBUM = List.of(
+            FoodLogMethod.PHOTO.code(),
+            FoodLogMethod.ALBUM.code()
+    );
+
+    private static final List<String> DEDUPE_METHODS_LABEL = List.of(
+            FoodLogMethod.LABEL.code()
+    );
 
     private final FoodLogRepository repo;
     private final FoodLogTaskRepository taskRepo;
@@ -67,7 +75,7 @@ public class FoodLogService {
     private final UserInFlightLimiter inFlight;
     private final UserRateLimiter rateLimiter;
     private final Clock clock;
-    private final CapturedTimeResolver timeResolver = new CapturedTimeResolver();
+    private final CapturedTimeResolver timeResolver;
     private final AbuseGuardService abuseGuard;
     private final EntitlementService entitlementService;
     private final FoodLogEnvelopeAssembler envelopeAssembler;
@@ -147,7 +155,7 @@ public class FoodLogService {
 
                 FoodLogEntity e = createSupport.newBaseEntity(
                         userId,
-                        "ALBUM",
+                        FoodLogMethod.ALBUM,
                         serverNow,
                         captureTz.getId(),
                         todayLocal,
@@ -167,7 +175,7 @@ public class FoodLogService {
 
             } catch (Exception ex) {
                 cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
-                idem.failAndReleaseIfNeeded(userId, requestId,  true);
+                idem.failAndReleaseIfNeeded(userId, requestId, true);
                 throw ex;
             }
 
@@ -180,7 +188,14 @@ public class FoodLogService {
     // S4-08：PHOTO
     // =========================
     @Transactional(rollbackFor = Exception.class)
-    public FoodLogEnvelope createPhoto(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
+    public FoodLogEnvelope createPhoto(
+            Long userId,
+            String clientTz,
+            String deviceId,
+            String deviceCapturedAtUtc,
+            MultipartFile file,
+            String requestId
+    ) throws Exception {
 
         ZoneId captureTz = FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz);
         ZoneId quotaTz = FoodLogRequestNormalizer.resolveQuotaTz();
@@ -239,7 +254,7 @@ public class FoodLogService {
 
                 FoodLogEntity e = createSupport.newBaseEntity(
                         userId,
-                        "PHOTO",
+                        FoodLogMethod.PHOTO,
                         r.capturedAtUtc(),
                         captureTz.getId(),
                         localDate,
@@ -260,7 +275,7 @@ public class FoodLogService {
             } catch (Exception ex) {
                 // ✅ retain 後若後續失敗，只清 tempKey；blob orphan 留給背景 cleaner
                 cleanupUploadOrBlobAfterFailure(storage, userId, requestId, tempKey);
-                idem.failAndReleaseIfNeeded(userId, requestId,  true);
+                idem.failAndReleaseIfNeeded(userId, requestId, true);
                 throw ex;
             }
 
@@ -273,7 +288,14 @@ public class FoodLogService {
     // LABEL：營養標示（Gemini 3 Flash）
     // =========================
     @Transactional(rollbackFor = Exception.class)
-    public FoodLogEnvelope createLabel(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
+    public FoodLogEnvelope createLabel(
+            Long userId,
+            String clientTz,
+            String deviceId,
+            String deviceCapturedAtUtc,
+            MultipartFile file,
+            String requestId
+    ) throws Exception {
 
         ZoneId captureTz = FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz);
         ZoneId quotaTz = FoodLogRequestNormalizer.resolveQuotaTz();
@@ -328,7 +350,7 @@ public class FoodLogService {
 
                 FoodLogEntity e = createSupport.newBaseEntity(
                         userId,
-                        "LABEL",
+                        FoodLogMethod.LABEL,
                         r.capturedAtUtc(),
                         captureTz.getId(),
                         localDate,

@@ -5,6 +5,7 @@ import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
@@ -22,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.Locale;
 
 /**
  * 專門負責 food log retry 流程。
@@ -64,11 +64,8 @@ public class FoodLogRetryService {
             throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
         }
 
-        String method = log.getMethod() == null ? "" : log.getMethod().trim().toUpperCase(Locale.ROOT);
-        boolean retryableMethod =
-                "PHOTO".equals(method)
-                || "ALBUM".equals(method)
-                || "LABEL".equals(method);
+        FoodLogMethod method = FoodLogMethod.from(log.getMethod());
+        boolean retryableMethod = method != null && method.isRetryableByUser();
 
         if (!retryableMethod || log.getStatus() != FoodLogStatus.FAILED) {
             throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_RETRYABLE);

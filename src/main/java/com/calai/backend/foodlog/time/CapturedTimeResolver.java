@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.time;
 
 import com.calai.backend.foodlog.model.TimeSource;
+import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -15,6 +16,7 @@ import java.util.Objects;
  * - 若 EXIF 不可信，但 DEVICE_CLOCK 可信，應改用 DEVICE_CLOCK
  * - 若兩者都不可信，才退回 SERVER_RECEIVED，並 suspect=true
  */
+@Component
 public final class CapturedTimeResolver {
 
     public record Result(Instant capturedAtUtc, TimeSource source, boolean suspect) {}

@@ -4,6 +4,7 @@ import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.image.ImageSniffer;
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
@@ -124,6 +125,28 @@ public class FoodLogCreateSupport {
         t.setPollAfterSec(2);
         t.setNextRetryAtUtc(null);
         return t;
+    }
+
+    public FoodLogEntity newBaseEntity(
+            Long userId,
+            FoodLogMethod method,
+            Instant capturedAtUtc,
+            String capturedTz,
+            LocalDate capturedLocalDate,
+            Instant serverReceivedAtUtc,
+            TimeSource timeSource,
+            boolean timeSuspect
+    ) {
+        return newBaseEntity(
+                userId,
+                method == null ? null : method.code(),
+                capturedAtUtc,
+                capturedTz,
+                capturedLocalDate,
+                serverReceivedAtUtc,
+                timeSource,
+                timeSuspect
+        );
     }
 
     public FoodLogEntity newBaseEntity(

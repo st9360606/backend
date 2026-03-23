@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.service.QuotaService;
@@ -16,6 +17,7 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -63,7 +65,7 @@ class FoodLogServiceCreateUploadFailureTest {
     @Mock FoodLogRetryService retryService;
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
-
+    @Mock CapturedTimeResolver timeResolver;
     private FoodLogService svc;
 
     @BeforeEach
@@ -78,6 +80,7 @@ class FoodLogServiceCreateUploadFailureTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,
@@ -177,7 +180,7 @@ class FoodLogServiceCreateUploadFailureTest {
         verify(taskRepo, never()).save(any());
         verify(idem, never()).attach(anyLong(), any(), any(), any());
         verify(createSupport, never()).retainBlobAndAttach(any(), anyLong(), any());
-        verify(createSupport, never()).newBaseEntity(anyLong(), anyString(), any(), anyString(), any(), any(), any(), anyBoolean());
+        verify(createSupport, never()).newBaseEntity(anyLong(), any(FoodLogMethod.class), any(), anyString(), any(), any(), any(), anyBoolean());
         verify(createSupport, never()).applyCacheHitDraft(any(), any());
         verify(createSupport, never()).applyPendingMiss(any(), any(), anyString());
         verify(createSupport, never()).createQueuedTask(anyString());

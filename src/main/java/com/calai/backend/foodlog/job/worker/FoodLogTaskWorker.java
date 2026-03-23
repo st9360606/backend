@@ -2,14 +2,15 @@ package com.calai.backend.foodlog.job.worker;
 
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
-import com.calai.backend.foodlog.provider.support.ProviderErrorMapper;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.provider.support.ProviderErrorMapper;
 import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -282,10 +283,16 @@ public class FoodLogTaskWorker {
             return;
         }
 
+        FoodLogMethod m = FoodLogMethod.from(method);
+
         // LABEL：單次失敗若是 PROVIDER_BAD_RESPONSE，直接降級成 NO_LABEL_DETECTED，不做 retry
-        if ("LABEL".equalsIgnoreCase(method) && "PROVIDER_BAD_RESPONSE".equals(mappedCode)) {
+        if (m != null && m.isLabel() && "PROVIDER_BAD_RESPONSE".equals(mappedCode)) {
             ObjectNode fallbackNoLabel = fallbackNoLabelDetectedEffective();
-            ObjectNode finalEff = postProcessor.apply(fallbackNoLabel, "GEMINI", "LABEL");
+            ObjectNode finalEff = postProcessor.apply(
+                    fallbackNoLabel,
+                    "GEMINI",
+                    FoodLogMethod.LABEL.code()
+            );
 
             logEntity.setEffective(finalEff);
             logEntity.setProvider("GEMINI");

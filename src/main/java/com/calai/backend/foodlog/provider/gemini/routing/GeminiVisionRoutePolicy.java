@@ -1,31 +1,19 @@
 package com.calai.backend.foodlog.provider.gemini.routing;
 
-import java.util.Locale;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 
-/**
- * PHOTO / ALBUM：
- * - 主流程仍以 GEMINI 為主
- * - 最多 2 次 GEMINI
- * - 允許 OFF name-search fallback
- * - 先不開 OFF local barcode fast path，避免抓到背景條碼
- * BARCODE：
- * - 不在 GeminiProviderClient 內處理
- * - 仍由 FoodLogService#createBarcodeMvp() 走 OFF
- * LABEL：
- * - 保持既有行為
- */
 public final class GeminiVisionRoutePolicy {
 
     private GeminiVisionRoutePolicy() {}
 
     public static boolean isPhotoOrAlbum(String method) {
-        if (method == null) return false;
-        String m = method.trim().toUpperCase(Locale.ROOT);
-        return "PHOTO".equals(m) || "ALBUM".equals(m);
+        FoodLogMethod m = FoodLogMethod.from(method);
+        return m == FoodLogMethod.PHOTO || m == FoodLogMethod.ALBUM;
     }
 
     public static boolean isLabel(String method) {
-        return method != null && "LABEL".equalsIgnoreCase(method.trim());
+        FoodLogMethod m = FoodLogMethod.from(method);
+        return m != null && m.isLabel();
     }
 
     /**

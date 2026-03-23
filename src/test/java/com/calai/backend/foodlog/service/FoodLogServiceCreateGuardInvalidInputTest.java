@@ -16,6 +16,8 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -61,7 +63,7 @@ class FoodLogServiceCreateGuardInvalidInputTest {
     @Mock FoodLogRetryService retryService;
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
-
+    @Mock CapturedTimeResolver timeResolver;
     private FoodLogService svc;
 
     @BeforeEach
@@ -76,6 +78,7 @@ class FoodLogServiceCreateGuardInvalidInputTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,
@@ -192,8 +195,8 @@ class FoodLogServiceCreateGuardInvalidInputTest {
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
         doNothing().when(idem).failAndReleaseIfNeeded(1L, requestId, true);
 
-        IllegalArgumentException ex = assertThrows(
-                IllegalArgumentException.class,
+        FoodLogAppException ex = assertThrows(
+                FoodLogAppException.class,
                 () -> invoker.invoke(requestId)
         );
 
@@ -231,8 +234,8 @@ class FoodLogServiceCreateGuardInvalidInputTest {
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
         doNothing().when(idem).failAndReleaseIfNeeded(1L, requestId, true);
 
-        IllegalArgumentException ex = assertThrows(
-                IllegalArgumentException.class,
+        FoodLogAppException ex = assertThrows(
+                FoodLogAppException.class,
                 () -> invoker.invoke(tooLargeFile, requestId)
         );
 

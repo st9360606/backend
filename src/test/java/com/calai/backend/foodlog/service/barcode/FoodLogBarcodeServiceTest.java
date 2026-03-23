@@ -2,15 +2,16 @@ package com.calai.backend.foodlog.service.barcode;
 
 import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.barcode.BarcodeLookupService;
+import com.calai.backend.foodlog.barcode.normalize.BarcodePortionCanonicalizer;
 import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsLang;
 import com.calai.backend.foodlog.barcode.openfoodfacts.error.OffHttpException;
 import com.calai.backend.foodlog.barcode.openfoodfacts.error.OffParseException;
 import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
 import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsCategoryResolver;
 import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsEffectiveBuilder;
-import com.calai.backend.foodlog.barcode.normalize.BarcodePortionCanonicalizer;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
@@ -19,6 +20,7 @@ import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.service.query.FoodLogQueryService;
 import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.calai.backend.foodlog.web.error.RateLimitedException;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
@@ -106,8 +108,11 @@ class FoodLogBarcodeServiceTest {
             assertThatThrownBy(() ->
                     service.createBarcodeMvp(USER_ID, CLIENT_TZ, DEVICE_ID, "   ", LANG, REQUEST_ID)
             )
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("BARCODE_REQUIRED");
+                    .isInstanceOfSatisfying(FoodLogAppException.class, ex -> {
+                        assertThat(ex.getErrorCode()).isEqualTo(FoodLogErrorCode.BARCODE_REQUIRED);
+                        assertThat(ex.code()).isEqualTo("BARCODE_REQUIRED");
+                        assertThat(ex.getMessage()).isEqualTo("BARCODE_REQUIRED");
+                    });
 
             verifyNoInteractions(idem, queryService, barcodeLookupService, repo, txTemplate);
         }

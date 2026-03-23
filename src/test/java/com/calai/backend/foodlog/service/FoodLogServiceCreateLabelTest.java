@@ -4,7 +4,9 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
@@ -21,6 +23,7 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +37,7 @@ import org.springframework.mock.web.MockMultipartFile;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.Optional;
@@ -41,27 +45,28 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * createLabel() happy path 測試
- * <p>
+ *
  * 驗證兩條主路徑：
  * 1. cache hit -> DRAFT -> 不扣 quota、不建 task
  * 2. cache miss -> PENDING -> 扣 quota、建 task
  */
 @ExtendWith(MockitoExtension.class)
 public class FoodLogServiceCreateLabelTest {
-
-    /**
-     * createLabel() happy path 測試
-     * <p>
-     * 驗證兩條主路徑：
-     * 1. cache hit -> DRAFT -> 不扣 quota、不建 task
-     * 2. cache miss -> PENDING -> 扣 quota、建 task
-     */
 
     @Mock
     ProviderClient providerClient;
@@ -97,6 +102,8 @@ public class FoodLogServiceCreateLabelTest {
     FoodLogBarcodeService barcodeService;
     @Mock
     FoodLogCreateSupport createSupport;
+    @Mock
+    CapturedTimeResolver timeResolver;
 
     private FoodLogService svc;
 
@@ -112,6 +119,7 @@ public class FoodLogServiceCreateLabelTest {
                 inFlight,
                 rateLimiter,
                 clock,
+                timeResolver,
                 abuseGuard,
                 entitlementService,
                 envelopeAssembler,
@@ -121,6 +129,22 @@ public class FoodLogServiceCreateLabelTest {
                 barcodeService,
                 createSupport
         );
+    }
+
+    /**
+     * createLabel() 內部一定會先呼叫 timeResolver.resolve(...)
+     * 然後立刻取 r.capturedAtUtc() / r.source().name() / r.suspect()
+     * 若不 stub，Mockito 預設回 null，service 會直接 NPE。
+     */
+    private void stubResolvedTime(Instant resolvedAtUtc, Instant serverNow) {
+        CapturedTimeResolver.Result resolved =
+                mock(CapturedTimeResolver.Result.class, org.mockito.Answers.RETURNS_DEEP_STUBS);
+
+        when(resolved.capturedAtUtc()).thenReturn(resolvedAtUtc);
+        when(resolved.source().name()).thenReturn("SERVER_RECEIVED");
+        when(resolved.suspect()).thenReturn(false);
+
+        when(timeResolver.resolve(any(), any(), eq(serverNow))).thenReturn(resolved);
     }
 
     @Test
@@ -157,6 +181,8 @@ public class FoodLogServiceCreateLabelTest {
         when(clock.instant()).thenReturn(fixedNow);
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
 
+        stubResolvedTime(fixedNow, fixedNow);
+
         when(entitlementService.resolveTier(1L, fixedNow))
                 .thenReturn(EntitlementService.Tier.TRIAL);
 
@@ -175,24 +201,23 @@ public class FoodLogServiceCreateLabelTest {
                 anyCollection()
         )).thenReturn(Optional.of(reusableHit));
 
-        when(createSupport.newBaseEntity(
+        doReturn(newEntity).when(createSupport).newBaseEntity(
                 eq(1L),
-                eq("LABEL"),
+                eq(FoodLogMethod.LABEL),
                 any(Instant.class),
                 eq("Asia/Taipei"),
-                any(),
+                any(LocalDate.class),
                 eq(fixedNow),
-                any(),
-                anyBoolean()
-        )).thenReturn(newEntity);
+                eq(TimeSource.SERVER_RECEIVED),
+                eq(false)
+        );
 
-        // 關鍵：mock 不會真的改狀態，要手動補 side effect
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.DRAFT);
             e.setEffective(JsonNodeFactory.instance.objectNode().put("foodName", "Nutrition Label"));
             return null;
-        }).when(createSupport).applyCacheHitDraft(any(FoodLogEntity.class), same(reusableHit));
+        }).when(createSupport).applyCacheHitDraft(same(newEntity), same(reusableHit));
 
         when(envelopeAssembler.assemble(newEntity, null, requestId)).thenReturn(expected);
 
@@ -220,7 +245,6 @@ public class FoodLogServiceCreateLabelTest {
             verify(rateLimiter).checkOrThrow(1L, EntitlementService.Tier.TRIAL, fixedNow);
             verify(inFlight).acquireOrThrow(1L);
 
-            // LABEL dedupe 應只查 LABEL
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Collection<String>> methodsCaptor = ArgumentCaptor.forClass(Collection.class);
 
@@ -247,14 +271,12 @@ public class FoodLogServiceCreateLabelTest {
             verify(createSupport).applyCacheHitDraft(newEntity, reusableHit);
             verifyNoInteractions(quota);
 
-            // finalizeCreateResult：save 兩次 + attach 一次 + retain 一次
             verify(repo, times(2)).save(newEntity);
             verify(idem).attach(1L, requestId, "log-new-label-1", fixedNow);
             verify(createSupport).retainBlobAndAttach(newEntity, 1L, upload);
 
-            // DRAFT 不應建 task
             verify(taskRepo, never()).save(any());
-            verify(createSupport, never()).createQueuedTask(anyString());
+            verify(createSupport, never()).createQueuedTask(any());
 
             verify(envelopeAssembler).assemble(newEntity, null, requestId);
             verify(inFlight).release(lease);
@@ -282,7 +304,6 @@ public class FoodLogServiceCreateLabelTest {
         FoodLogCreateSupport.UploadTempResult upload = mock(FoodLogCreateSupport.UploadTempResult.class);
         StorageService.SaveResult saved = mock(StorageService.SaveResult.class);
 
-        // ✅ 不要 mock record，直接用真的 Decision
         QuotaService.Decision decision = new QuotaService.Decision(ModelTier.MODEL_TIER_HIGH);
 
         FoodLogEntity newEntity = new FoodLogEntity();
@@ -295,6 +316,8 @@ public class FoodLogServiceCreateLabelTest {
 
         when(clock.instant()).thenReturn(fixedNow);
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
+
+        stubResolvedTime(fixedNow, fixedNow);
 
         doReturn(EntitlementService.Tier.TRIAL)
                 .when(entitlementService)
@@ -315,16 +338,16 @@ public class FoodLogServiceCreateLabelTest {
                 anyCollection()
         )).thenReturn(Optional.empty());
 
-        when(createSupport.newBaseEntity(
+        doReturn(newEntity).when(createSupport).newBaseEntity(
                 eq(1L),
-                eq("LABEL"),
+                eq(FoodLogMethod.LABEL),
                 any(Instant.class),
                 eq("Asia/Taipei"),
-                any(),
+                any(LocalDate.class),
                 eq(fixedNow),
-                any(),
-                anyBoolean()
-        )).thenReturn(newEntity);
+                eq(TimeSource.SERVER_RECEIVED),
+                eq(false)
+        );
 
         when(quota.consumeOperationOrThrow(
                 eq(1L),
@@ -335,14 +358,13 @@ public class FoodLogServiceCreateLabelTest {
 
         when(providerClient.providerCode()).thenReturn("gemini");
 
-        // 關鍵：mock 不會真的改狀態，要手動補 side effect
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.PENDING);
             return null;
         }).when(createSupport).applyPendingMiss(
                 same(newEntity),
-                any(),
+                eq(ModelTier.MODEL_TIER_HIGH),
                 eq("GEMINI")
         );
 

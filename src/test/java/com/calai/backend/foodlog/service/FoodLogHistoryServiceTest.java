@@ -3,6 +3,7 @@ package com.calai.backend.foodlog.service;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -46,7 +47,7 @@ class FoodLogHistoryServiceTest {
 
         FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService);
 
-        var ex = assertThrows(IllegalArgumentException.class, () ->
+        var ex = assertThrows(FoodLogAppException.class, () ->
                 svc.save(10L, "L1", "RID")
         );
         assertEquals("FOOD_LOG_NOT_READY", ex.getMessage());

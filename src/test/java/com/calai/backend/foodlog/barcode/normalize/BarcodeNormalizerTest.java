@@ -1,12 +1,15 @@
 package com.calai.backend.foodlog.barcode.normalize;
 
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * 測試 BarcodeNormalizer.normalizeOrThrow()：
@@ -25,11 +28,13 @@ class BarcodeNormalizerTest {
         @Test
         @DisplayName("raw = null 時應拋 BARCODE_REQUIRED")
         void should_throw_required_when_raw_is_null() {
-            IllegalArgumentException ex = assertThrows(
-                    IllegalArgumentException.class,
+            FoodLogAppException ex = assertThrows(
+                    FoodLogAppException.class,
                     () -> BarcodeNormalizer.normalizeOrThrow(null)
             );
 
+            assertEquals(FoodLogErrorCode.BARCODE_REQUIRED, ex.getErrorCode());
+            assertEquals("BARCODE_REQUIRED", ex.code());
             assertEquals("BARCODE_REQUIRED", ex.getMessage());
         }
 
@@ -42,11 +47,13 @@ class BarcodeNormalizerTest {
         })
         @DisplayName("blank 輸入時應拋 BARCODE_REQUIRED")
         void should_throw_required_when_raw_is_blank(String raw) {
-            IllegalArgumentException ex = assertThrows(
-                    IllegalArgumentException.class,
+            FoodLogAppException ex = assertThrows(
+                    FoodLogAppException.class,
                     () -> BarcodeNormalizer.normalizeOrThrow(raw)
             );
 
+            assertEquals(FoodLogErrorCode.BARCODE_REQUIRED, ex.getErrorCode());
+            assertEquals("BARCODE_REQUIRED", ex.code());
             assertEquals("BARCODE_REQUIRED", ex.getMessage());
         }
 
@@ -60,11 +67,13 @@ class BarcodeNormalizerTest {
         })
         @DisplayName("沒有任何 digits 時應拋 BARCODE_INVALID")
         void should_throw_invalid_when_no_digits(String raw) {
-            IllegalArgumentException ex = assertThrows(
-                    IllegalArgumentException.class,
+            FoodLogAppException ex = assertThrows(
+                    FoodLogAppException.class,
                     () -> BarcodeNormalizer.normalizeOrThrow(raw)
             );
 
+            assertEquals(FoodLogErrorCode.BARCODE_INVALID, ex.getErrorCode());
+            assertEquals("BARCODE_INVALID", ex.code());
             assertEquals("BARCODE_INVALID", ex.getMessage());
         }
 
@@ -73,11 +82,13 @@ class BarcodeNormalizerTest {
         void should_throw_invalid_when_digits_too_long() {
             String raw = "123456789012345678901234567890123"; // 33 digits
 
-            IllegalArgumentException ex = assertThrows(
-                    IllegalArgumentException.class,
+            FoodLogAppException ex = assertThrows(
+                    FoodLogAppException.class,
                     () -> BarcodeNormalizer.normalizeOrThrow(raw)
             );
 
+            assertEquals(FoodLogErrorCode.BARCODE_INVALID, ex.getErrorCode());
+            assertEquals("BARCODE_INVALID", ex.code());
             assertEquals("BARCODE_INVALID", ex.getMessage());
         }
     }

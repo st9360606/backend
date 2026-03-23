@@ -1,8 +1,10 @@
 package com.calai.backend.foodlog.entity;
 
 
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -149,7 +151,7 @@ public class FoodLogEntity {
                     }
 
                     if (!newValue.isObject()) {
-                        throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                        throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
                     }
 
                     ObjectNode patch = (ObjectNode) newValue;
@@ -162,7 +164,7 @@ public class FoodLogEntity {
                     root.set("nutrients", merged);
                 }
             }
-            default -> throw new IllegalArgumentException("FIELD_KEY_INVALID");
+            default -> throw new FoodLogAppException(FoodLogErrorCode.FIELD_KEY_INVALID);
         }
 
         this.effective = root;
