@@ -3,6 +3,7 @@ package com.calai.backend.foodlog.service.support;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.image.ImageSniffer;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
@@ -11,6 +12,7 @@ import com.calai.backend.foodlog.service.ImageBlobService;
 import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.storage.support.StorageCleanup;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
@@ -69,7 +71,7 @@ public class FoodLogCreateSupport {
 
             ImageSniffer.Detection det = ImageSniffer.detect(in);
             if (det == null) {
-                throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
+                throw new FoodLogAppException(FoodLogErrorCode.UNSUPPORTED_IMAGE_FORMAT);
             }
 
             tempKey = "user-" + userId + "/blobs/tmp/" + requestId + "/upload" + det.ext();

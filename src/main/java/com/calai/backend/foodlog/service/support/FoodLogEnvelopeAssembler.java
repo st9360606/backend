@@ -41,6 +41,10 @@ import java.util.regex.Pattern;
  * - storage / upload
  * - provider call
  */
+// NOTE:
+// warnings parsing / degradedReason canonicalization 目前暫不抽共用。
+// 原因：EnvelopeAssembler 與 HistoryService 在非 LABEL 情境下的既有行為不完全一致，
+// 先保留原邏輯以避免改動已通過測試的 response 細節。
 @Component
 @RequiredArgsConstructor
 public class FoodLogEnvelopeAssembler {
@@ -84,11 +88,11 @@ public class FoodLogEnvelopeAssembler {
             }
 
             reasoning = textOrNull(eff, "_reasoning");
-            labelMeta = toLabelMeta(eff.get("labelMeta"));
+            labelMeta = FoodLogEffectiveViewSupport.toLabelMeta(eff.get("labelMeta"));
 
             JsonNode aiMeta = eff.get("aiMeta");
             if (aiMeta != null && aiMeta.isObject()) {
-                aiMetaView = toAiMetaView(aiMeta);
+                aiMetaView = FoodLogEffectiveViewSupport.toAiMetaView(aiMeta);
 
                 JsonNode src = aiMeta.get("source");
                 if (src != null && !src.isNull()) {
@@ -132,40 +136,17 @@ public class FoodLogEnvelopeAssembler {
             }
 
             // degraded case：不要帶誤導性的 labelMeta
-            if ("NO_FOOD".equals(degradedReason)
-                || "UNKNOWN_FOOD".equals(degradedReason)
-                || "NO_LABEL".equals(degradedReason)) {
-                labelMeta = null;
-            }
-
-            if ("MISSING_NUTRITION_FACTS".equals(degradedReason)
-                && warnings != null
-                && warnings.contains("PACKAGE_SIZE_UNVERIFIED")
-                && labelMeta != null
-                && "WHOLE_PACKAGE".equals(labelMeta.basis())) {
-                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
-            }
-
-            if (labelMeta != null
-                && "ESTIMATED_PORTION".equals(labelMeta.basis())
-                && labelMeta.servingsPerContainer() != null
-                && Math.abs(labelMeta.servingsPerContainer() - 1.0d) < 0.0001d) {
-                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
-            }
+            labelMeta = FoodLogEffectiveViewSupport.normalizeLabelMetaForDisplay(
+                    degradedReason,
+                    warnings,
+                    labelMeta
+            );
 
             // 同步修正 aiMetaView，避免 response 內 degradedReason 與 aiMeta.degradedReason 打架
-            if (aiMetaView != null && degradedReason != null) {
-                aiMetaView = new FoodLogEnvelope.AiMetaView(
-                        degradedReason,
-                        aiMetaView.degradedAtUtc(),
-                        aiMetaView.resultFromCache(),
-                        aiMetaView.foodCategory(),
-                        aiMetaView.foodSubCategory(),
-                        aiMetaView.source(),
-                        aiMetaView.basis(),
-                        aiMetaView.lang()
-                );
-            }
+            aiMetaView = FoodLogEffectiveViewSupport.overrideAiMetaDegradedReason(
+                    aiMetaView,
+                    degradedReason
+            );
         }
 
         if (resolvedBy == null || resolvedBy.isBlank()) {
@@ -296,65 +277,6 @@ public class FoodLogEnvelopeAssembler {
                 hints,
                 new FoodLogEnvelope.Trace(requestId)
         );
-    }
-
-    private static FoodLogEnvelope.LabelMeta toLabelMeta(JsonNode node) {
-        if (node == null || node.isNull() || !node.isObject()) {
-            return null;
-        }
-
-        Double servingsPerContainer = doubleOrNull(node, "servingsPerContainer");
-        String basis = textOrNull(node, "basis");
-
-        if (servingsPerContainer == null && (basis == null || basis.isBlank())) {
-            return null;
-        }
-
-        return new FoodLogEnvelope.LabelMeta(servingsPerContainer, basis);
-    }
-
-    private static FoodLogEnvelope.AiMetaView toAiMetaView(JsonNode node) {
-        if (node == null || node.isNull() || !node.isObject()) {
-            return null;
-        }
-
-        String degradedReason = textOrNull(node, "degradedReason");
-        String degradedAtUtc = textOrNull(node, "degradedAtUtc");
-        Boolean resultFromCache = booleanOrNull(node, "resultFromCache");
-        String foodCategory = textOrNull(node, "foodCategory");
-        String foodSubCategory = textOrNull(node, "foodSubCategory");
-        String source = textOrNull(node, "source");
-        String basis = textOrNull(node, "basis");
-        String lang = textOrNull(node, "lang");
-
-        if (degradedReason == null
-            && degradedAtUtc == null
-            && resultFromCache == null
-            && foodCategory == null
-            && foodSubCategory == null
-            && source == null
-            && basis == null
-            && lang == null) {
-            return null;
-        }
-
-        return new FoodLogEnvelope.AiMetaView(
-                degradedReason,
-                degradedAtUtc,
-                resultFromCache,
-                foodCategory,
-                foodSubCategory,
-                source,
-                basis,
-                lang
-        );
-    }
-
-    private static Boolean booleanOrNull(JsonNode node, String field) {
-        if (node == null || node.isNull()) return null;
-        JsonNode v = node.get(field);
-        if (v == null || v.isNull()) return null;
-        return v.isBoolean() ? v.asBoolean() : null;
     }
 
     private static boolean resolveResultFromCache(JsonNode effective) {

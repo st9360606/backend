@@ -4,10 +4,12 @@ import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogOverrideEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogFieldKey;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogOverrideRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,18 +28,18 @@ public class FoodLogOverrideService {
 
     @Transactional
     public FoodLogEnvelope applyOverride(Long userId, String foodLogId, FoodLogOverrideRequest req, String requestId) {
-        if (req == null) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+        if (req == null) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
 
         FoodLogFieldKey key = FoodLogFieldKey.parse(req.fieldKey());
-        if (key == null) throw new IllegalArgumentException("FIELD_KEY_INVALID");
+        if (key == null) throw new FoodLogAppException(FoodLogErrorCode.FIELD_KEY_INVALID);
 
         FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
-        if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
+        if (!userId.equals(log.getUserId())) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
 
-        if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
+        if (log.getStatus() == FoodLogStatus.DELETED) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
         if (log.getStatus() != FoodLogStatus.DRAFT) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_EDITABLE");
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_EDITABLE);
         }
 
         validateNewValueOrThrow(key, req.newValue());
@@ -73,37 +75,37 @@ public class FoodLogOverrideService {
     }
 
     private static void validateNewValueOrThrow(FoodLogFieldKey key, JsonNode v) {
-        if (v == null || v.isNull()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+        if (v == null || v.isNull()) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
 
         switch (key) {
             case FOOD_NAME -> {
-                if (!v.isTextual()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (!v.isTextual()) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
                 String s = v.asText().trim();
-                if (s.isEmpty() || s.length() > 80) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (s.isEmpty() || s.length() > 80) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
             }
             case HEALTH_SCORE -> {
-                if (!v.isInt() && !v.isIntegralNumber()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (!v.isInt() && !v.isIntegralNumber()) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
                 int n = v.asInt();
-                if (n < 0 || n > 10) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (n < 0 || n > 10) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
             }
             case QUANTITY -> {
-                if (!v.isObject()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (!v.isObject()) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
                 JsonNode value = v.get("value");
                 JsonNode unit = v.get("unit");
-                if (value == null || !value.isNumber()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
-                if (value.asDouble() < 0d) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (value == null || !value.isNumber()) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
+                if (value.asDouble() < 0d) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
                 if (unit == null || !unit.isTextual() || unit.asText().trim().isEmpty()) {
-                    throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                    throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
                 }
             }
             case NUTRIENTS -> {
-                if (!v.isObject()) throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                if (!v.isObject()) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
 
                 // Jackson 2.19+ 建議使用 properties()，避免 fields() deprecated
                 for (Map.Entry<String, JsonNode> e : v.properties()) {
                     JsonNode nv = e.getValue();
                     if (nv == null || !nv.isNumber() || nv.asDouble() < 0d) {
-                        throw new IllegalArgumentException("OVERRIDE_VALUE_INVALID");
+                        throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
                     }
                 }
             }

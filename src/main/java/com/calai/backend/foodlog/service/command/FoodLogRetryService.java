@@ -4,6 +4,7 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.model.ModelTier;
@@ -12,6 +13,8 @@ import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
+import com.calai.backend.foodlog.service.support.FoodLogRequestNormalizer;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.Locale;
 
 /**
@@ -52,14 +54,14 @@ public class FoodLogRetryService {
             String requestId
     ) {
         FoodLogEntity log = repo.findByIdForUpdate(foodLogId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
 
         if (!userId.equals(log.getUserId())) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
         }
 
         if (log.getStatus() == FoodLogStatus.DELETED) {
-            throw new IllegalArgumentException("FOOD_LOG_DELETED");
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
         }
 
         String method = log.getMethod() == null ? "" : log.getMethod().trim().toUpperCase(Locale.ROOT);
@@ -69,12 +71,12 @@ public class FoodLogRetryService {
                 || "LABEL".equals(method);
 
         if (!retryableMethod || log.getStatus() != FoodLogStatus.FAILED) {
-            throw new IllegalArgumentException("FOOD_LOG_NOT_RETRYABLE");
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_RETRYABLE);
         }
 
         Instant now = clock.instant();
-        ZoneId quotaTz = resolveQuotaTz();
-        String did = normalizeDeviceId(userId, deviceId);
+        ZoneId quotaTz = FoodLogRequestNormalizer.resolveQuotaTz();
+        String did = FoodLogRequestNormalizer.normalizeDeviceId(userId, deviceId);
 
         // precheck 失敗時不得先 save
         EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
@@ -110,22 +112,5 @@ public class FoodLogRetryService {
         repo.save(log);
 
         return envelopeAssembler.assemble(log, task, requestId);
-    }
-
-    /**
-     * 與既有邏輯一致：
-     * null / blank -> uid-{userId}
-     */
-    private static String normalizeDeviceId(Long userId, String deviceId) {
-        if (deviceId == null) return "uid-" + userId;
-        String s = deviceId.trim();
-        return s.isEmpty() ? ("uid-" + userId) : s;
-    }
-
-    /**
-     * quota / abuse guard 一律用 UTC，避免 client 切時區鑽洞。
-     */
-    private static ZoneId resolveQuotaTz() {
-        return ZoneOffset.UTC;
     }
 }

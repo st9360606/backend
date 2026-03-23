@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
@@ -8,6 +9,7 @@ import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,8 +31,8 @@ public class FoodLogDeleteService {
         Instant now = Instant.now();
 
         FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
-        if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
+        if (!userId.equals(log.getUserId())) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
 
         // ✅ 冪等刪除：已 DELETED 直接回
         if (log.getStatus() == FoodLogStatus.DELETED) {

@@ -3,6 +3,9 @@ package com.calai.backend.foodlog.barcode.openfoodfacts.support;
 import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+// NOTE:
+// 這裡保留 IllegalArgumentException，因為它屬於 internal precondition 檢查，
+// 不是 API error contract。
 public final class OpenFoodFactsEffectiveBuilder {
 
     private OpenFoodFactsEffectiveBuilder() {}

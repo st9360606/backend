@@ -4,10 +4,13 @@ import com.calai.backend.foodlog.barcode.normalize.BarcodeNutrientsNormalizer;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.mapper.FoodLogDisplayNameResolver;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.service.support.FoodLogEffectiveViewSupport;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -17,6 +20,10 @@ import java.util.List;
 import java.time.LocalDate;
 import java.util.Locale;
 
+// NOTE:
+// warnings parsing / degradedReason canonicalization 目前暫不抽共用。
+// 原因：EnvelopeAssembler 與 HistoryService 在非 LABEL 情境下的既有行為不完全一致，
+// 先保留原邏輯以避免改動已通過測試的 response 細節。
 @RequiredArgsConstructor
 @Service
 public class FoodLogHistoryService {
@@ -27,14 +34,14 @@ public class FoodLogHistoryService {
     @Transactional
     public FoodLogEnvelope save(Long userId, String foodLogId, String requestId) {
         FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
-        if (!userId.equals(log.getUserId())) throw new IllegalArgumentException("FOOD_LOG_NOT_FOUND");
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
+        if (!userId.equals(log.getUserId())) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
 
-        if (log.getStatus() == FoodLogStatus.DELETED) throw new IllegalArgumentException("FOOD_LOG_DELETED");
+        if (log.getStatus() == FoodLogStatus.DELETED) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
         if (log.getStatus() == FoodLogStatus.SAVED) return foodLogService.getOne(userId, foodLogId, requestId);
-        if (log.getStatus() == FoodLogStatus.PENDING) throw new IllegalArgumentException("FOOD_LOG_NOT_READY");
-        if (log.getStatus() == FoodLogStatus.FAILED) throw new IllegalArgumentException("FOOD_LOG_FAILED");
-        if (log.getStatus() != FoodLogStatus.DRAFT) throw new IllegalArgumentException("FOOD_LOG_NOT_SAVABLE");
+        if (log.getStatus() == FoodLogStatus.PENDING) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_READY);
+        if (log.getStatus() == FoodLogStatus.FAILED) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_FAILED);
+        if (log.getStatus() != FoodLogStatus.DRAFT) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_SAVABLE);
 
         log.setStatus(FoodLogStatus.SAVED);
         logRepo.save(log);
@@ -66,11 +73,11 @@ public class FoodLogHistoryService {
         FoodLogStatus status = parseStatusOrThrow(statusRaw);
 
         if (size <= 0) size = 20;
-        if (size > 50) throw new IllegalArgumentException("PAGE_SIZE_TOO_LARGE");
+        if (size > 50) throw new FoodLogAppException(FoodLogErrorCode.PAGE_SIZE_TOO_LARGE);
         if (page < 0) page = 0;
 
-        if (fromLocalDate == null || toLocalDate == null) throw new IllegalArgumentException("DATE_RANGE_REQUIRED");
-        if (fromLocalDate.isAfter(toLocalDate)) throw new IllegalArgumentException("DATE_RANGE_INVALID");
+        if (fromLocalDate == null || toLocalDate == null) throw new FoodLogAppException(FoodLogErrorCode.DATE_RANGE_REQUIRED);
+        if (fromLocalDate.isAfter(toLocalDate)) throw new FoodLogAppException(FoodLogErrorCode.DATE_RANGE_INVALID);
 
         var pageable = PageRequest.of(page, size);
         var p = logRepo.findByUserIdAndStatusAndCapturedLocalDateRange(userId, status, fromLocalDate, toLocalDate, pageable);
@@ -85,12 +92,12 @@ public class FoodLogHistoryService {
     }
 
     private static FoodLogStatus parseStatusOrThrow(String raw) {
-        if (raw == null) throw new IllegalArgumentException("BAD_REQUEST");
+        if (raw == null) throw new FoodLogAppException(FoodLogErrorCode.BAD_REQUEST);
         String v = raw.trim().toUpperCase(Locale.ROOT);
         try {
             return FoodLogStatus.valueOf(v);
         } catch (Exception e) {
-            throw new IllegalArgumentException("BAD_REQUEST");
+            throw new FoodLogAppException(FoodLogErrorCode.BAD_REQUEST);
         }
     }
 
@@ -151,11 +158,11 @@ public class FoodLogHistoryService {
                 if (warnings.isEmpty()) warnings = null;
             }
 
-            labelMeta = toLabelMeta(eff.get("labelMeta"));
+            labelMeta = FoodLogEffectiveViewSupport.toLabelMeta(eff.get("labelMeta"));
 
             JsonNode aiMetaNode = eff.get("aiMeta");
             if (aiMetaNode != null && aiMetaNode.isObject()) {
-                aiMeta = toAiMetaView(aiMetaNode);
+                aiMeta = FoodLogEffectiveViewSupport.toAiMetaView(aiMetaNode);
                 degradedReason = textOrNull(aiMetaNode.get("degradedReason"));
                 foodCategory = textOrNull(aiMetaNode.get("foodCategory"));
                 foodSubCategory = textOrNull(aiMetaNode.get("foodSubCategory"));
@@ -188,38 +195,17 @@ public class FoodLogHistoryService {
                 }
             }
 
-            if ("NO_FOOD".equals(degradedReason)
-                || "UNKNOWN_FOOD".equals(degradedReason)
-                || "NO_LABEL".equals(degradedReason)) {
-                labelMeta = null;
-            }
+            labelMeta = FoodLogEffectiveViewSupport.normalizeLabelMetaForDisplay(
+                    degradedReason,
+                    warnings,
+                    labelMeta
+            );
 
-            if ("MISSING_NUTRITION_FACTS".equals(degradedReason)
-                && warnings != null
-                && warnings.contains("PACKAGE_SIZE_UNVERIFIED")
-                && labelMeta != null
-                && "WHOLE_PACKAGE".equals(labelMeta.basis())) {
-                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
-            }
+            aiMeta = FoodLogEffectiveViewSupport.overrideAiMetaDegradedReason(
+                    aiMeta,
+                    degradedReason
+            );
 
-            if (labelMeta != null
-                && "ESTIMATED_PORTION".equals(labelMeta.basis())
-                && labelMeta.servingsPerContainer() != null
-                && Math.abs(labelMeta.servingsPerContainer() - 1.0d) < 0.0001d) {
-                labelMeta = new FoodLogEnvelope.LabelMeta(null, "ESTIMATED_PORTION");
-            }
-            if (aiMeta != null && degradedReason != null) {
-                aiMeta = new FoodLogEnvelope.AiMetaView(
-                        degradedReason,
-                        aiMeta.degradedAtUtc(),
-                        aiMeta.resultFromCache(),
-                        aiMeta.foodCategory(),
-                        aiMeta.foodSubCategory(),
-                        aiMeta.source(),
-                        aiMeta.basis(),
-                        aiMeta.lang()
-                );
-            }
             // ✅ 最終顯示名稱：與 toEnvelope() 保持一致
             foodName = FoodLogDisplayNameResolver.resolve(e.getMethod(), degradedReason, eff);
         }
@@ -249,62 +235,6 @@ public class FoodLogHistoryService {
                         aiMeta
                 )
         );
-    }
-
-    private static FoodLogEnvelope.LabelMeta toLabelMeta(JsonNode node) {
-        if (node == null || node.isNull() || !node.isObject()) {
-            return null;
-        }
-
-        Double servingsPerContainer = doubleOrNull(node.get("servingsPerContainer"));
-        String basis = textOrNull(node.get("basis"));
-
-        if (servingsPerContainer == null && (basis == null || basis.isBlank())) {
-            return null;
-        }
-
-        return new FoodLogEnvelope.LabelMeta(servingsPerContainer, basis);
-    }
-
-    private static FoodLogEnvelope.AiMetaView toAiMetaView(JsonNode node) {
-        if (node == null || node.isNull() || !node.isObject()) {
-            return null;
-        }
-
-        String degradedReason = textOrNull(node.get("degradedReason"));
-        String degradedAtUtc = textOrNull(node.get("degradedAtUtc"));
-        Boolean resultFromCache = booleanOrNull(node.get("resultFromCache"));
-        String foodCategory = textOrNull(node.get("foodCategory"));
-        String foodSubCategory = textOrNull(node.get("foodSubCategory"));
-        String source = textOrNull(node.get("source"));
-        String basis = textOrNull(node.get("basis"));
-        String lang = textOrNull(node.get("lang"));
-
-        if (degradedReason == null
-            && degradedAtUtc == null
-            && resultFromCache == null
-            && foodCategory == null
-            && foodSubCategory == null
-            && source == null
-            && basis == null
-            && lang == null) {
-            return null;
-        }
-
-        return new FoodLogEnvelope.AiMetaView(
-                degradedReason,
-                degradedAtUtc,
-                resultFromCache,
-                foodCategory,
-                foodSubCategory,
-                source,
-                basis,
-                lang
-        );
-    }
-
-    private static Boolean booleanOrNull(JsonNode v) {
-        return (v == null || v.isNull() || !v.isBoolean()) ? null : v.asBoolean();
     }
 
     private static String textOrNull(JsonNode v) {

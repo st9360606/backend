@@ -61,7 +61,7 @@ public class FoodLogController {
     /**
      * ✅ LABEL：營養標示（multipart）
      * - provider 固定走 GEMINI（Gemini 3 Flash）
-     * - 最多重試一次：由 worker 的 method-aware attempts=2 控制
+     * - 目前不做 worker 自動 retry；單次失敗由失敗結果 / fallback 規則處理
      */
     @PostMapping(value = "/label", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope label(

@@ -13,6 +13,7 @@ import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsCate
 import com.calai.backend.foodlog.barcode.openfoodfacts.support.OpenFoodFactsEffectiveBuilder;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
@@ -21,7 +22,9 @@ import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.service.query.FoodLogQueryService;
 import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
+import com.calai.backend.foodlog.service.support.FoodLogRequestNormalizer;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.calai.backend.foodlog.web.error.RateLimitedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -30,12 +33,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
+import java.time.*;
 
 @Service
 @RequiredArgsConstructor
@@ -64,7 +62,7 @@ public class FoodLogBarcodeService {
         Instant now = clock.instant();
 
         if (barcode == null || barcode.isBlank()) {
-            throw new IllegalArgumentException("BARCODE_REQUIRED");
+            throw new FoodLogAppException(FoodLogErrorCode.BARCODE_REQUIRED);
         }
 
         var bn = BarcodeNormalizer.normalizeOrThrow(barcode);
@@ -77,13 +75,12 @@ public class FoodLogBarcodeService {
         }
 
         try {
-            ZoneId captureTz = parseTzOrUtc(clientTz);
-            ZoneId quotaTz = resolveQuotaTz();
+            ZoneId captureTz = FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz);
+            ZoneId quotaTz = FoodLogRequestNormalizer.resolveQuotaTz();
+            String did = FoodLogRequestNormalizer.normalizeDeviceId(userId, deviceId);
             LocalDate localDate = ZonedDateTime.ofInstant(now, captureTz).toLocalDate();
-
-            String did = normalizeDeviceId(userId, deviceId);
-
             EntitlementService.Tier tier = entitlementService.resolveTier(userId, now);
+
             rateLimiter.checkOrThrow(userId, tier, now);
 
             abuseGuard.onBarcodeAttempt(userId, did, now, quotaTz);
@@ -320,18 +317,4 @@ public class FoodLogBarcodeService {
         return (m == null || m.isBlank()) ? t.getClass().getSimpleName() : m;
     }
 
-    private static String normalizeDeviceId(Long userId, String deviceId) {
-        if (deviceId == null) return "uid-" + userId;
-        String s = deviceId.trim();
-        return s.isEmpty() ? ("uid-" + userId) : s;
-    }
-
-    private static ZoneId parseTzOrUtc(String tz) {
-        try { return (tz == null || tz.isBlank()) ? ZoneOffset.UTC : ZoneId.of(tz); }
-        catch (Exception ignored) { return ZoneOffset.UTC; }
-    }
-
-    private static ZoneId resolveQuotaTz() {
-        return ZoneOffset.UTC;
-    }
 }

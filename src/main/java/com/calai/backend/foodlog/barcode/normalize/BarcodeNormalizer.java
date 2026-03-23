@@ -1,5 +1,8 @@
 package com.calai.backend.foodlog.barcode.normalize;
 
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
+
 /**
  * OFF barcode normalization:
  * - remove leading zeros
@@ -15,16 +18,16 @@ public final class BarcodeNormalizer {
     public record Norm(String rawInput, String digitsOnly, String normalized) {}
 
     public static Norm normalizeOrThrow(String raw) {
-        if (raw == null) throw new IllegalArgumentException("BARCODE_REQUIRED");
+        if (raw == null) throw new FoodLogAppException(FoodLogErrorCode.BARCODE_REQUIRED);
 
         String trimmed = raw.trim();
-        if (trimmed.isEmpty()) throw new IllegalArgumentException("BARCODE_REQUIRED");
+        if (trimmed.isEmpty()) throw new FoodLogAppException(FoodLogErrorCode.BARCODE_REQUIRED);
 
         // Some scanners may include spaces/hyphens. Keep digits only.
         String digits = trimmed.replaceAll("[^0-9]", "");
-        if (digits.isEmpty()) throw new IllegalArgumentException("BARCODE_INVALID");
-        if (digits.length() > 32) throw new IllegalArgumentException("BARCODE_INVALID");
-        if (!digits.chars().allMatch(Character::isDigit)) throw new IllegalArgumentException("BARCODE_INVALID");
+        if (digits.isEmpty()) throw new FoodLogAppException(FoodLogErrorCode.BARCODE_INVALID);
+        if (digits.length() > 32) throw new FoodLogAppException(FoodLogErrorCode.BARCODE_INVALID);
+        if (!digits.chars().allMatch(Character::isDigit)) throw new FoodLogAppException(FoodLogErrorCode.BARCODE_INVALID);
 
         // remove leading zeros (keep at least 1 digit)
         int i = 0;

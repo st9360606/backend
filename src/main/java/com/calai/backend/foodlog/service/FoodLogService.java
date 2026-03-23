@@ -4,6 +4,7 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
@@ -21,10 +22,12 @@ import com.calai.backend.foodlog.service.query.FoodLogQueryService;
 import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
+import com.calai.backend.foodlog.service.support.FoodLogRequestNormalizer;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.storage.support.StorageCleanup;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import com.calai.backend.foodlog.time.ExifTimeExtractor;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,17 +58,6 @@ public class FoodLogService {
     private static final long MAX_IMAGE_BYTES = 15L * 1024 * 1024;
     private static final List<String> DEDUPE_METHODS_PHOTO_ALBUM = List.of("PHOTO", "ALBUM");
     private static final List<String> DEDUPE_METHODS_LABEL = List.of("LABEL");
-
-    /**
-     * ✅ 所有入口統一的 deviceId normalize：
-     * - null / blank → "uid-{userId}"
-     * - trim 後回傳
-     */
-    private static String normalizeDeviceId(Long userId, String deviceId) {
-        if (deviceId == null) return "uid-" + userId;
-        String s = deviceId.trim();
-        return s.isEmpty() ? ("uid-" + userId) : s;
-    }
 
     private final FoodLogRepository repo;
     private final FoodLogTaskRepository taskRepo;
@@ -108,8 +100,8 @@ public class FoodLogService {
             String requestId
     ) throws Exception {
 
-        ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = resolveQuotaTz();
+        ZoneId captureTz = FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz);
+        ZoneId quotaTz = FoodLogRequestNormalizer.resolveQuotaTz();
         Instant serverNow = clock.instant();
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
@@ -147,7 +139,7 @@ public class FoodLogService {
                                    && hit.get().getEffective().isObject();
 
                 // ✅ Anti-abuse：deviceId 統一 normalize，避免 null/blank key 汙染或 NPE
-                String did = normalizeDeviceId(userId, deviceId);
+                String did = FoodLogRequestNormalizer.normalizeDeviceId(userId, deviceId);
                 abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, quotaTz);
 
                 // ✅ ALBUM：固定用「上傳時間」當作 capturedAtUtc
@@ -190,8 +182,8 @@ public class FoodLogService {
     @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createPhoto(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
-        ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = resolveQuotaTz();
+        ZoneId captureTz = FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz);
+        ZoneId quotaTz = FoodLogRequestNormalizer.resolveQuotaTz();
         Instant serverNow = clock.instant();
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
@@ -239,7 +231,7 @@ public class FoodLogService {
                                    && hit.get().getEffective().isObject();
 
                 // ✅ Anti-abuse：deviceId 統一 normalize
-                String did = normalizeDeviceId(userId, deviceId);
+                String did = FoodLogRequestNormalizer.normalizeDeviceId(userId, deviceId);
                 abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, quotaTz);
 
                 // 6) 建 log（capturedLocalDate 用 resolved capturedAtUtc + client tz）
@@ -283,8 +275,8 @@ public class FoodLogService {
     @Transactional(rollbackFor = Exception.class)
     public FoodLogEnvelope createLabel(Long userId, String clientTz, String deviceId, String deviceCapturedAtUtc, MultipartFile file, String requestId) throws Exception {
 
-        ZoneId captureTz = parseTzOrUtc(clientTz);
-        ZoneId quotaTz = resolveQuotaTz();
+        ZoneId captureTz = FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz);
+        ZoneId quotaTz = FoodLogRequestNormalizer.resolveQuotaTz();
         Instant serverNow = clock.instant();
 
         String existingLogId = idem.reserveOrGetExisting(userId, requestId, serverNow);
@@ -329,7 +321,7 @@ public class FoodLogService {
                                    && hit.get().getEffective().isObject();
 
                 // ✅ Anti-abuse：deviceId 統一 normalize
-                String did = normalizeDeviceId(userId, deviceId);
+                String did = FoodLogRequestNormalizer.normalizeDeviceId(userId, deviceId);
                 abuseGuard.onOperationAttempt(userId, did, cacheHit, serverNow, quotaTz);
 
                 LocalDate localDate = ZonedDateTime.ofInstant(r.capturedAtUtc(), captureTz).toLocalDate();
@@ -486,19 +478,12 @@ public class FoodLogService {
     }
 
     private static void validateUploadBasics(MultipartFile file) {
-        if (file == null || file.isEmpty()) throw new IllegalArgumentException("FILE_REQUIRED");
-        if (file.getSize() > MAX_IMAGE_BYTES) throw new IllegalArgumentException("FILE_TOO_LARGE");
-    }
-
-    private static ZoneId parseTzOrUtc(String tz) {
-        try { return (tz == null || tz.isBlank()) ? ZoneOffset.UTC : ZoneId.of(tz); }
-        catch (Exception ignored) { return ZoneOffset.UTC; }
-    }
-
-    private static ZoneId resolveQuotaTz() {
-        // quota / cooldown / abuse guard 不信任 client 傳入時區，
-        // 避免使用者透過切換時區重置 daily / monthly bucket
-        return ZoneOffset.UTC;
+        if (file == null || file.isEmpty()) {
+            throw new FoodLogAppException(FoodLogErrorCode.FILE_REQUIRED);
+        }
+        if (file.getSize() > MAX_IMAGE_BYTES) {
+            throw new FoodLogAppException(FoodLogErrorCode.FILE_TOO_LARGE);
+        }
     }
 
     private Optional<FoodLogEntity> findReusableHit(

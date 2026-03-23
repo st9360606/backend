@@ -16,6 +16,10 @@ import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 
+// NOTE:
+// 這裡保留 IllegalArgumentException，因為它屬於 entity 內部 invariant / 欄位約束檢查，
+// 不是 controller-facing 的 API 邊界錯誤，不走 FoodLogAppException。
+
 @Getter
 @Setter
 @Entity

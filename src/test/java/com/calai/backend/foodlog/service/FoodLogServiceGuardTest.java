@@ -1,6 +1,7 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.service.QuotaService;
@@ -16,6 +17,7 @@ import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -103,7 +105,7 @@ FoodLogServiceGuardTest {
         // 要自己把 side effect 模擬出來。
         doAnswer(invocation -> {
             idem.failAndReleaseIfNeeded(1L, "rid-1", true);
-            throw new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT");
+            throw new FoodLogAppException(FoodLogErrorCode.UNSUPPORTED_IMAGE_FORMAT);
         }).when(createSupport).uploadTempImage(1L, "rid-1", file);
 
         // act + assert

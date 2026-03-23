@@ -1,8 +1,10 @@
 package com.calai.backend.foodlog.service.image;
 
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.storage.StorageService;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,10 +28,10 @@ public class FoodLogImageAccessService {
     @Transactional(readOnly = true)
     public ImageOpenResult openImage(Long userId, String foodLogId) {
         var log = repo.findByIdAndUserId(foodLogId, userId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
 
         if (log.getStatus() == FoodLogStatus.DELETED) {
-            throw new IllegalArgumentException("FOOD_LOG_DELETED");
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
         }
 
         if (log.getImageObjectKey() == null || log.getImageObjectKey().isBlank()) {

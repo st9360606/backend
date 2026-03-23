@@ -3,6 +3,7 @@ package com.calai.backend.foodlog.web.advice;
 import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.controller.FoodLogController;
 import com.calai.backend.foodlog.controller.FoodLogImageController;
+import com.calai.backend.foodlog.controller.dev.FoodLogDebugController;
 import com.calai.backend.foodlog.dto.FoodLogErrorResponse;
 import com.calai.backend.foodlog.dto.ModelRefusedResponse;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
@@ -22,42 +23,28 @@ import java.util.List;
 
 @RestControllerAdvice(assignableTypes = {
         FoodLogController.class,
-        FoodLogImageController.class
+        FoodLogImageController.class,
+        FoodLogDebugController.class
 })
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class FoodLogExceptionAdvice {
 
+    @ExceptionHandler(FoodLogAppException.class)
+    public ResponseEntity<FoodLogErrorResponse> handleFoodLogApp(
+            FoodLogAppException e,
+            HttpServletRequest req
+    ) {
+        String code = e.code();
+        return ResponseEntity.status(FoodLogErrorStatusResolver.resolve(code)).body(err(code, e, req));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<FoodLogErrorResponse> handleIllegalArg(IllegalArgumentException e, HttpServletRequest req) {
+    public ResponseEntity<FoodLogErrorResponse> handleIllegalArg(
+            IllegalArgumentException e,
+            HttpServletRequest req
+    ) {
         String code = norm(e.getMessage(), "BAD_REQUEST");
-        HttpStatus status = switch (code) {
-            case "FOOD_LOG_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "FOOD_LOG_DELETED" -> HttpStatus.GONE;
-
-            case "FOOD_LOG_NOT_READY",
-                 "FOOD_LOG_FAILED",
-                 "FOOD_LOG_NOT_SAVABLE",
-                 "FOOD_LOG_NOT_EDITABLE",
-                 "FOOD_LOG_NOT_RETRYABLE",
-                 "DATE_RANGE_REQUIRED",
-                 "DATE_RANGE_INVALID",
-                 "FIELD_KEY_INVALID",
-                 "OVERRIDE_VALUE_INVALID",
-                 "PAGE_SIZE_TOO_LARGE" -> HttpStatus.CONFLICT;
-
-            case "FILE_REQUIRED",
-                 "UNSUPPORTED_IMAGE_FORMAT",
-                 "UNSUPPORTED_CONTENT_TYPE",
-                 "BARCODE_REQUIRED",
-                 "BARCODE_INVALID" -> HttpStatus.BAD_REQUEST;
-
-            case "FILE_TOO_LARGE",
-                 "IMAGE_TOO_LARGE" -> HttpStatus.PAYLOAD_TOO_LARGE;
-
-            default -> HttpStatus.BAD_REQUEST;
-        };
-
-        return ResponseEntity.status(status).body(err(code, e, req));
+        return ResponseEntity.status(FoodLogErrorStatusResolver.resolve(code)).body(err(code, e, req));
     }
 
     /**

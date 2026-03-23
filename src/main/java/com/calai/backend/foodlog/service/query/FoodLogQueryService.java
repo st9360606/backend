@@ -3,11 +3,13 @@ package com.calai.backend.foodlog.service.query;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.ProviderRefuseReason;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.calai.backend.foodlog.web.error.ModelRefusedException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,7 +37,7 @@ public class FoodLogQueryService {
     @Transactional(readOnly = true)
     public FoodLogEnvelope getOne(Long userId, String id, String requestId) {
         FoodLogEntity e = repo.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
 
         ProviderRefuseReason reason = ProviderRefuseReason.fromErrorCodeOrNull(e.getLastErrorCode());
         if (reason != null) {

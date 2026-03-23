@@ -1,7 +1,9 @@
 package com.calai.backend.foodlog.controller.dev;
 
 import com.calai.backend.auth.security.AuthContext;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
@@ -24,7 +26,7 @@ public class FoodLogDebugController {
     public ResponseEntity<?> effective(@PathVariable String id) {
         Long uid = auth.requireUserId();
         var log = repo.findByIdAndUserId(id, uid)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
 
         return ResponseEntity.ok(
                 log.getEffective() == null ? Map.of() : log.getEffective()
@@ -36,7 +38,7 @@ public class FoodLogDebugController {
     public ResponseEntity<?> meta(@PathVariable String id) {
         Long uid = auth.requireUserId();
         var log = repo.findByIdAndUserId(id, uid)
-                .orElseThrow(() -> new IllegalArgumentException("FOOD_LOG_NOT_FOUND"));
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
 
         return ResponseEntity.ok(Map.of(
                 "foodLogId", log.getId(),

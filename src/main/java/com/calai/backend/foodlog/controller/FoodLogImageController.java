@@ -1,9 +1,7 @@
 package com.calai.backend.foodlog.controller;
 
 import com.calai.backend.auth.security.AuthContext;
-import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.service.FoodLogService;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.CacheControl;
@@ -28,11 +26,9 @@ public class FoodLogImageController {
 
     @GetMapping("/api/v1/food-logs/{id}/image")
     public ResponseEntity<StreamingResponseBody> image(
-            @PathVariable("id") String foodLogId,
-            HttpServletRequest req
+            @PathVariable("id") String foodLogId
     ) {
         Long uid = auth.requireUserId();
-        String requestId = RequestIdFilter.getOrCreate(req);
 
         // 1) 查出 objectKey / contentType / size
         var opened = service.openImage(uid, foodLogId);
