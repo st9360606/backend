@@ -4,7 +4,9 @@ import com.calai.backend.entitlement.service.EntitlementService;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogMethod;
 import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.service.QuotaService;
@@ -21,6 +23,7 @@ import com.calai.backend.foodlog.service.support.FoodLogCreateSupport;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
+import com.calai.backend.foodlog.time.ExifTimeExtractor;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,12 +35,26 @@ import org.springframework.mock.web.MockMultipartFile;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * createPhoto() happy path 測試
@@ -67,6 +84,7 @@ class FoodLogServiceCreatePhotoTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+
     private FoodLogService svc;
 
     @BeforeEach
@@ -93,6 +111,22 @@ class FoodLogServiceCreatePhotoTest {
         );
     }
 
+    /**
+     * createPhoto() 內部一定會先呼叫 timeResolver.resolve(...)
+     * 然後立刻取 r.capturedAtUtc() / r.source().name() / r.suspect()
+     * 若不 stub，Mockito 預設回 null，service 會直接 NPE。
+     */
+    private void stubResolvedTime(Instant resolvedAtUtc, Instant serverNow) {
+        CapturedTimeResolver.Result resolved =
+                mock(CapturedTimeResolver.Result.class, org.mockito.Answers.RETURNS_DEEP_STUBS);
+
+        when(resolved.capturedAtUtc()).thenReturn(resolvedAtUtc);
+        when(resolved.source().name()).thenReturn("SERVER_RECEIVED");
+        when(resolved.suspect()).thenReturn(false);
+
+        when(timeResolver.resolve(any(), any(), eq(serverNow))).thenReturn(resolved);
+    }
+
     @Test
     void createPhoto_should_return_draft_without_quota_or_task_when_cache_hit() throws Exception {
         // arrange
@@ -111,7 +145,6 @@ class FoodLogServiceCreatePhotoTest {
                 new byte[]{1, 2, 3, 4}
         );
 
-        // upload result / save result 全部用 mock，避免你不知道 constructor
         FoodLogCreateSupport.UploadTempResult upload = mock(FoodLogCreateSupport.UploadTempResult.class);
         StorageService.SaveResult saved = mock(StorageService.SaveResult.class);
 
@@ -127,6 +160,8 @@ class FoodLogServiceCreatePhotoTest {
 
         when(clock.instant()).thenReturn(fixedNow);
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
+
+        stubResolvedTime(fixedNow, fixedNow);
 
         doReturn(EntitlementService.Tier.TRIAL)
                 .when(entitlementService)
@@ -147,34 +182,32 @@ class FoodLogServiceCreatePhotoTest {
                 anyCollection()
         )).thenReturn(Optional.of(reusableHit));
 
-        when(createSupport.newBaseEntity(
+        doReturn(newEntity).when(createSupport).newBaseEntity(
                 eq(1L),
-                eq("PHOTO"),
+                eq(FoodLogMethod.PHOTO),
                 any(Instant.class),
                 eq("Asia/Taipei"),
-                any(),
+                any(LocalDate.class),
                 eq(fixedNow),
-                any(),
-                anyBoolean()
-        )).thenReturn(newEntity);
+                eq(TimeSource.SERVER_RECEIVED),
+                eq(false)
+        );
 
-        // 關鍵：mock 不會自己改 entity 狀態，所以你要手動補 side effect
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.DRAFT);
             e.setEffective(JsonNodeFactory.instance.objectNode().put("foodName", "Chicken Salad"));
             return null;
-        }).when(createSupport).applyCacheHitDraft(any(FoodLogEntity.class), same(reusableHit));
+        }).when(createSupport).applyCacheHitDraft(same(newEntity), same(reusableHit));
 
         when(envelopeAssembler.assemble(newEntity, null, requestId)).thenReturn(expected);
 
-        // 你的 ExifTimeExtractor 若對 mocked storage 會噴例外，就保留這段 static mock
-        try (MockedStatic<com.calai.backend.foodlog.time.ExifTimeExtractor> exifMock =
-                     mockStatic(com.calai.backend.foodlog.time.ExifTimeExtractor.class)) {
-
-            exifMock.when(() -> com.calai.backend.foodlog.time.ExifTimeExtractor
-                            .tryReadCapturedAtUtc(storage, tempKey, java.time.ZoneId.of("Asia/Taipei")))
-                    .thenReturn(Optional.empty());
+        try (MockedStatic<ExifTimeExtractor> exifMock = mockStatic(ExifTimeExtractor.class)) {
+            exifMock.when(() -> ExifTimeExtractor.tryReadCapturedAtUtc(
+                    storage,
+                    tempKey,
+                    java.time.ZoneId.of("Asia/Taipei")
+            )).thenReturn(Optional.empty());
 
             // act
             FoodLogEnvelope actual = svc.createPhoto(
@@ -204,14 +237,12 @@ class FoodLogServiceCreatePhotoTest {
             verify(createSupport).applyCacheHitDraft(newEntity, reusableHit);
             verifyNoInteractions(quota);
 
-            // finalizeCreateResult：save 兩次 + attach 一次 + retain 一次
             verify(repo, times(2)).save(newEntity);
             verify(idem).attach(1L, requestId, "log-new-1", fixedNow);
             verify(createSupport).retainBlobAndAttach(newEntity, 1L, upload);
 
-            // DRAFT 不應建 task
             verify(taskRepo, never()).save(any());
-            verify(createSupport, never()).createQueuedTask(anyString());
+            verify(createSupport, never()).createQueuedTask(any());
 
             verify(envelopeAssembler).assemble(newEntity, null, requestId);
             verify(inFlight).release(lease);
@@ -251,6 +282,8 @@ class FoodLogServiceCreatePhotoTest {
         when(clock.instant()).thenReturn(fixedNow);
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
 
+        stubResolvedTime(fixedNow, fixedNow);
+
         when(entitlementService.resolveTier(1L, fixedNow))
                 .thenReturn(EntitlementService.Tier.TRIAL);
 
@@ -269,16 +302,16 @@ class FoodLogServiceCreatePhotoTest {
                 anyCollection()
         )).thenReturn(Optional.empty());
 
-        when(createSupport.newBaseEntity(
+        doReturn(newEntity).when(createSupport).newBaseEntity(
                 eq(1L),
-                eq("PHOTO"),
+                eq(FoodLogMethod.PHOTO),
                 any(Instant.class),
                 eq("Asia/Taipei"),
-                any(),
+                any(LocalDate.class),
                 eq(fixedNow),
-                any(),
-                anyBoolean()
-        )).thenReturn(newEntity);
+                eq(TimeSource.SERVER_RECEIVED),
+                eq(false)
+        );
 
         when(quota.consumeOperationOrThrow(
                 eq(1L),
@@ -289,7 +322,6 @@ class FoodLogServiceCreatePhotoTest {
 
         when(providerClient.providerCode()).thenReturn("gemini");
 
-        // 關鍵：mock 不會自己改 entity 狀態，所以你要手動補 side effect
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.PENDING);
@@ -303,12 +335,12 @@ class FoodLogServiceCreatePhotoTest {
         when(createSupport.createQueuedTask("log-new-2")).thenReturn(task);
         when(envelopeAssembler.assemble(newEntity, task, requestId)).thenReturn(expected);
 
-        try (MockedStatic<com.calai.backend.foodlog.time.ExifTimeExtractor> exifMock =
-                     mockStatic(com.calai.backend.foodlog.time.ExifTimeExtractor.class)) {
-
-            exifMock.when(() -> com.calai.backend.foodlog.time.ExifTimeExtractor
-                            .tryReadCapturedAtUtc(storage, tempKey, java.time.ZoneId.of("Asia/Taipei")))
-                    .thenReturn(Optional.empty());
+        try (MockedStatic<ExifTimeExtractor> exifMock = mockStatic(ExifTimeExtractor.class)) {
+            exifMock.when(() -> ExifTimeExtractor.tryReadCapturedAtUtc(
+                    storage,
+                    tempKey,
+                    java.time.ZoneId.of("Asia/Taipei")
+            )).thenReturn(Optional.empty());
 
             // act
             FoodLogEnvelope actual = svc.createPhoto(
