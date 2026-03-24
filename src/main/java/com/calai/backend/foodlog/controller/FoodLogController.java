@@ -10,13 +10,14 @@ import com.calai.backend.foodlog.service.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
-
+@Slf4j
 @Tag(name = "FoodLog", description = "Food log (photo/album) + override/save/history")
 @RequiredArgsConstructor
 @RestController
@@ -102,6 +103,12 @@ public class FoodLogController {
                         : OpenFoodFactsLang.firstLangTagOrNull(
                         (appLang != null && !appLang.isBlank()) ? appLang : acceptLanguage
                 );
+
+        log.info("barcode lang body='{}', appLang='{}', acceptLanguage='{}', preferred='{}'",
+                body == null ? null : body.locale(),
+                appLang,
+                acceptLanguage,
+                preferredLangTag);
 
         return service.createBarcodeMvp(
                 uid, clientTz, deviceId,
