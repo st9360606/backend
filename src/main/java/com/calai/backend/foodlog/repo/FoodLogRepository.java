@@ -11,9 +11,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
-import java.time.LocalDate;
 
 public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> {
     Optional<FoodLogEntity> findByIdAndUserId(String id, Long userId);
@@ -49,6 +50,21 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
             Pageable pageable
     );
 
+    @Query(value = """
+              SELECT *
+              FROM food_logs
+              WHERE user_id = :userId
+                AND status IN ('PENDING','DRAFT','SAVED')
+                AND server_received_at_utc >= :fromUtc
+              ORDER BY server_received_at_utc DESC
+              LIMIT :limit
+            """, nativeQuery = true)
+    List<FoodLogEntity> findRecentPreviewItems(
+            @Param("userId") Long userId,
+            @Param("fromUtc") Instant fromUtc,
+            @Param("limit") int limit
+    );
+
     @Query("""
                 select count(f) from FoodLogEntity f
                 where f.userId = :userId
@@ -75,7 +91,26 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
     )
     List<FoodLogEntity> claimExpiredForUpdate(
             @Param("statuses") java.util.List<String> statuses,
-            @Param("cutoff") java.time.Instant cutoff,
+            @Param("cutoff") Instant cutoff,
+            @Param("limit") int limit
+    );
+
+    @Query(
+            value = """
+                SELECT *
+                FROM food_logs
+                WHERE status <> 'DELETED'
+                  AND image_object_key IS NOT NULL
+                  AND image_object_key <> ''
+                  AND server_received_at_utc <= :cutoff
+                ORDER BY server_received_at_utc ASC
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+                """,
+            nativeQuery = true
+    )
+    List<FoodLogEntity> claimImageExpiredForUpdate(
+            @Param("cutoff") Instant cutoff,
             @Param("limit") int limit
     );
 
@@ -110,6 +145,4 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
               SELECT COUNT(*) FROM food_logs WHERE user_id = :userId
             """, nativeQuery = true)
     long countByUserId(@Param("userId") Long userId);
-
-
 }

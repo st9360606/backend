@@ -16,6 +16,7 @@ public record FoodLogListResponse(
             String status,
             String capturedLocalDate,
             String capturedAtUtc,
+            String serverReceivedAtUtc,
             Nutrition nutrition
     ) {}
 

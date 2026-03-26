@@ -6,9 +6,11 @@ import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 class FoodLogHistoryServiceTest {
@@ -17,6 +19,7 @@ class FoodLogHistoryServiceTest {
     void save_should_turn_draft_to_saved() {
         FoodLogRepository repo = mock(FoodLogRepository.class);
         FoodLogService foodLogService = mock(FoodLogService.class);
+        Clock clock = mock(Clock.class);
 
         FoodLogEntity e = new FoodLogEntity();
         e.setId("L1");
@@ -25,7 +28,7 @@ class FoodLogHistoryServiceTest {
 
         when(repo.findByIdForUpdate("L1")).thenReturn(Optional.of(e));
 
-        FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService);
+        FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService, clock);
         svc.save(10L, "L1", "RID");
 
         assertEquals(FoodLogStatus.SAVED, e.getStatus());
@@ -37,6 +40,7 @@ class FoodLogHistoryServiceTest {
     void save_pending_should_throw_conflict_code() {
         FoodLogRepository repo = mock(FoodLogRepository.class);
         FoodLogService foodLogService = mock(FoodLogService.class);
+        Clock clock = mock(Clock.class);
 
         FoodLogEntity e = new FoodLogEntity();
         e.setId("L1");
@@ -45,7 +49,7 @@ class FoodLogHistoryServiceTest {
 
         when(repo.findByIdForUpdate("L1")).thenReturn(Optional.of(e));
 
-        FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService);
+        FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService, clock);
 
         var ex = assertThrows(FoodLogAppException.class, () ->
                 svc.save(10L, "L1", "RID")
@@ -57,6 +61,7 @@ class FoodLogHistoryServiceTest {
     void save_saved_should_be_idempotent() {
         FoodLogRepository repo = mock(FoodLogRepository.class);
         FoodLogService foodLogService = mock(FoodLogService.class);
+        Clock clock = mock(Clock.class);
 
         FoodLogEntity e = new FoodLogEntity();
         e.setId("L1");
@@ -65,7 +70,7 @@ class FoodLogHistoryServiceTest {
 
         when(repo.findByIdForUpdate("L1")).thenReturn(Optional.of(e));
 
-        FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService);
+        FoodLogHistoryService svc = new FoodLogHistoryService(repo, foodLogService, clock);
         svc.save(10L, "L1", "RID");
 
         verify(repo, never()).save(any());

@@ -194,4 +194,15 @@ public class FoodLogController {
         String requestId = RequestIdFilter.getOrCreate(req);
         return overrideService.applyOverride(uid, id, body, requestId);
     }
+
+    @GetMapping("/recent-previews")
+    public FoodLogListResponse recentPreviews(
+            @RequestParam(defaultValue = "72") int lookBackHours,
+            @RequestParam(defaultValue = "10") int size,
+            HttpServletRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return historyService.listRecentPreviews(uid, lookBackHours, size, requestId);
+    }
 }

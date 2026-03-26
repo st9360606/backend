@@ -1,8 +1,9 @@
 package com.calai.backend.foodlog.job.retention;
 
-import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.entity.DeletionJobEntity;
+import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
@@ -34,11 +35,8 @@ public class FoodLogRetentionWorker {
     private final FoodLogTaskRepository taskRepo;
     private final DeletionJobRepository deletionRepo;
     private final ImageBlobService blobService;
-
-    /** 由 Spring 注入，方便測試時改成 fixed clock */
     private final Clock clock;
 
-    // 每天凌晨 05:30 跑（你可改）
     @Scheduled(cron = "0 30 5 * * *")
     @Transactional
     public void runDaily() {
@@ -48,71 +46,134 @@ public class FoodLogRetentionWorker {
 
         Instant now = Instant.now(clock);
 
-        // 1) 短期：DRAFT / PENDING / FAILED
+        // 0) 先清超過 3 天的原始圖片，但保留 FoodLog 本身
+        Instant cutoffImage = now.minus(props.getKeepOriginalImage());
+        int imageExpired = processExpiredImages(cutoffImage, props.getBatchSize());
+
+        // 1) PENDING：2 天
+        Instant cutoffPending = now.minus(props.getKeepPending());
+        int pendingExpired = processExpired(now, cutoffPending, List.of("PENDING"), props.getBatchSize());
+
+        // 2) FAILED：7 天
+        Instant cutoffFailed = now.minus(props.getKeepFailed());
+        int failedExpired = processExpired(now, cutoffFailed, List.of("FAILED"), props.getBatchSize());
+
+        // 3) DRAFT：32 天
         Instant cutoffDraft = now.minus(props.getKeepDraft());
-        int n1 = processExpired(now, cutoffDraft, List.of("DRAFT", "PENDING", "FAILED"), props.getBatchSize());
+        int draftExpired = processExpired(now, cutoffDraft, List.of("DRAFT"), props.getBatchSize());
 
-        // 2) 長期：SAVED
-        Instant cutoffSaved = now.minus(props.getKeepSaved());
-        int n2 = processExpired(now, cutoffSaved, List.of("SAVED"), props.getBatchSize());
-
-        if (n1 + n2 > 0) {
-            log.info("retention done. draftExpired={} savedExpired={}", n1, n2);
+        if (imageExpired + pendingExpired + failedExpired + draftExpired > 0) {
+            log.info(
+                    "retention done. imageExpired={} pendingExpired={} failedExpired={} draftExpired={}",
+                    imageExpired, pendingExpired, failedExpired, draftExpired
+            );
         }
     }
 
-    private int processExpired(Instant now, Instant cutoff, List<String> statuses, int limit) {
+    private int processExpiredImages(Instant cutoff, int limit) {
         int processed = 0;
 
-        // 批次領取（避免一次太大）
-        List<com.calai.backend.foodlog.entity.FoodLogEntity> logs =
-                logRepo.claimExpiredForUpdate(statuses, cutoff, limit);
-
-        for (var logEntity : logs) {
-            // 已刪就跳過（保守）
+        List<FoodLogEntity> logs = logRepo.claimImageExpiredForUpdate(cutoff, limit);
+        for (FoodLogEntity logEntity : logs) {
             if (logEntity.getStatus() == FoodLogStatus.DELETED) {
                 continue;
             }
 
-            // 取消 task（避免 worker 競態）
-            taskRepo.findByFoodLogIdForUpdate(logEntity.getId()).ifPresent(t -> {
-                if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.QUEUED
-                        || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING
-                        || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.FAILED) {
-                    t.markCancelled(now, "RETENTION_DELETED", "cancelled by retention");
-                    taskRepo.save(t);
-                }
-            });
+            String objectKey = trimToNull(logEntity.getImageObjectKey());
+            String sha256 = trimToNull(logEntity.getImageSha256());
 
-            // 軟刪（並標記來源）
-            logEntity.setStatus(FoodLogStatus.DELETED);
-            logEntity.setDeletedBy("RETENTION");
-            logEntity.setDeletedAtUtc(now);
+            // 沒圖了就直接清欄位，避免殘值
+            if (objectKey == null) {
+                clearImageRefs(logEntity);
+                logRepo.save(logEntity);
+                continue;
+            }
 
-            // 依你的要求：結果 / 歷史也要刪（MVP 先做脫敏）
-            logEntity.setEffective(null);
-
-            logRepo.save(logEntity);
-
-            // enqueue deletion job：釋放 blob / 刪照片
-            if (logEntity.getImageSha256() != null && !logEntity.getImageSha256().isBlank()) {
-                String ext = blobService.findExtOrNull(logEntity.getUserId(), logEntity.getImageSha256());
+            // 避免重複建立 deletion job
+            var existing = deletionRepo.findByFoodLogIdForUpdate(logEntity.getId()).orElse(null);
+            if (existing == null) {
+                String ext = sha256 == null ? null : blobService.findExtOrNull(logEntity.getUserId(), sha256);
 
                 DeletionJobEntity job = new DeletionJobEntity();
                 job.setFoodLogId(logEntity.getId());
                 job.setUserId(logEntity.getUserId());
-                job.setSha256(logEntity.getImageSha256());
+                job.setSha256(sha256); // nullable
                 job.setExt(ext);
-                job.setImageObjectKey(logEntity.getImageObjectKey());
+                job.setImageObjectKey(objectKey);
                 job.setJobStatus(DeletionJobEntity.JobStatus.QUEUED);
                 job.setAttempts(0);
                 job.setNextRetryAtUtc(null);
                 deletionRepo.save(job);
             }
-
+            clearImageRefs(logEntity);
+            logRepo.save(logEntity);
             processed++;
         }
-
         return processed;
+    }
+
+    private int processExpired(Instant now, Instant cutoff, List<String> statuses, int limit) {
+        int processed = 0;
+
+        List<FoodLogEntity> logs = logRepo.claimExpiredForUpdate(statuses, cutoff, limit);
+
+        for (FoodLogEntity logEntity : logs) {
+            if (logEntity.getStatus() == FoodLogStatus.DELETED) {
+                continue;
+            }
+
+            taskRepo.findByFoodLogIdForUpdate(logEntity.getId()).ifPresent(t -> {
+                if (t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.QUEUED
+                    || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.RUNNING
+                    || t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.FAILED) {
+                    t.markCancelled(now, "RETENTION_DELETED", "cancelled by retention");
+                    taskRepo.save(t);
+                }
+            });
+
+            logEntity.setStatus(FoodLogStatus.DELETED);
+            logEntity.setDeletedBy("RETENTION");
+            logEntity.setDeletedAtUtc(now);
+            logEntity.setEffective(null);
+
+            String objectKey = trimToNull(logEntity.getImageObjectKey());
+            String sha256 = trimToNull(logEntity.getImageSha256());
+
+            if (objectKey != null) {
+                var existing = deletionRepo.findByFoodLogIdForUpdate(logEntity.getId()).orElse(null);
+                if (existing == null) {
+                    String ext = sha256 == null ? null : blobService.findExtOrNull(logEntity.getUserId(), sha256);
+
+                    DeletionJobEntity job = new DeletionJobEntity();
+                    job.setFoodLogId(logEntity.getId());
+                    job.setUserId(logEntity.getUserId());
+                    job.setSha256(sha256); // nullable
+                    job.setExt(ext);
+                    job.setImageObjectKey(objectKey);
+                    job.setJobStatus(DeletionJobEntity.JobStatus.QUEUED);
+                    job.setAttempts(0);
+                    job.setNextRetryAtUtc(null);
+                    deletionRepo.save(job);
+                }
+                // deletion job 已存在（或剛建立），可安全清掉 tombstone 上的圖片 refs
+                clearImageRefs(logEntity);
+            }
+            logRepo.save(logEntity);
+            processed++;
+        }
+        return processed;
+    }
+
+    private void clearImageRefs(FoodLogEntity logEntity) {
+        logEntity.setImageObjectKey(null);
+        logEntity.setImageSha256(null);
+        logEntity.setImageContentType(null);
+        logEntity.setImageSizeBytes(null);
+    }
+
+    private String trimToNull(String s) {
+        if (s == null) return null;
+        String v = s.trim();
+        return v.isEmpty() ? null : v;
     }
 }

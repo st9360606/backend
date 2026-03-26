@@ -18,6 +18,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
@@ -32,6 +35,7 @@ public class FoodLogHistoryService {
 
     private final FoodLogRepository logRepo;
     private final FoodLogService foodLogService;
+    private final Clock clock;
 
     @Transactional
     public FoodLogEnvelope save(Long userId, String foodLogId, String requestId) {
@@ -241,6 +245,7 @@ public class FoodLogHistoryService {
                 e.getStatus().name(),
                 e.getCapturedLocalDate() == null ? null : e.getCapturedLocalDate().toString(),
                 e.getCapturedAtUtc() == null ? null : e.getCapturedAtUtc().toString(),
+                e.getServerReceivedAtUtc() == null ? null : e.getServerReceivedAtUtc().toString(),
                 new FoodLogListResponse.Nutrition(
                         foodName,
                         kcal,
@@ -260,6 +265,29 @@ public class FoodLogHistoryService {
                         labelMeta,
                         aiMeta
                 )
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public FoodLogListResponse listRecentPreviews(
+            Long userId,
+            int lookBackHours,
+            int size,
+            String requestId
+    ) {
+        int safeHours = Math.max(1, Math.min(lookBackHours, 24 * 7));
+        int safeSize = Math.max(1, Math.min(size, 20));
+
+        Instant fromUtc = Instant.now(clock).minus(Duration.ofHours(safeHours));
+        var items = logRepo.findRecentPreviewItems(userId, fromUtc, safeSize)
+                .stream()
+                .map(this::toItem)
+                .toList();
+
+        return new FoodLogListResponse(
+                items,
+                new FoodLogListResponse.Page(0, safeSize, items.size(), 1),
+                new FoodLogEnvelope.Trace(requestId)
         );
     }
 

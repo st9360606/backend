@@ -3,7 +3,6 @@ package com.calai.backend.foodlog.controller;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.foodlog.service.FoodLogService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -17,7 +16,6 @@ import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
 
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.features", name = "dev-image-endpoint", havingValue = "true")
 @RestController
 public class FoodLogImageController {
 
@@ -30,10 +28,8 @@ public class FoodLogImageController {
     ) {
         Long uid = auth.requireUserId();
 
-        // 1) 查出 objectKey / contentType / size
         var opened = service.openImage(uid, foodLogId);
 
-        // 2) 串流回傳（StreamingResponseBody 會在完成後關閉輸出）
         StreamingResponseBody body = outputStream -> {
             try (InputStream in = service.openImageStream(opened.objectKey())) {
                 byte[] buf = new byte[8192];
@@ -52,13 +48,13 @@ public class FoodLogImageController {
                 : opened.contentType();
         headers.set(HttpHeaders.CONTENT_TYPE, ct);
 
-        // 若你希望更保守（避免被第三方代理快取），改成 CacheControl.noStore()
+        // Home recent-upload 預覽圖：允許 private cache，但避免被共享代理快取
         headers.setCacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePrivate());
 
-        // 有 size 就給 Content-Length（有助於 App 顯示 loading）
-        if (opened.sizeBytes() > 0) headers.setContentLength(opened.sizeBytes());
+        if (opened.sizeBytes() > 0) {
+            headers.setContentLength(opened.sizeBytes());
+        }
 
-        // trace（你想也可放 header，這裡先不放避免污染）
         return ResponseEntity.ok()
                 .headers(headers)
                 .body(body);

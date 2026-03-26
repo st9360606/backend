@@ -198,11 +198,13 @@ app:
 
   retention:
     foodlog:
-      enabled: true           #FoodLogRetentionWorker
-      keep-draft: "PT72H"     # 3 天
-      keep-saved: "PT768H"    # 32 天
+      enabled: true
+      keep-original-image: "PT72H"      # 原始圖片 3 天
+      keep-pending: "PT48H"             # PENDING 2 天
+      keep-failed: "PT168H"             # FAILED 7 天
+      keep-draft: "PT768H"              # DRAFT 32 天
+      keep-deleted-tombstone: "PT768H"  # DELETED tombstone 32 天
       batch-size: 200
-      purge-after: "PT168H"   # 可選：DELETED 後 7 天再做 hard purge（下一步）
 
   account-deletion:
     worker:
