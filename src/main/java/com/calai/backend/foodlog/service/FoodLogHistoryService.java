@@ -78,6 +78,36 @@ public class FoodLogHistoryService {
         return listByStatus(userId, "SAVED", fromLocalDate, toLocalDate, page, size, requestId);
     }
 
+    @Transactional
+    public FoodLogEnvelope unsave(Long userId, String foodLogId, String requestId) {
+        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
+
+        if (!userId.equals(log.getUserId())) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
+        }
+
+        if (log.getStatus() == FoodLogStatus.DELETED) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
+        }
+        if (log.getStatus() == FoodLogStatus.DRAFT) {
+            return foodLogService.getOne(userId, foodLogId, requestId);
+        }
+        if (log.getStatus() == FoodLogStatus.PENDING) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_READY);
+        }
+        if (log.getStatus() == FoodLogStatus.FAILED) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_FAILED);
+        }
+        if (log.getStatus() != FoodLogStatus.SAVED) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_SAVABLE);
+        }
+
+        log.setStatus(FoodLogStatus.DRAFT);
+        logRepo.save(log);
+        return foodLogService.getOne(userId, foodLogId, requestId);
+    }
+
     @Transactional(readOnly = true)
     public FoodLogListResponse listByStatus(
             Long userId,

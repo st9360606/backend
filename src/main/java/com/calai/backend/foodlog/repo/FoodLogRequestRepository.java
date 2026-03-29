@@ -82,4 +82,14 @@ public interface FoodLogRequestRepository extends JpaRepository<FoodLogRequestEn
             nativeQuery = true
     )
     int deleteFailedIfNotAttached(@Param("userId") Long userId, @Param("requestId") String requestId);
+
+    @Modifying
+    @Query(
+            value = """
+        DELETE FROM food_log_requests
+        WHERE food_log_id = :foodLogId
+        """,
+            nativeQuery = true
+    )
+    int deleteByFoodLogId(@Param("foodLogId") String foodLogId);
 }

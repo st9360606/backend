@@ -33,12 +33,13 @@ public class FoodLogOverrideService {
         FoodLogFieldKey key = FoodLogFieldKey.parse(req.fieldKey());
         if (key == null) throw new FoodLogAppException(FoodLogErrorCode.FIELD_KEY_INVALID);
 
-        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
-                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
+        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId).orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
+
         if (!userId.equals(log.getUserId())) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
 
         if (log.getStatus() == FoodLogStatus.DELETED) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
-        if (log.getStatus() != FoodLogStatus.DRAFT) {
+
+        if (log.getStatus() != FoodLogStatus.DRAFT && log.getStatus() != FoodLogStatus.SAVED) {
             throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_EDITABLE);
         }
 

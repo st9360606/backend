@@ -1,55 +1,141 @@
 package com.calai.backend.foodlog.service;
 
+import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
-import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
+import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.repo.DeletionJobRepository;
+import com.calai.backend.foodlog.repo.FoodLogOverrideRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.repo.FoodLogRequestRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 class FoodLogDeleteServiceTest {
 
     @Test
-    void delete_should_cancel_task_and_enqueue_job() {
+    void delete_should_hard_delete_children_and_release_blob() {
         FoodLogRepository logRepo = mock(FoodLogRepository.class);
         FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
+        FoodLogOverrideRepository overrideRepo = mock(FoodLogOverrideRepository.class);
         DeletionJobRepository deletionRepo = mock(DeletionJobRepository.class);
+        FoodLogRequestRepository requestRepo = mock(FoodLogRequestRepository.class);
         ImageBlobService blobService = mock(ImageBlobService.class);
-        FoodLogService foodLogService = mock(FoodLogService.class);
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("L1");
         log.setUserId(10L);
-        log.setStatus(FoodLogStatus.PENDING);
-        log.setImageSha256("sha");
-        log.setImageObjectKey("blobKey");
+        log.setStatus(FoodLogStatus.SAVED);
+        log.setImageSha256("sha256-abc");
 
-        FoodLogTaskEntity task = new FoodLogTaskEntity();
-        task.setId("T1");
-        task.setFoodLogId("L1");
-        task.setTaskStatus(FoodLogTaskEntity.TaskStatus.RUNNING);
-
-        // ✅ 這裡要回 Optional
         when(logRepo.findByIdForUpdate("L1")).thenReturn(Optional.of(log));
-        when(taskRepo.findByFoodLogIdForUpdate("L1")).thenReturn(Optional.of(task));
-        when(blobService.findExtOrNull(10L, "sha")).thenReturn(".jpg");
-        when(foodLogService.getOne(10L, "L1", "RID")).thenReturn(null);
 
-        FoodLogDeleteService svc =
-                new FoodLogDeleteService(logRepo, taskRepo, deletionRepo, blobService, foodLogService);
+        FoodLogDeleteService svc = new FoodLogDeleteService(
+                logRepo,
+                taskRepo,
+                overrideRepo,
+                deletionRepo,
+                requestRepo,
+                blobService
+        );
 
-        svc.deleteOne(10L, "L1", "RID");
+        FoodLogEnvelope env = svc.deleteOne(10L, "L1", "RID-1");
 
-        assertEquals(FoodLogStatus.DELETED, log.getStatus());
-        verify(taskRepo).save(argThat(t -> t.getTaskStatus() == FoodLogTaskEntity.TaskStatus.CANCELLED));
-        verify(deletionRepo).save(any());
+        assertEquals("L1", env.foodLogId());
+        assertEquals("DELETED", env.status());
+
+        verify(taskRepo).deleteByFoodLogId("L1");
+        verify(overrideRepo).deleteByFoodLogId("L1");
+        verify(deletionRepo).deleteByFoodLogId("L1");
+        verify(requestRepo).deleteByFoodLogId("L1");
+        verify(logRepo).delete(log);
+        verify(blobService).release(10L, "sha256-abc");
+
+        verifyNoMoreInteractions(taskRepo, overrideRepo, deletionRepo, requestRepo, blobService);
+    }
+
+    @Test
+    void delete_should_not_release_blob_when_sha256_blank() {
+        FoodLogRepository logRepo = mock(FoodLogRepository.class);
+        FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
+        FoodLogOverrideRepository overrideRepo = mock(FoodLogOverrideRepository.class);
+        DeletionJobRepository deletionRepo = mock(DeletionJobRepository.class);
+        FoodLogRequestRepository requestRepo = mock(FoodLogRequestRepository.class);
+        ImageBlobService blobService = mock(ImageBlobService.class);
+
+        FoodLogEntity log = new FoodLogEntity();
+        log.setId("L2");
+        log.setUserId(10L);
+        log.setStatus(FoodLogStatus.DRAFT);
+        log.setImageSha256("   ");
+
+        when(logRepo.findByIdForUpdate("L2")).thenReturn(Optional.of(log));
+
+        FoodLogDeleteService svc = new FoodLogDeleteService(
+                logRepo,
+                taskRepo,
+                overrideRepo,
+                deletionRepo,
+                requestRepo,
+                blobService
+        );
+
+        FoodLogEnvelope env = svc.deleteOne(10L, "L2", "RID-2");
+
+        assertEquals("DELETED", env.status());
+
+        verify(taskRepo).deleteByFoodLogId("L2");
+        verify(overrideRepo).deleteByFoodLogId("L2");
+        verify(deletionRepo).deleteByFoodLogId("L2");
+        verify(requestRepo).deleteByFoodLogId("L2");
+        verify(logRepo).delete(log);
+        verify(blobService, never()).release(anyLong(), anyString());
+    }
+
+    @Test
+    void delete_should_throw_not_found_when_user_not_owner() {
+        FoodLogRepository logRepo = mock(FoodLogRepository.class);
+        FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
+        FoodLogOverrideRepository overrideRepo = mock(FoodLogOverrideRepository.class);
+        DeletionJobRepository deletionRepo = mock(DeletionJobRepository.class);
+        FoodLogRequestRepository requestRepo = mock(FoodLogRequestRepository.class);
+        ImageBlobService blobService = mock(ImageBlobService.class);
+
+        FoodLogEntity log = new FoodLogEntity();
+        log.setId("L3");
+        log.setUserId(999L);
+        log.setStatus(FoodLogStatus.SAVED);
+
+        when(logRepo.findByIdForUpdate("L3")).thenReturn(Optional.of(log));
+
+        FoodLogDeleteService svc = new FoodLogDeleteService(
+                logRepo,
+                taskRepo,
+                overrideRepo,
+                deletionRepo,
+                requestRepo,
+                blobService
+        );
+
+        FoodLogAppException ex = assertThrows(
+                FoodLogAppException.class,
+                () -> svc.deleteOne(10L, "L3", "RID-3")
+        );
+
+        assertEquals(FoodLogErrorCode.FOOD_LOG_NOT_FOUND, ex.getErrorCode());
+
+        verify(taskRepo, never()).deleteByFoodLogId(anyString());
+        verify(overrideRepo, never()).deleteByFoodLogId(anyString());
+        verify(deletionRepo, never()).deleteByFoodLogId(anyString());
+        verify(requestRepo, never()).deleteByFoodLogId(anyString());
+        verify(logRepo, never()).delete(any());
+        verify(blobService, never()).release(anyLong(), anyString());
     }
 }

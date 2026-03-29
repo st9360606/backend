@@ -58,4 +58,8 @@ public interface DeletionJobRepository extends JpaRepository<DeletionJobEntity, 
     @Query("select j from DeletionJobEntity j where j.id = :id")
     Optional<DeletionJobEntity> findByIdForUpdate(@Param("id") String id);
 
+    @Modifying
+    @Query("delete from DeletionJobEntity j where j.foodLogId = :foodLogId")
+    int deleteByFoodLogId(@Param("foodLogId") String foodLogId);
+
 }

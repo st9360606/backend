@@ -150,6 +150,13 @@ public class FoodLogController {
         return historyService.save(uid, id, requestId);
     }
 
+    @PostMapping("/{id}/unsave")
+    public FoodLogEnvelope unsave(@PathVariable String id, HttpServletRequest req) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return historyService.unsave(uid, id, requestId);
+    }
+
     /**
      * ✅ 保留你原本的 SAVED 列表（不破壞既有 App）
      */

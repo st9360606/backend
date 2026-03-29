@@ -71,7 +71,12 @@ public interface FoodLogTaskRepository extends JpaRepository<FoodLogTaskEntity, 
             @Param("code") String code,
             @Param("msg") String msg
     );
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from FoodLogTaskEntity t where t.id = :id")
     Optional<FoodLogTaskEntity> findByIdForUpdate(@Param("id") String id);
+
+    @Modifying
+    @Query("delete from FoodLogTaskEntity t where t.foodLogId = :foodLogId")
+    int deleteByFoodLogId(@Param("foodLogId") String foodLogId);
 }
