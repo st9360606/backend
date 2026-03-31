@@ -1,18 +1,18 @@
 package com.calai.backend.foodlog.entity;
 
-
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
 import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
@@ -86,6 +86,13 @@ public class FoodLogEntity {
     @Column(name = "effective", columnDefinition = "JSON")
     private JsonNode effective;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "base_effective", columnDefinition = "JSON")
+    private JsonNode baseEffective;
+
+    @Column(name = "portion_multiplier", nullable = false)
+    private Integer portionMultiplier = 1;
+
     @Column(name = "last_error_code", length = 64)
     private String lastErrorCode;
 
@@ -107,14 +114,23 @@ public class FoodLogEntity {
     @PrePersist
     void prePersist() {
         if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
+
         Instant now = Instant.now();
         if (createdAtUtc == null) createdAtUtc = now;
         if (updatedAtUtc == null) updatedAtUtc = now;
+
+        if (portionMultiplier == null || portionMultiplier < 1) {
+            portionMultiplier = 1;
+        }
     }
 
     @PreUpdate
     void preUpdate() {
         updatedAtUtc = Instant.now();
+
+        if (portionMultiplier == null || portionMultiplier < 1) {
+            portionMultiplier = 1;
+        }
     }
 
     public void applyEffectivePatch(String fieldKey, JsonNode newValue) {
@@ -156,17 +172,37 @@ public class FoodLogEntity {
 
                     ObjectNode patch = (ObjectNode) newValue;
 
-                    // ✅ 用 properties() 取代已 deprecated 的 fields()
                     for (Map.Entry<String, JsonNode> en : patch.properties()) {
                         merged.set(en.getKey(), en.getValue());
                     }
 
-                    root.set("nutrients", merged);
+                    root.set("nutrients", orderNutrients(merged));
                 }
             }
             default -> throw new FoodLogAppException(FoodLogErrorCode.FIELD_KEY_INVALID);
         }
 
         this.effective = root;
+    }
+
+    public static ObjectNode orderNutrients(ObjectNode source) {
+        ObjectNode out = JsonNodeFactory.instance.objectNode();
+
+        copyIfPresent(out, source, "kcal");
+        copyIfPresent(out, source, "protein");
+        copyIfPresent(out, source, "fat");
+        copyIfPresent(out, source, "carbs");
+        copyIfPresent(out, source, "fiber");
+        copyIfPresent(out, source, "sugar");
+        copyIfPresent(out, source, "sodium");
+
+        return out;
+    }
+
+    private static void copyIfPresent(ObjectNode target, ObjectNode source, String field) {
+        JsonNode value = source.get(field);
+        if (value != null) {
+            target.set(field, value);
+        }
     }
 }

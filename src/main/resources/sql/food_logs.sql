@@ -57,6 +57,12 @@ CREATE TABLE food_logs
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci;
 
+ALTER TABLE food_logs
+    ADD COLUMN base_effective JSON NULL AFTER effective;
+
+ALTER TABLE food_logs
+    ADD COLUMN portion_multiplier INT NOT NULL DEFAULT 1 AFTER base_effective;
+
 
 CREATE INDEX idx_food_logs_status_received
     ON food_logs (status, server_received_at_utc);

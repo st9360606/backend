@@ -270,12 +270,20 @@ public class FoodLogEnvelopeAssembler {
                 e.getDegradeLevel(),
                 tierUsed,
                 fromCache,
+                resolvePortionMultiplier(e),
                 nr,
                 task,
                 err,
                 hints,
                 new FoodLogEnvelope.Trace(requestId)
         );
+    }
+
+    private static Integer resolvePortionMultiplier(FoodLogEntity e) {
+        if (e == null || e.getPortionMultiplier() == null) {
+            return 1;
+        }
+        return Math.max(1, e.getPortionMultiplier());
     }
 
     private static boolean resolveResultFromCache(JsonNode effective) {

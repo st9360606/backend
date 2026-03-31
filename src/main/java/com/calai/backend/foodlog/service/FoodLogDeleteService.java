@@ -55,10 +55,11 @@ public class FoodLogDeleteService {
                 null,
                 null,
                 false,
-                null,
-                null,
-                null,
-                null,
+                null, // portionMultiplier
+                null, // nutritionResult
+                null, // task
+                null, // error
+                null, // hints
                 new FoodLogEnvelope.Trace(requestId)
         );
     }

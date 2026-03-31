@@ -19,6 +19,7 @@ class FoodLogEnvelopeJsonTest {
                 "DG-0",
                 "MODEL_TIER_HIGH",
                 false,
+                1, // portionMultiplier
                 new FoodLogEnvelope.NutritionResult(
                         "Unknown food",
                         new FoodLogEnvelope.Quantity(1.0, "SERVING"),
@@ -62,6 +63,7 @@ class FoodLogEnvelopeJsonTest {
         // v1.2 / v1.3 契約欄位
         assertThat(json).contains("\"tierUsed\"");
         assertThat(json).contains("\"fromCache\"");
+        assertThat(json).contains("\"portionMultiplier\"");
         assertThat(json).contains("\"warnings\"");
         assertThat(json).contains("\"degradedReason\"");
 

@@ -11,6 +11,7 @@ public record FoodLogEnvelope(
         String degradeLevel,
         String tierUsed,
         boolean fromCache,
+        Integer portionMultiplier,
         NutritionResult nutritionResult,
         Task task,
         ApiError error,
