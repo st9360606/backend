@@ -2,6 +2,7 @@ package com.calai.backend.foodlog.service;
 
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
+import com.calai.backend.foodlog.dto.FoodLogPortionMultiplierRequest;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogOverrideEntity;
 import com.calai.backend.foodlog.model.FoodLogErrorCode;
@@ -11,6 +12,8 @@ import com.calai.backend.foodlog.repo.FoodLogOverrideRepository;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.web.error.FoodLogAppException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,15 +36,7 @@ public class FoodLogOverrideService {
         FoodLogFieldKey key = FoodLogFieldKey.parse(req.fieldKey());
         if (key == null) throw new FoodLogAppException(FoodLogErrorCode.FIELD_KEY_INVALID);
 
-        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId).orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
-
-        if (!userId.equals(log.getUserId())) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
-
-        if (log.getStatus() == FoodLogStatus.DELETED) throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
-
-        if (log.getStatus() != FoodLogStatus.DRAFT && log.getStatus() != FoodLogStatus.SAVED) {
-            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_EDITABLE);
-        }
+        FoodLogEntity log = requireEditableLog(userId, foodLogId);
 
         validateNewValueOrThrow(key, req.newValue());
 
@@ -64,6 +59,89 @@ public class FoodLogOverrideService {
         return foodLogService.getOne(userId, foodLogId, requestId);
     }
 
+    @Transactional
+    public FoodLogEnvelope applyPortionMultiplier(
+            Long userId,
+            String foodLogId,
+            FoodLogPortionMultiplierRequest req,
+            String requestId
+    ) {
+        if (req == null || req.multiplier() == null || req.multiplier() < 1) {
+            throw new FoodLogAppException(FoodLogErrorCode.BAD_REQUEST);
+        }
+
+        int multiplier = req.multiplier();
+        if (multiplier == 1) {
+            return foodLogService.getOne(userId, foodLogId, requestId);
+        }
+
+        FoodLogEntity log = requireEditableLog(userId, foodLogId);
+        JsonNode effective = log.getEffective();
+
+        JsonNode oldNutrients = extractOldValue(effective, FoodLogFieldKey.NUTRIENTS);
+        JsonNode oldQuantity = extractOldValue(effective, FoodLogFieldKey.QUANTITY);
+
+        ObjectNode newNutrients = buildScaledNutrientsOrNull(oldNutrients, multiplier);
+        ObjectNode newQuantity = buildScaledQuantityOrNull(oldQuantity, multiplier);
+
+        if (newNutrients == null && newQuantity == null) {
+            throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
+        }
+
+        Instant now = Instant.now();
+        String reason = req.reason() != null && !req.reason().isBlank()
+                ? req.reason()
+                : "RECENT_UPLOAD_MULTIPLIER_X" + multiplier;
+
+        if (newNutrients != null) {
+            overrideRepo.save(FoodLogOverrideEntity.create(
+                    foodLogId,
+                    FoodLogFieldKey.NUTRIENTS.name(),
+                    oldNutrients,
+                    newNutrients,
+                    "USER",
+                    reason,
+                    now
+            ));
+            log.applyEffectivePatch(FoodLogFieldKey.NUTRIENTS.name(), newNutrients);
+        }
+
+        if (newQuantity != null) {
+            overrideRepo.save(FoodLogOverrideEntity.create(
+                    foodLogId,
+                    FoodLogFieldKey.QUANTITY.name(),
+                    oldQuantity,
+                    newQuantity,
+                    "USER",
+                    reason,
+                    now
+            ));
+            log.applyEffectivePatch(FoodLogFieldKey.QUANTITY.name(), newQuantity);
+        }
+
+        logRepo.save(log);
+        return foodLogService.getOne(userId, foodLogId, requestId);
+    }
+
+    private FoodLogEntity requireEditableLog(Long userId, String foodLogId) {
+        FoodLogEntity log = logRepo.findByIdForUpdate(foodLogId)
+                .orElseThrow(() -> new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND));
+
+        if (!userId.equals(log.getUserId())) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
+        }
+
+        if (log.getStatus() == FoodLogStatus.DELETED) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
+        }
+
+        if (log.getStatus() != FoodLogStatus.DRAFT && log.getStatus() != FoodLogStatus.SAVED) {
+            throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_EDITABLE);
+        }
+
+        return log;
+    }
+
     private static JsonNode extractOldValue(JsonNode effective, FoodLogFieldKey key) {
         if (effective == null || effective.isNull() || !effective.isObject()) return null;
 
@@ -73,6 +151,38 @@ public class FoodLogOverrideService {
             case NUTRIENTS -> effective.get("nutrients");
             case HEALTH_SCORE -> effective.get("healthScore");
         };
+    }
+
+    private static ObjectNode buildScaledNutrientsOrNull(JsonNode nutrients, int multiplier) {
+        if (nutrients == null || !nutrients.isObject()) return null;
+
+        ObjectNode out = JsonNodeFactory.instance.objectNode();
+        int count = 0;
+
+        for (Map.Entry<String, JsonNode> e : nutrients.properties()) {
+            JsonNode v = e.getValue();
+            if (v != null && v.isNumber()) {
+                out.put(e.getKey(), v.asDouble() * multiplier);
+                count++;
+            }
+        }
+
+        return count > 0 ? out : null;
+    }
+
+    private static ObjectNode buildScaledQuantityOrNull(JsonNode quantity, int multiplier) {
+        if (quantity == null || !quantity.isObject()) return null;
+
+        JsonNode value = quantity.get("value");
+        JsonNode unit = quantity.get("unit");
+
+        if (value == null || !value.isNumber()) return null;
+        if (unit == null || !unit.isTextual() || unit.asText().trim().isEmpty()) return null;
+
+        ObjectNode out = JsonNodeFactory.instance.objectNode();
+        out.put("value", value.asDouble() * multiplier);
+        out.put("unit", unit.asText().trim());
+        return out;
     }
 
     private static void validateNewValueOrThrow(FoodLogFieldKey key, JsonNode v) {
@@ -102,7 +212,6 @@ public class FoodLogOverrideService {
             case NUTRIENTS -> {
                 if (!v.isObject()) throw new FoodLogAppException(FoodLogErrorCode.OVERRIDE_VALUE_INVALID);
 
-                // Jackson 2.19+ 建議使用 properties()，避免 fields() deprecated
                 for (Map.Entry<String, JsonNode> e : v.properties()) {
                     JsonNode nv = e.getValue();
                     if (nv == null || !nv.isNumber() || nv.asDouble() < 0d) {

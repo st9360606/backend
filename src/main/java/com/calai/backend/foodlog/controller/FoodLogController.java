@@ -6,6 +6,7 @@ import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsLang;
 import com.calai.backend.foodlog.dto.FoodLogEnvelope;
 import com.calai.backend.foodlog.dto.FoodLogListResponse;
 import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
+import com.calai.backend.foodlog.dto.FoodLogPortionMultiplierRequest;
 import com.calai.backend.foodlog.service.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -200,6 +201,17 @@ public class FoodLogController {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
         return overrideService.applyOverride(uid, id, body, requestId);
+    }
+
+    @PostMapping(value = "/{id}/portion-multiplier", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public FoodLogEnvelope applyPortionMultiplier(
+            @PathVariable String id,
+            @RequestBody FoodLogPortionMultiplierRequest body,
+            HttpServletRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return overrideService.applyPortionMultiplier(uid, id, body, requestId);
     }
 
     @GetMapping("/recent-previews")
