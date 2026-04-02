@@ -199,11 +199,12 @@ app:
   retention:
     foodlog:
       enabled: true
-      keep-original-image: "PT72H"      # 原始圖片 3 天
-      keep-pending: "PT48H"             # PENDING 2 天
-      keep-failed: "PT168H"             # FAILED 7 天
-      keep-draft: "PT768H"              # DRAFT 32 天
-      keep-deleted-tombstone: "PT768H"  # DELETED tombstone 32 天
+      keep-original-image: "PT72H"           # 一般原始圖片 3 天
+      keep-saved-original-image: "PT360H"    # SAVED 原始圖片 15 天
+      keep-pending: "PT48H"                  # PENDING 2 天
+      keep-failed: "PT168H"                  # FAILED 7 天
+      keep-draft: "PT360H"                   # DRAFT 15 天
+      keep-deleted-tombstone: "PT240H"       # DELETED tombstone 10 天 一筆資料一旦被 retention 轉成 DELETED 它的 tombstone 只再留 10 天
       batch-size: 200
 
   account-deletion:

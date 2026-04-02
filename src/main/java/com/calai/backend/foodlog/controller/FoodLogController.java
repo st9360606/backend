@@ -158,6 +158,18 @@ public class FoodLogController {
         return historyService.unsave(uid, id, requestId);
     }
 
+    // 近 15 天內已保存的食物辨識卡片
+    @GetMapping("/saved-recent")
+    public FoodLogListResponse savedRecent(
+            @RequestParam(defaultValue = "15") int lookBackDays,
+            @RequestParam(defaultValue = "100") int size,
+            HttpServletRequest req
+    ) {
+        Long uid = auth.requireUserId();
+        String requestId = RequestIdFilter.getOrCreate(req);
+        return historyService.listSavedRecent(uid, lookBackDays, size, requestId);
+    }
+
     /**
      * ✅ 保留你原本的 SAVED 列表（不破壞既有 App）
      */

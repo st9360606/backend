@@ -162,6 +162,41 @@ public class FoodLogHistoryService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public FoodLogListResponse listSavedRecent(
+            Long userId,
+            int lookBackDays,
+            int size,
+            String requestId
+    ) {
+        if (lookBackDays <= 0) lookBackDays = 15;
+        if (size <= 0) size = 20;
+        if (size > 100) size = 100;
+
+        Instant fromUtc = Instant.now(clock).minus(Duration.ofDays(lookBackDays));
+
+        List<FoodLogEntity> rows = logRepo.findSavedRecentByServerReceivedAtUtc(
+                userId,
+                fromUtc,
+                size
+        );
+
+        var items = rows.stream()
+                .map(this::toItem)
+                .toList();
+
+        return new FoodLogListResponse(
+                items,
+                new FoodLogListResponse.Page(
+                        0,
+                        size,
+                        items.size(),
+                        1
+                ),
+                new FoodLogEnvelope.Trace(requestId)
+        );
+    }
+
     private FoodLogListResponse.Item toItem(FoodLogEntity e) {
         JsonNode eff = e.getEffective();
         FoodLogMethod method = FoodLogMethod.from(e.getMethod());

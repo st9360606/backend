@@ -32,7 +32,12 @@ public class FoodLogImageAccessService {
             throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_DELETED);
         }
 
-        Instant cutoff = Instant.now(clock).minus(retentionProperties.getKeepOriginalImage());
+        Instant cutoff = Instant.now(clock).minus(
+                log.getStatus() == FoodLogStatus.SAVED
+                        ? retentionProperties.getKeepSavedOriginalImage()
+                        : retentionProperties.getKeepOriginalImage()
+        );
+
         if (log.getServerReceivedAtUtc() != null && !log.getServerReceivedAtUtc().isAfter(cutoff)) {
             throw new FoodLogAppException(FoodLogErrorCode.FOOD_LOG_NOT_FOUND);
         }
