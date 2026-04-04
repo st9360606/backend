@@ -52,10 +52,14 @@ public class FoodLogDeleteService {
         return new FoodLogEnvelope(
                 foodLogId,
                 FoodLogStatus.DELETED.name(),
-                null,
-                null,
-                false,
+                null, // degradeLevel
+                null, // tierUsed
+                false, // fromCache
                 null, // portionMultiplier
+                null, // updatedAtUtc
+                null, // serverReceivedAtUtc
+                null, // capturedAtUtc
+                null, // capturedLocalDate
                 null, // nutritionResult
                 null, // task
                 null, // error

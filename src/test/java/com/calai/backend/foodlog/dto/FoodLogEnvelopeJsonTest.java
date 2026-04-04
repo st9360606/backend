@@ -20,6 +20,13 @@ class FoodLogEnvelopeJsonTest {
                 "MODEL_TIER_HIGH",
                 false,
                 1, // portionMultiplier
+
+                // NEW: time fields
+                "2026-04-04T02:42:00Z", // updatedAtUtc
+                "2026-04-04T02:14:00Z", // serverReceivedAtUtc
+                "2026-04-04T02:10:00Z", // capturedAtUtc
+                "2026-04-04",           // capturedLocalDate
+
                 new FoodLogEnvelope.NutritionResult(
                         "Unknown food",
                         new FoodLogEnvelope.Quantity(1.0, "SERVING"),
@@ -73,5 +80,11 @@ class FoodLogEnvelopeJsonTest {
 
         // 新增欄位驗收
         assertThat(json).contains("\"_reasoning\"");
+
+        // NEW: time fields 驗收
+        assertThat(json).contains("\"updatedAtUtc\"");
+        assertThat(json).contains("\"serverReceivedAtUtc\"");
+        assertThat(json).contains("\"capturedAtUtc\"");
+        assertThat(json).contains("\"capturedLocalDate\"");
     }
 }

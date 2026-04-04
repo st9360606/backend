@@ -308,6 +308,7 @@ public class FoodLogHistoryService {
         return new FoodLogListResponse.Item(
                 e.getId(),
                 e.getStatus().name(),
+                e.getUpdatedAtUtc() == null ? null : e.getUpdatedAtUtc().toString(),
                 e.getCapturedLocalDate() == null ? null : e.getCapturedLocalDate().toString(),
                 e.getCapturedAtUtc() == null ? null : e.getCapturedAtUtc().toString(),
                 e.getServerReceivedAtUtc() == null ? null : e.getServerReceivedAtUtc().toString(),

@@ -52,14 +52,14 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
     );
 
     @Query(value = """
-              SELECT *
-              FROM food_logs
-              WHERE user_id = :userId
-                AND status IN ('PENDING','DRAFT','SAVED')
-                AND server_received_at_utc >= :fromUtc
-              ORDER BY server_received_at_utc DESC
-              LIMIT :limit
-            """, nativeQuery = true)
+          SELECT *
+          FROM food_logs
+          WHERE user_id = :userId
+            AND status IN ('PENDING','DRAFT','SAVED')
+            AND server_received_at_utc >= :fromUtc
+          ORDER BY server_received_at_utc DESC
+          LIMIT :limit
+        """, nativeQuery = true)
     List<FoodLogEntity> findRecentPreviewItems(
             @Param("userId") Long userId,
             @Param("fromUtc") Instant fromUtc,
@@ -178,15 +178,16 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
             """, nativeQuery = true)
     long countByUserId(@Param("userId") Long userId);
 
+
     @Query(value = """
-            SELECT *
-            FROM food_logs
-            WHERE user_id = :userId
-              AND status = 'SAVED'
-              AND server_received_at_utc >= :fromUtc
-            ORDER BY server_received_at_utc DESC
-            LIMIT :limit
-            """, nativeQuery = true)
+          SELECT *
+          FROM food_logs
+          WHERE user_id = :userId
+            AND status = 'SAVED'
+            AND server_received_at_utc >= :fromUtc
+          ORDER BY server_received_at_utc DESC
+          LIMIT :limit
+        """, nativeQuery = true)
     List<FoodLogEntity> findSavedRecentByServerReceivedAtUtc(
             @Param("userId") Long userId,
             @Param("fromUtc") Instant fromUtc,

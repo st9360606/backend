@@ -14,6 +14,7 @@ public record FoodLogListResponse(
     public record Item(
             String foodLogId,
             String status,
+            String updatedAtUtc,
             String capturedLocalDate,
             String capturedAtUtc,
             String serverReceivedAtUtc,
