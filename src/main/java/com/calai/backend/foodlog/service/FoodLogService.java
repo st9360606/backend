@@ -84,6 +84,7 @@ public class FoodLogService {
     private final FoodLogRetryService retryService;
     private final FoodLogBarcodeService barcodeService;
     private final FoodLogCreateSupport createSupport;
+    private final UserDailyNutritionSummaryService dailySummaryService;
 
     /**
      * createAlbum / createPhoto / createLabel 已經能一眼看懂：
@@ -535,6 +536,7 @@ public class FoodLogService {
         repo.save(e);
 
         if (e.getStatus() == FoodLogStatus.DRAFT) {
+            dailySummaryService.recomputeDay(e.getUserId(), e.getCapturedLocalDate());
             return envelopeAssembler.assemble(e, null, requestId);
         }
 

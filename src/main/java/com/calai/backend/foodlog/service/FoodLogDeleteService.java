@@ -14,6 +14,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+
 @RequiredArgsConstructor
 @Service
 public class FoodLogDeleteService {
@@ -24,6 +26,7 @@ public class FoodLogDeleteService {
     private final DeletionJobRepository deletionRepo;
     private final FoodLogRequestRepository requestRepo;
     private final ImageBlobService blobService;
+    private final UserDailyNutritionSummaryService dailySummaryService;
 
     @Transactional
     public FoodLogEnvelope deleteOne(Long userId, String foodLogId, String requestId) {
@@ -36,6 +39,8 @@ public class FoodLogDeleteService {
 
         String sha256 = trimToNull(log.getImageSha256());
 
+        LocalDate localDate = log.getCapturedLocalDate();
+
         // 先刪 child rows，再刪 parent
         taskRepo.deleteByFoodLogId(foodLogId);
         overrideRepo.deleteByFoodLogId(foodLogId);
@@ -43,6 +48,8 @@ public class FoodLogDeleteService {
         requestRepo.deleteByFoodLogId(foodLogId);
 
         logRepo.delete(log);
+        logRepo.flush();
+        dailySummaryService.recomputeDay(userId, localDate);
 
         // blob 不能直接刪 objectKey，要走 ref_count release
         if (sha256 != null) {

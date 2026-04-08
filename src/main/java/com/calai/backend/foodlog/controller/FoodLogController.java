@@ -3,11 +3,9 @@ package com.calai.backend.foodlog.controller;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.barcode.openfoodfacts.OpenFoodFactsLang;
-import com.calai.backend.foodlog.dto.FoodLogEnvelope;
-import com.calai.backend.foodlog.dto.FoodLogListResponse;
-import com.calai.backend.foodlog.dto.FoodLogOverrideRequest;
-import com.calai.backend.foodlog.dto.FoodLogPortionMultiplierRequest;
+import com.calai.backend.foodlog.dto.*;
 import com.calai.backend.foodlog.service.*;
+import com.calai.backend.foodlog.service.support.FoodLogRequestNormalizer;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +28,7 @@ public class FoodLogController {
     private final FoodLogDeleteService deleteService;
     private final FoodLogHistoryService historyService;
     private final FoodLogOverrideService overrideService;
+    private final UserDailyNutritionSummaryService dailySummaryService;
 
     @PostMapping(value = "/album", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope album(
@@ -235,5 +234,18 @@ public class FoodLogController {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
         return historyService.listRecentPreviews(uid, lookBackHours, size, requestId);
+    }
+
+    @GetMapping("/progress/weekly")
+    public FoodLogWeeklyProgressResponse weeklyProgress(
+            @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz,
+            @RequestParam(defaultValue = "0") int weekOffset
+    ) {
+        Long uid = auth.requireUserId();
+        return dailySummaryService.getWeeklyProgress(
+                uid,
+                FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz),
+                weekOffset
+        );
     }
 }

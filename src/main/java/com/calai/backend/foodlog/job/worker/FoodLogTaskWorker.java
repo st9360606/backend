@@ -10,6 +10,7 @@ import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.unit.FoodLogWarning;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -35,6 +36,7 @@ public class FoodLogTaskWorker {
     private final ProviderRouter router;
     private final StorageService storage;
     private final FoodLogEffectivePostProcessor postProcessor;
+    private final UserDailyNutritionSummaryService dailySummaryService;
     private final TransactionTemplate txTemplate;
     private final Clock clock;
 
@@ -43,7 +45,7 @@ public class FoodLogTaskWorker {
             FoodLogRepository logRepo,
             ProviderRouter router,
             StorageService storage,
-            FoodLogEffectivePostProcessor postProcessor,
+            FoodLogEffectivePostProcessor postProcessor, UserDailyNutritionSummaryService dailySummaryService,
             PlatformTransactionManager txManager,
             Clock clock
     ) {
@@ -52,6 +54,7 @@ public class FoodLogTaskWorker {
         this.router = router;
         this.storage = storage;
         this.postProcessor = postProcessor;
+        this.dailySummaryService = dailySummaryService;
         this.txTemplate = new TransactionTemplate(txManager);
         this.clock = clock;
     }
@@ -237,6 +240,7 @@ public class FoodLogTaskWorker {
 
         logRepo.save(logEntity);
         taskRepo.save(task);
+        dailySummaryService.recomputeDay(logEntity.getUserId(), logEntity.getCapturedLocalDate());
     }
 
     private void applyFailure(
@@ -304,6 +308,7 @@ public class FoodLogTaskWorker {
 
             logRepo.save(logEntity);
             taskRepo.save(task);
+            dailySummaryService.recomputeDay(logEntity.getUserId(), logEntity.getCapturedLocalDate());
             return;
         }
 

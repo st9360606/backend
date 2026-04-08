@@ -193,4 +193,26 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
             @Param("fromUtc") Instant fromUtc,
             @Param("limit") int limit
     );
+
+    //被收藏 & 被辨識 的都要統計進去當天
+    @Query(value = """
+        SELECT
+          COALESCE(MAX(captured_tz), 'UTC') AS timezone,
+          COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.kcal')) AS DECIMAL(12,3)), 0)), 0) AS totalKcal,
+          COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.protein')) AS DECIMAL(12,3)), 0)), 0) AS totalProteinG,
+          COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.carbs')) AS DECIMAL(12,3)), 0)), 0) AS totalCarbsG,
+          COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.fat')) AS DECIMAL(12,3)), 0)), 0) AS totalFatsG,
+          COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.fiber')) AS DECIMAL(12,3)), 0)), 0) AS totalFiberG,
+          COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.sugar')) AS DECIMAL(12,3)), 0)), 0) AS totalSugarG,
+          COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.sodium')) AS DECIMAL(12,3)), 0)), 0) AS totalSodiumMg,
+          COUNT(*) AS mealCount
+        FROM food_logs
+        WHERE user_id = :userId
+          AND captured_local_date = :localDate
+          AND status IN ('DRAFT','SAVED')
+        """, nativeQuery = true)
+    Optional<FoodLogDailyNutritionAggregate> aggregateDailyNutrition(
+            @Param("userId") Long userId,
+            @Param("localDate") LocalDate localDate
+    );
 }

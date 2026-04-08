@@ -206,6 +206,7 @@ app:
       keep-draft: "PT360H"                   # DRAFT 15 天
       keep-deleted-tombstone: "PT240H"       # DELETED tombstone 10 天 一筆資料一旦被 retention 轉成 DELETED 它的 tombstone 只再留 10 天
       batch-size: 200
+      keep-daily-summary-days: 36            #Progress 統計圖留存36天
 
   account-deletion:
     worker:

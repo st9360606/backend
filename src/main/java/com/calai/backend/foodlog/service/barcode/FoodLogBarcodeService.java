@@ -20,6 +20,7 @@ import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.service.query.FoodLogQueryService;
 import com.calai.backend.foodlog.service.request.IdempotencyService;
 import com.calai.backend.foodlog.service.support.FoodLogEnvelopeAssembler;
@@ -51,6 +52,7 @@ public class FoodLogBarcodeService {
     private final FoodLogEffectivePostProcessor postProcessor;
     private final FoodLogEnvelopeAssembler envelopeAssembler;
     private final FoodLogQueryService queryService;
+    private final UserDailyNutritionSummaryService dailySummaryService;
 
     public FoodLogEnvelope createBarcodeMvp(
             Long userId,
@@ -254,6 +256,7 @@ public class FoodLogBarcodeService {
 
             repo.save(e);
             idem.attach(userId, requestId, e.getId(), now);
+            dailySummaryService.recomputeDay(userId, localDate);
 
             return envelopeAssembler.assemble(e, null, requestId);
         });

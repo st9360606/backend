@@ -28,6 +28,7 @@ public class FoodLogOverrideService {
     private final FoodLogRepository logRepo;
     private final FoodLogOverrideRepository overrideRepo;
     private final FoodLogService foodLogService;
+    private final UserDailyNutritionSummaryService dailySummaryService;
 
     @Transactional
     public FoodLogEnvelope applyOverride(
@@ -80,6 +81,7 @@ public class FoodLogOverrideService {
         log.setBaseEffective(baseRoot);
 
         logRepo.save(log);
+        dailySummaryService.recomputeDay(log.getUserId(), log.getCapturedLocalDate());
 
         return foodLogService.getOne(userId, foodLogId, requestId);
     }
@@ -134,7 +136,9 @@ public class FoodLogOverrideService {
 
         log.setEffective(scaledEffective);
         log.setPortionMultiplier(targetMultiplier);
+
         logRepo.save(log);
+        dailySummaryService.recomputeDay(log.getUserId(), log.getCapturedLocalDate());
 
         return foodLogService.getOne(userId, foodLogId, requestId);
     }
