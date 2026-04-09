@@ -1,6 +1,8 @@
 package com.calai.backend.foodlog.service;
 
 import com.calai.backend.entitlement.service.EntitlementService;
+import com.calai.backend.foodlog.model.FoodLogMethod;
+import com.calai.backend.foodlog.model.TimeSource;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.quota.service.QuotaService;
@@ -28,11 +30,15 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -65,6 +71,8 @@ class FoodLogServiceCreateGuardTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
+
     private FoodLogService svc;
 
     @BeforeEach
@@ -87,7 +95,8 @@ class FoodLogServiceCreateGuardTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 
@@ -367,9 +376,19 @@ class FoodLogServiceCreateGuardTest {
         verifyNoInteractions(quota);
         verifyNoInteractions(abuseGuard);
         verifyNoInteractions(providerClient);
+        verifyNoInteractions(dailySummaryService);
 
         verify(createSupport, never()).uploadTempImage(anyLong(), anyString(), any());
-        verify(createSupport, never()).newBaseEntity(anyLong(), anyString(), any(), anyString(), any(), any(), any(), anyBoolean());
+        verify(createSupport, never()).newBaseEntity(
+                anyLong(),
+                any(FoodLogMethod.class),
+                any(Instant.class),
+                anyString(),
+                any(LocalDate.class),
+                any(Instant.class),
+                any(TimeSource.class),
+                anyBoolean()
+        );
         verify(createSupport, never()).applyCacheHitDraft(any(), any());
         verify(createSupport, never()).applyPendingMiss(any(), any(), anyString());
         verify(createSupport, never()).retainBlobAndAttach(any(), anyLong(), any());
@@ -446,9 +465,19 @@ class FoodLogServiceCreateGuardTest {
         verifyNoInteractions(quota);
         verifyNoInteractions(abuseGuard);
         verifyNoInteractions(providerClient);
+        verifyNoInteractions(dailySummaryService);
 
         verify(createSupport, never()).uploadTempImage(anyLong(), anyString(), any());
-        verify(createSupport, never()).newBaseEntity(anyLong(), anyString(), any(), anyString(), any(), any(), any(), anyBoolean());
+        verify(createSupport, never()).newBaseEntity(
+                anyLong(),
+                any(FoodLogMethod.class),
+                any(Instant.class),
+                anyString(),
+                any(LocalDate.class),
+                any(Instant.class),
+                any(TimeSource.class),
+                anyBoolean()
+        );
         verify(createSupport, never()).applyCacheHitDraft(any(), any());
         verify(createSupport, never()).applyPendingMiss(any(), any(), anyString());
         verify(createSupport, never()).retainBlobAndAttach(any(), anyLong(), any());
@@ -515,9 +544,19 @@ class FoodLogServiceCreateGuardTest {
         verifyNoInteractions(quota);
         verifyNoInteractions(abuseGuard);
         verifyNoInteractions(providerClient);
+        verifyNoInteractions(dailySummaryService);
 
         verify(createSupport, never()).uploadTempImage(anyLong(), anyString(), any());
-        verify(createSupport, never()).newBaseEntity(anyLong(), anyString(), any(), anyString(), any(), any(), any(), anyBoolean());
+        verify(createSupport, never()).newBaseEntity(
+                anyLong(),
+                any(FoodLogMethod.class),
+                any(Instant.class),
+                anyString(),
+                any(LocalDate.class),
+                any(Instant.class),
+                any(TimeSource.class),
+                anyBoolean()
+        );
         verify(createSupport, never()).applyCacheHitDraft(any(), any());
         verify(createSupport, never()).applyPendingMiss(any(), any(), anyString());
         verify(createSupport, never()).retainBlobAndAttach(any(), anyLong(), any());

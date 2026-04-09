@@ -7,15 +7,19 @@ import com.calai.backend.foodlog.service.FoodLogDeleteService;
 import com.calai.backend.foodlog.service.FoodLogHistoryService;
 import com.calai.backend.foodlog.service.FoodLogOverrideService;
 import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.web.error.ModelRefusedException;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class FoodLogRefused422StandaloneTest {
 
@@ -27,12 +31,19 @@ class FoodLogRefused422StandaloneTest {
         FoodLogDeleteService deleteService = mock(FoodLogDeleteService.class);
         FoodLogHistoryService historyService = mock(FoodLogHistoryService.class);
         FoodLogOverrideService overrideService = mock(FoodLogOverrideService.class);
+        UserDailyNutritionSummaryService dailySummaryService = mock(UserDailyNutritionSummaryService.class);
 
-        // 2) 建 controller（✅ 注意順序：auth, service, delete, history, override）
-        FoodLogController controller =
-                new FoodLogController(auth, service, deleteService, historyService, overrideService);
+        // 2) 建 controller
+        FoodLogController controller = new FoodLogController(
+                auth,
+                service,
+                deleteService,
+                historyService,
+                overrideService,
+                dailySummaryService
+        );
 
-        // 3) standalone MockMvc + 掛上 Advice（這才是本測試重點）
+        // 3) standalone MockMvc + 掛上 Advice
         MockMvc mvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new FoodLogExceptionAdvice())

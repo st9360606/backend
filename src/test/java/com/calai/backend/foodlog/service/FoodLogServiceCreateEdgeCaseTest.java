@@ -32,7 +32,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
-import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -41,11 +41,13 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
@@ -54,6 +56,7 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -84,6 +87,8 @@ class FoodLogServiceCreateEdgeCaseTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
+
     private FoodLogService svc;
 
     @BeforeEach
@@ -106,7 +111,8 @@ class FoodLogServiceCreateEdgeCaseTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 
@@ -166,16 +172,9 @@ class FoodLogServiceCreateEdgeCaseTest {
         );
     }
 
-
     /**
      * reusable hit 存在，但 effective 不是 object：
      * 應被視為 miss，而不是 cache hit。
-     *
-     * 驗證：
-     * - quota 會被扣
-     * - applyPendingMiss() 會被呼叫
-     * - 建 task
-     * - applyCacheHitDraft() 不會被呼叫
      */
     private void assertNonObjectEffectiveFallsBackToMiss(FileInvoker invoker) throws Exception {
         Instant fixedNow = Instant.parse("2026-03-03T00:00:00Z");
@@ -241,7 +240,7 @@ class FoodLogServiceCreateEdgeCaseTest {
                 any(),
                 eq(fixedNow),
                 any(),
-                any(Boolean.class)
+                anyBoolean()
         )).thenReturn(newEntity);
 
         when(quota.consumeOperationOrThrow(
@@ -308,17 +307,14 @@ class FoodLogServiceCreateEdgeCaseTest {
             verify(taskRepo).save(task);
             verify(envelopeAssembler).assemble(newEntity, task, requestId);
 
-            verify(idem, never()).failAndReleaseIfNeeded(anyLong(), anyString(), any(Boolean.class));
+            verifyNoInteractions(dailySummaryService);
+            verify(idem, never()).failAndReleaseIfNeeded(anyLong(), anyString(), anyBoolean());
             verify(inFlight).release(lease);
         }
     }
 
     /**
-     * 依你目前的 finalizeCreateResult()，
      * 只要不是 DRAFT，就會建立 task 並 assemble。
-     *
-     * 所以這裡把 applyPendingMiss 後的 status 故意設成 FAILED，
-     * 驗證它仍然走「非 DRAFT 路徑」。
      */
     private void assertFailedStatusStillCreatesTask(FileInvoker invoker) throws Exception {
         Instant fixedNow = Instant.parse("2026-03-03T00:00:00Z");
@@ -379,7 +375,7 @@ class FoodLogServiceCreateEdgeCaseTest {
                 any(),
                 eq(fixedNow),
                 any(),
-                any(Boolean.class)
+                anyBoolean()
         )).thenReturn(newEntity);
 
         when(quota.consumeOperationOrThrow(
@@ -446,11 +442,11 @@ class FoodLogServiceCreateEdgeCaseTest {
             verify(taskRepo).save(task);
             verify(envelopeAssembler).assemble(newEntity, task, requestId);
 
-            verify(idem, never()).failAndReleaseIfNeeded(anyLong(), anyString(), any(Boolean.class));
+            verifyNoInteractions(dailySummaryService);
+            verify(idem, never()).failAndReleaseIfNeeded(anyLong(), anyString(), anyBoolean());
             verify(inFlight).release(lease);
         }
     }
-
 
     private void stubResolvedTime(Instant resolvedAtUtc) {
         CapturedTimeResolver.Result resolved = mock(CapturedTimeResolver.Result.class, RETURNS_DEEP_STUBS);

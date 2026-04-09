@@ -3,12 +3,13 @@ package com.calai.backend.foodlog.job.worker;
 import com.calai.backend.foodlog.entity.FoodLogEntity;
 import com.calai.backend.foodlog.entity.FoodLogTaskEntity;
 import com.calai.backend.foodlog.model.FoodLogStatus;
+import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
+import com.calai.backend.foodlog.provider.routing.ProviderRouter;
+import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.storage.StorageService;
-import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
-import com.calai.backend.foodlog.provider.spi.ProviderClient;
-import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
@@ -53,6 +55,7 @@ class FoodLogTaskWorkerTest {
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         StorageService storage = Mockito.mock(StorageService.class);
         FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
+        UserDailyNutritionSummaryService dailySummaryService = Mockito.mock(UserDailyNutritionSummaryService.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -74,15 +77,22 @@ class FoodLogTaskWorkerTest {
                 .thenReturn(Optional.of(log));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
-                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+                taskRepo,
+                logRepo,
+                router,
+                storage,
+                postProcessor,
+                dailySummaryService,
+                txManager,
+                clock
         );
         worker.runOnce();
 
         assertEquals(FoodLogTaskEntity.TaskStatus.CANCELLED, task.getTaskStatus());
 
-        Mockito.verify(router, never()).pick(any());
         Mockito.verify(router, never()).pickStrict(any());
         Mockito.verifyNoInteractions(postProcessor);
+        Mockito.verifyNoInteractions(dailySummaryService);
     }
 
     @Test
@@ -93,6 +103,7 @@ class FoodLogTaskWorkerTest {
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
         FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
+        UserDailyNutritionSummaryService dailySummaryService = Mockito.mock(UserDailyNutritionSummaryService.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -122,7 +133,14 @@ class FoodLogTaskWorkerTest {
                 .thenThrow(new RuntimeException("boom"));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
-                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+                taskRepo,
+                logRepo,
+                router,
+                storage,
+                postProcessor,
+                dailySummaryService,
+                txManager,
+                clock
         );
         worker.runOnce();
 
@@ -135,6 +153,7 @@ class FoodLogTaskWorkerTest {
         assertNotNull(log.getLastErrorMessage());
 
         Mockito.verifyNoInteractions(postProcessor);
+        Mockito.verifyNoInteractions(dailySummaryService);
     }
 
     @Test
@@ -144,6 +163,7 @@ class FoodLogTaskWorkerTest {
         ProviderRouter router = Mockito.mock(ProviderRouter.class);
         StorageService storage = Mockito.mock(StorageService.class);
         FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
+        UserDailyNutritionSummaryService dailySummaryService = Mockito.mock(UserDailyNutritionSummaryService.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -168,7 +188,14 @@ class FoodLogTaskWorkerTest {
                 .thenReturn(Optional.of(log));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
-                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+                taskRepo,
+                logRepo,
+                router,
+                storage,
+                postProcessor,
+                dailySummaryService,
+                txManager,
+                clock
         );
         worker.runOnce();
 
@@ -179,9 +206,9 @@ class FoodLogTaskWorkerTest {
         assertEquals(FoodLogStatus.FAILED, log.getStatus());
         assertEquals("MAX_ATTEMPTS_EXCEEDED", log.getLastErrorCode());
 
-        Mockito.verify(router, never()).pick(any());
         Mockito.verify(router, never()).pickStrict(any());
         Mockito.verifyNoInteractions(postProcessor);
+        Mockito.verifyNoInteractions(dailySummaryService);
     }
 
     @Test
@@ -192,6 +219,7 @@ class FoodLogTaskWorkerTest {
         ProviderClient provider = Mockito.mock(ProviderClient.class);
         StorageService storage = Mockito.mock(StorageService.class);
         FoodLogEffectivePostProcessor postProcessor = Mockito.mock(FoodLogEffectivePostProcessor.class);
+        UserDailyNutritionSummaryService dailySummaryService = Mockito.mock(UserDailyNutritionSummaryService.class);
         PlatformTransactionManager txManager = newTxManager();
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
@@ -204,6 +232,8 @@ class FoodLogTaskWorkerTest {
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log4");
+        log.setUserId(100L);
+        log.setCapturedLocalDate(LocalDate.of(2026, 3, 3));
         log.setStatus(FoodLogStatus.PENDING);
         log.setMethod("PHOTO");
         log.setImageObjectKey("user-1/food-log/log4/original.jpg");
@@ -234,7 +264,14 @@ class FoodLogTaskWorkerTest {
                 .thenAnswer(inv -> inv.getArgument(0));
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
-                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+                taskRepo,
+                logRepo,
+                router,
+                storage,
+                postProcessor,
+                dailySummaryService,
+                txManager,
+                clock
         );
         worker.runOnce();
 
@@ -245,5 +282,6 @@ class FoodLogTaskWorkerTest {
 
         Mockito.verify(postProcessor, Mockito.times(1))
                 .apply(any(ObjectNode.class), eq("GEMINI"), eq("PHOTO"));
+        Mockito.verify(dailySummaryService).recomputeDay(100L, LocalDate.of(2026, 3, 3));
     }
 }

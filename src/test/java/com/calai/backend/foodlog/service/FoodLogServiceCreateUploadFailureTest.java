@@ -31,8 +31,16 @@ import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 /**
  * createPhoto / createLabel 在 uploadTempImage() 失敗時的 guard tests
@@ -66,6 +74,8 @@ class FoodLogServiceCreateUploadFailureTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
+
     private FoodLogService svc;
 
     @BeforeEach
@@ -88,7 +98,8 @@ class FoodLogServiceCreateUploadFailureTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 
@@ -150,7 +161,6 @@ class FoodLogServiceCreateUploadFailureTest {
         doNothing().when(rateLimiter).checkOrThrow(1L, EntitlementService.Tier.TRIAL, fixedNow);
         when(inFlight.acquireOrThrow(1L)).thenReturn(lease);
 
-        // ✅ 重點：模擬 FoodLogCreateSupport.uploadTempImage() 內部的補償行為
         doAnswer(invocation -> {
             idem.failAndReleaseIfNeeded(1L, requestId, true);
             throw uploadFailure;
@@ -163,31 +173,37 @@ class FoodLogServiceCreateUploadFailureTest {
 
         assertSame(uploadFailure, ex);
 
-        // 前置流程有走到 upload 失敗點
         verify(idem).reserveOrGetExisting(1L, requestId, fixedNow);
         verify(entitlementService).resolveTier(1L, fixedNow);
         verify(rateLimiter).checkOrThrow(1L, EntitlementService.Tier.TRIAL, fixedNow);
         verify(inFlight).acquireOrThrow(1L);
         verify(createSupport).uploadTempImage(1L, requestId, validFile);
 
-        // upload 失敗後要回收 request 與 lease
         verify(idem).failAndReleaseIfNeeded(1L, requestId, true);
         verify(inFlight).release(lease);
 
-        // upload 失敗後，後續流程都不應執行
         verifyNoInteractions(quota);
         verify(repo, never()).save(any());
         verify(taskRepo, never()).save(any());
         verify(idem, never()).attach(anyLong(), any(), any(), any());
         verify(createSupport, never()).retainBlobAndAttach(any(), anyLong(), any());
-        verify(createSupport, never()).newBaseEntity(anyLong(), any(FoodLogMethod.class), any(), anyString(), any(), any(), any(), anyBoolean());
+        verify(createSupport, never()).newBaseEntity(
+                anyLong(),
+                any(FoodLogMethod.class),
+                any(),
+                anyString(),
+                any(),
+                any(),
+                any(),
+                anyBoolean()
+        );
         verify(createSupport, never()).applyCacheHitDraft(any(), any());
         verify(createSupport, never()).applyPendingMiss(any(), any(), anyString());
         verify(createSupport, never()).createQueuedTask(anyString());
         verifyNoInteractions(envelopeAssembler);
         verifyNoInteractions(abuseGuard);
+        verifyNoInteractions(dailySummaryService);
 
-        // 這些旁支 service 不該被碰到
         verifyNoInteractions(queryService);
         verifyNoInteractions(imageAccessService);
         verifyNoInteractions(retryService);

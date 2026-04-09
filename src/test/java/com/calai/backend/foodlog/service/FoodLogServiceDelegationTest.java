@@ -100,7 +100,10 @@ class FoodLogServiceDelegationTest {
     private FoodLogCreateSupport createSupport;
 
     @Mock
-    CapturedTimeResolver timeResolver;
+    private CapturedTimeResolver timeResolver;
+
+    @Mock
+    private UserDailyNutritionSummaryService dailySummaryService;
 
     private FoodLogService service;
 
@@ -124,7 +127,8 @@ class FoodLogServiceDelegationTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 

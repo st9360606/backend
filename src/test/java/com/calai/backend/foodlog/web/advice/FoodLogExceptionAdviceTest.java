@@ -6,6 +6,7 @@ import com.calai.backend.common.web.RequestIdFilter;
 import com.calai.backend.foodlog.controller.FoodLogController;
 import com.calai.backend.foodlog.controller.FoodLogImageController;
 import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.service.image.ImageOpenResult;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -27,13 +28,21 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
 
-import static org.mockito.ArgumentMatchers.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ActiveProfiles("test")
 @WebMvcTest(
-        controllers = { FoodLogController.class, FoodLogImageController.class }, // ✅ 關鍵：把 image controller 加進來
+        controllers = { FoodLogController.class, FoodLogImageController.class },
         excludeAutoConfiguration = {
                 SecurityAutoConfiguration.class,
                 SecurityFilterAutoConfiguration.class
@@ -56,20 +65,21 @@ class FoodLogExceptionAdviceTest {
     @MockitoBean com.calai.backend.foodlog.service.FoodLogDeleteService deleteService;
     @MockitoBean com.calai.backend.foodlog.service.FoodLogOverrideService overrideService;
     @MockitoBean com.calai.backend.foodlog.service.FoodLogHistoryService historyService;
+    @MockitoBean UserDailyNutritionSummaryService dailySummaryService;
 
     @Test
     void upload_unsupported_format_should_400_with_requestId() throws Exception {
         Mockito.when(auth.requireUserId()).thenReturn(1L);
         Mockito.when(service.createAlbum(
                 eq(1L),
-                anyString(),                 // clientTz
-                anyString(),                 // deviceId
-                any(MultipartFile.class),    // file  ✅
-                anyString()                  // requestId
+                anyString(),
+                anyString(),
+                any(MultipartFile.class),
+                anyString()
         )).thenThrow(new IllegalArgumentException("UNSUPPORTED_IMAGE_FORMAT"));
 
         MockMultipartFile f = new MockMultipartFile(
-                "file", "x.bin", MediaType.APPLICATION_OCTET_STREAM_VALUE, new byte[]{1,2,3}
+                "file", "x.bin", MediaType.APPLICATION_OCTET_STREAM_VALUE, new byte[]{1, 2, 3}
         );
 
         mvc.perform(multipart("/api/v1/food-logs/album")
@@ -120,13 +130,11 @@ class FoodLogExceptionAdviceTest {
         Mockito.when(service.openImageStream(eq("obj-1")))
                 .thenReturn(new ByteArrayInputStream(new byte[]{9, 8, 7}));
 
-        // ✅ 第一步：觸發 async
         MvcResult result = mvc.perform(get("/api/v1/food-logs/id-1/image")
                         .header("X-Request-Id", "RID-200"))
-                .andExpect(request().asyncStarted())   // ✅ 這行會讓測試更「鎖行為」
+                .andExpect(request().asyncStarted())
                 .andReturn();
 
-        // ✅ 第二步：dispatch async 結果，才會有 body
         mvc.perform(asyncDispatch(result))
                 .andExpect(status().isOk())
                 .andExpect(header().string("X-Request-Id", "RID-200"))

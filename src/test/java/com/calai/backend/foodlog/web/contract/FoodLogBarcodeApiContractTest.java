@@ -1,9 +1,9 @@
 package com.calai.backend.foodlog.web.contract;
 
-
 import com.calai.backend.foodlog.barcode.BarcodeLookupService;
 import com.calai.backend.foodlog.barcode.BarcodeLookupService.LookupResult;
 import com.calai.backend.foodlog.barcode.openfoodfacts.mapper.OpenFoodFactsMapper.OffResult;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.testsupport.config.TestAuthConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,8 +19,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doNothing;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -34,6 +38,9 @@ class FoodLogBarcodeApiContractTest {
 
     @MockitoBean
     BarcodeLookupService barcodeLookupService;
+
+    @MockitoBean
+    UserDailyNutritionSummaryService dailySummaryService;
 
     @Test
     void barcode_found_should_return_draft_with_nutrients() throws Exception {
@@ -55,8 +62,10 @@ class FoodLogBarcodeApiContractTest {
                 // package size
                 null, null,
                 // category tags
-                List.of() // ✅ 新增
+                List.of()
         );
+
+        doNothing().when(dailySummaryService).recomputeDay(any(), any());
 
         when(barcodeLookupService.lookupOff(eq(bc), any()))
                 .thenReturn(new LookupResult(
@@ -85,6 +94,7 @@ class FoodLogBarcodeApiContractTest {
         assertThat(json.path("nutritionResult").path("source").path("method").asText()).isEqualTo("BARCODE");
 
         verify(barcodeLookupService, times(1)).lookupOff(eq(bc), any());
+        verify(dailySummaryService, times(1)).recomputeDay(any(), any());
     }
 
     @Test
@@ -102,8 +112,8 @@ class FoodLogBarcodeApiContractTest {
                 ));
 
         String body = """
-    { "barcode": "%s" }
-    """.formatted(bc);
+        { "barcode": "%s" }
+        """.formatted(bc);
 
         String resp = mvc.perform(post("/api/v1/food-logs/barcode")
                         .contentType(MediaType.APPLICATION_JSON)

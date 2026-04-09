@@ -41,7 +41,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
@@ -60,8 +59,8 @@ import static org.mockito.Mockito.when;
  * createPhoto() happy path 測試
  *
  * 驗證兩條主路徑：
- * 1. cache hit -> DRAFT -> 不扣 quota、不建 task
- * 2. cache miss -> PENDING -> 扣 quota、建 task
+ * 1. cache hit -> DRAFT -> 不扣 quota、不建 task、會重算 daily summary
+ * 2. cache miss -> PENDING -> 扣 quota、建 task、不會重算 daily summary
  */
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceCreatePhotoTest {
@@ -84,6 +83,7 @@ class FoodLogServiceCreatePhotoTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
 
     private FoodLogService svc;
 
@@ -107,7 +107,8 @@ class FoodLogServiceCreatePhotoTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 
@@ -131,6 +132,7 @@ class FoodLogServiceCreatePhotoTest {
     void createPhoto_should_return_draft_without_quota_or_task_when_cache_hit() throws Exception {
         // arrange
         Instant fixedNow = Instant.parse("2026-03-03T00:00:00Z");
+        LocalDate capturedLocalDate = LocalDate.of(2026, 3, 3);
         String requestId = "rid-hit-1";
         String tempKey = "temp/u1/rid-hit-1.jpg";
         String sha256 = "sha-photo-001";
@@ -155,6 +157,8 @@ class FoodLogServiceCreatePhotoTest {
 
         FoodLogEntity newEntity = new FoodLogEntity();
         newEntity.setId("log-new-1");
+        newEntity.setUserId(1L);
+        newEntity.setCapturedLocalDate(capturedLocalDate);
 
         FoodLogEnvelope expected = mock(FoodLogEnvelope.class);
 
@@ -197,6 +201,8 @@ class FoodLogServiceCreatePhotoTest {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.DRAFT);
             e.setEffective(JsonNodeFactory.instance.objectNode().put("foodName", "Chicken Salad"));
+            e.setUserId(1L);
+            e.setCapturedLocalDate(capturedLocalDate);
             return null;
         }).when(createSupport).applyCacheHitDraft(same(newEntity), same(reusableHit));
 
@@ -241,6 +247,8 @@ class FoodLogServiceCreatePhotoTest {
             verify(idem).attach(1L, requestId, "log-new-1", fixedNow);
             verify(createSupport).retainBlobAndAttach(newEntity, 1L, upload);
 
+            verify(dailySummaryService).recomputeDay(1L, capturedLocalDate);
+
             verify(taskRepo, never()).save(any());
             verify(createSupport, never()).createQueuedTask(any());
 
@@ -253,6 +261,7 @@ class FoodLogServiceCreatePhotoTest {
     void createPhoto_should_consume_quota_and_create_task_when_cache_miss() throws Exception {
         // arrange
         Instant fixedNow = Instant.parse("2026-03-03T00:00:00Z");
+        LocalDate capturedLocalDate = LocalDate.of(2026, 3, 3);
         String requestId = "rid-miss-1";
         String tempKey = "temp/u1/rid-miss-1.jpg";
         String sha256 = "sha-photo-002";
@@ -273,6 +282,8 @@ class FoodLogServiceCreatePhotoTest {
 
         FoodLogEntity newEntity = new FoodLogEntity();
         newEntity.setId("log-new-2");
+        newEntity.setUserId(1L);
+        newEntity.setCapturedLocalDate(capturedLocalDate);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setFoodLogId("log-new-2");
@@ -325,6 +336,8 @@ class FoodLogServiceCreatePhotoTest {
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.PENDING);
+            e.setUserId(1L);
+            e.setCapturedLocalDate(capturedLocalDate);
             return null;
         }).when(createSupport).applyPendingMiss(
                 same(newEntity),
@@ -382,6 +395,8 @@ class FoodLogServiceCreatePhotoTest {
 
             verify(createSupport).createQueuedTask("log-new-2");
             verify(taskRepo).save(task);
+
+            verify(dailySummaryService, never()).recomputeDay(any(), any());
 
             verify(envelopeAssembler).assemble(newEntity, task, requestId);
             verify(inFlight).release(lease);

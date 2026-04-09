@@ -39,9 +39,18 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.same;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceCreateAlbumTest {
@@ -64,6 +73,7 @@ class FoodLogServiceCreateAlbumTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
 
     private FoodLogService svc;
 
@@ -87,7 +97,8 @@ class FoodLogServiceCreateAlbumTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 
@@ -118,6 +129,8 @@ class FoodLogServiceCreateAlbumTest {
 
         FoodLogEntity newEntity = new FoodLogEntity();
         newEntity.setId("log-new-album-1");
+        newEntity.setUserId(1L);
+        newEntity.setCapturedLocalDate(expectedLocalDate);
 
         FoodLogEnvelope expected = mock(FoodLogEnvelope.class);
 
@@ -157,8 +170,10 @@ class FoodLogServiceCreateAlbumTest {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.DRAFT);
             e.setEffective(JsonNodeFactory.instance.objectNode().put("foodName", "Chicken Salad"));
+            e.setUserId(1L);
+            e.setCapturedLocalDate(expectedLocalDate);
             return null;
-        }).when(createSupport).applyCacheHitDraft(any(FoodLogEntity.class), same(reusableHit));
+        }).when(createSupport).applyCacheHitDraft(same(newEntity), same(reusableHit));
 
         when(envelopeAssembler.assemble(newEntity, null, requestId)).thenReturn(expected);
 
@@ -182,6 +197,28 @@ class FoodLogServiceCreateAlbumTest {
                 TimeSource.SERVER_RECEIVED,
                 false
         );
+
+        verify(abuseGuard).onOperationAttempt(
+                1L,
+                "dev-1",
+                true,
+                fixedNow,
+                ZoneOffset.UTC
+        );
+
+        verifyNoInteractions(quota);
+
+        verify(repo, times(2)).save(newEntity);
+        verify(idem).attach(1L, requestId, "log-new-album-1", fixedNow);
+        verify(createSupport).retainBlobAndAttach(newEntity, 1L, upload);
+
+        verify(dailySummaryService).recomputeDay(1L, expectedLocalDate);
+
+        verify(taskRepo, never()).save(any());
+        verify(createSupport, never()).createQueuedTask(any());
+
+        verify(envelopeAssembler).assemble(newEntity, null, requestId);
+        verify(inFlight).release(lease);
     }
 
     @Test
@@ -203,11 +240,12 @@ class FoodLogServiceCreateAlbumTest {
 
         FoodLogCreateSupport.UploadTempResult upload = mock(FoodLogCreateSupport.UploadTempResult.class);
         StorageService.SaveResult saved = mock(StorageService.SaveResult.class);
-
-        QuotaService.Decision decision = new QuotaService.Decision(ModelTier.MODEL_TIER_HIGH);
+        QuotaService.Decision decision = mock(QuotaService.Decision.class);
 
         FoodLogEntity newEntity = new FoodLogEntity();
         newEntity.setId("log-new-album-2");
+        newEntity.setUserId(1L);
+        newEntity.setCapturedLocalDate(expectedLocalDate);
 
         FoodLogTaskEntity task = new FoodLogTaskEntity();
         task.setFoodLogId("log-new-album-2");
@@ -252,16 +290,19 @@ class FoodLogServiceCreateAlbumTest {
                 eq(ZoneOffset.UTC),
                 eq(fixedNow)
         )).thenReturn(decision);
+        when(decision.tierUsed()).thenReturn(ModelTier.MODEL_TIER_HIGH);
 
         when(providerClient.providerCode()).thenReturn("gemini");
 
         doAnswer(invocation -> {
             FoodLogEntity e = invocation.getArgument(0);
             e.setStatus(FoodLogStatus.PENDING);
+            e.setUserId(1L);
+            e.setCapturedLocalDate(expectedLocalDate);
             return null;
         }).when(createSupport).applyPendingMiss(
                 same(newEntity),
-                any(),
+                eq(ModelTier.MODEL_TIER_HIGH),
                 eq("GEMINI")
         );
 
@@ -288,5 +329,38 @@ class FoodLogServiceCreateAlbumTest {
                 TimeSource.SERVER_RECEIVED,
                 false
         );
+
+        verify(abuseGuard).onOperationAttempt(
+                1L,
+                "dev-1",
+                false,
+                fixedNow,
+                ZoneOffset.UTC
+        );
+
+        verify(quota).consumeOperationOrThrow(
+                1L,
+                EntitlementService.Tier.TRIAL,
+                ZoneOffset.UTC,
+                fixedNow
+        );
+
+        verify(createSupport).applyPendingMiss(
+                same(newEntity),
+                eq(ModelTier.MODEL_TIER_HIGH),
+                eq("GEMINI")
+        );
+
+        verify(repo, times(2)).save(newEntity);
+        verify(idem).attach(1L, requestId, "log-new-album-2", fixedNow);
+        verify(createSupport).retainBlobAndAttach(newEntity, 1L, upload);
+
+        verify(createSupport).createQueuedTask("log-new-album-2");
+        verify(taskRepo).save(task);
+
+        verify(dailySummaryService, never()).recomputeDay(any(), any());
+
+        verify(envelopeAssembler).assemble(newEntity, task, requestId);
+        verify(inFlight).release(lease);
     }
 }

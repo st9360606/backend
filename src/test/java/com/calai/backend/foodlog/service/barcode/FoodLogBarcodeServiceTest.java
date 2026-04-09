@@ -16,6 +16,7 @@ import com.calai.backend.foodlog.model.FoodLogStatus;
 import com.calai.backend.foodlog.processing.effective.FoodLogEffectivePostProcessor;
 import com.calai.backend.foodlog.quota.guard.AbuseGuardService;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.service.limiter.UserRateLimiter;
 import com.calai.backend.foodlog.service.query.FoodLogQueryService;
 import com.calai.backend.foodlog.service.request.IdempotencyService;
@@ -39,6 +40,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,6 +67,7 @@ class FoodLogBarcodeServiceTest {
     private static final String CLIENT_TZ = "Asia/Taipei";
     private static final String DEVICE_ID = "device-001";
     private static final String LANG = "zh-TW";
+    private static final LocalDate LOCAL_DATE_TAIPEI = LocalDate.of(2026, 3, 21);
 
     @Mock private IdempotencyService idem;
     @Mock private EntitlementService entitlementService;
@@ -76,6 +79,7 @@ class FoodLogBarcodeServiceTest {
     @Mock private FoodLogEffectivePostProcessor postProcessor;
     @Mock private FoodLogEnvelopeAssembler envelopeAssembler;
     @Mock private FoodLogQueryService queryService;
+    @Mock private UserDailyNutritionSummaryService dailySummaryService;
 
     private FoodLogBarcodeService service;
 
@@ -94,7 +98,8 @@ class FoodLogBarcodeServiceTest {
                 repo,
                 postProcessor,
                 envelopeAssembler,
-                queryService
+                queryService,
+                dailySummaryService
         );
     }
 
@@ -114,7 +119,7 @@ class FoodLogBarcodeServiceTest {
                         assertThat(ex.getMessage()).isEqualTo("BARCODE_REQUIRED");
                     });
 
-            verifyNoInteractions(idem, queryService, barcodeLookupService, repo, txTemplate);
+            verifyNoInteractions(idem, queryService, barcodeLookupService, repo, txTemplate, dailySummaryService);
         }
 
         @Test
@@ -132,7 +137,7 @@ class FoodLogBarcodeServiceTest {
             assertThat(actual).isSameAs(expected);
 
             verify(queryService).getOne(USER_ID, "log-123", REQUEST_ID);
-            verifyNoInteractions(barcodeLookupService, repo, txTemplate);
+            verifyNoInteractions(barcodeLookupService, repo, txTemplate, dailySummaryService);
         }
 
         @Test
@@ -148,7 +153,7 @@ class FoodLogBarcodeServiceTest {
             ).isSameAs(ex);
 
             verify(idem).failAndReleaseIfNeeded(USER_ID, REQUEST_ID, true);
-            verifyNoInteractions(barcodeLookupService, repo, txTemplate);
+            verifyNoInteractions(barcodeLookupService, repo, txTemplate, dailySummaryService);
         }
 
         @Test
@@ -183,6 +188,7 @@ class FoodLogBarcodeServiceTest {
             assertThat(saved.getBarcode()).isEqualTo(BARCODE);
 
             verify(idem).attach(USER_ID, REQUEST_ID, saved.getId(), NOW);
+            verifyNoInteractions(dailySummaryService);
         }
 
         @Test
@@ -211,6 +217,8 @@ class FoodLogBarcodeServiceTest {
             assertThat(saved.getStatus()).isEqualTo(FoodLogStatus.FAILED);
             assertThat(saved.getLastErrorCode()).isEqualTo("BARCODE_LOOKUP_FAILED");
             assertThat(saved.getLastErrorMessage()).contains("returned null result");
+
+            verifyNoInteractions(dailySummaryService);
         }
 
         @Test
@@ -245,6 +253,8 @@ class FoodLogBarcodeServiceTest {
             assertThat(saved.getStatus()).isEqualTo(FoodLogStatus.FAILED);
             assertThat(saved.getLastErrorCode()).isEqualTo("BARCODE_NOT_FOUND");
             assertThat(saved.getBarcode()).isEqualTo(BARCODE);
+
+            verifyNoInteractions(dailySummaryService);
         }
 
         @Test
@@ -287,6 +297,8 @@ class FoodLogBarcodeServiceTest {
             FoodLogEntity saved = captor.getValue();
             assertThat(saved.getStatus()).isEqualTo(FoodLogStatus.FAILED);
             assertThat(saved.getLastErrorCode()).isEqualTo("BARCODE_NUTRITION_UNAVAILABLE");
+
+            verifyNoInteractions(dailySummaryService);
         }
 
         @Test
@@ -358,6 +370,7 @@ class FoodLogBarcodeServiceTest {
             assertThat(saved.getEffective().path("aiMeta").path("source").asText()).isEqualTo("OPENFOODFACTS");
 
             verify(idem).attach(USER_ID, REQUEST_ID, saved.getId(), NOW);
+            verify(dailySummaryService).recomputeDay(USER_ID, LOCAL_DATE_TAIPEI);
         }
 
         @Test
@@ -391,6 +404,8 @@ class FoodLogBarcodeServiceTest {
             assertThat(saved.getStatus()).isEqualTo(FoodLogStatus.FAILED);
             assertThat(saved.getLastErrorCode()).isEqualTo("BARCODE_LOOKUP_FAILED");
             assertThat(saved.getLastErrorMessage()).contains("parse error");
+
+            verifyNoInteractions(dailySummaryService);
         }
     }
 

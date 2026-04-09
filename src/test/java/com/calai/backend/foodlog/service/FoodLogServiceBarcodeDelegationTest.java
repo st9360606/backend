@@ -20,7 +20,6 @@ import com.calai.backend.foodlog.storage.StorageService;
 import com.calai.backend.foodlog.time.CapturedTimeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -31,23 +30,25 @@ import static org.mockito.Mockito.*;
 
 class FoodLogServiceBarcodeDelegationTest {
 
-    private ProviderClient providerClient = mock(ProviderClient.class);
-    private FoodLogRepository repo = mock(FoodLogRepository.class);
-    private FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
-    private StorageService storage = mock(StorageService.class);
-    private QuotaService quota = mock(QuotaService.class);
-    private IdempotencyService idem = mock(IdempotencyService.class);
-    private UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
-    private UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
-    private AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
-    private EntitlementService entitlementService = mock(EntitlementService.class);
-    private FoodLogEnvelopeAssembler envelopeAssembler = mock(FoodLogEnvelopeAssembler.class);
-    private FoodLogQueryService queryService = mock(FoodLogQueryService.class);
-    private FoodLogImageAccessService imageAccessService = mock(FoodLogImageAccessService.class);
-    private FoodLogRetryService retryService = mock(FoodLogRetryService.class);
-    private FoodLogBarcodeService barcodeService = mock(FoodLogBarcodeService.class);
-    private FoodLogCreateSupport createSupport = mock(FoodLogCreateSupport.class);
-    private CapturedTimeResolver timeResolver = mock(CapturedTimeResolver.class);
+    private final ProviderClient providerClient = mock(ProviderClient.class);
+    private final FoodLogRepository repo = mock(FoodLogRepository.class);
+    private final FoodLogTaskRepository taskRepo = mock(FoodLogTaskRepository.class);
+    private final StorageService storage = mock(StorageService.class);
+    private final QuotaService quota = mock(QuotaService.class);
+    private final IdempotencyService idem = mock(IdempotencyService.class);
+    private final UserInFlightLimiter inFlight = mock(UserInFlightLimiter.class);
+    private final UserRateLimiter rateLimiter = mock(UserRateLimiter.class);
+    private final AbuseGuardService abuseGuard = mock(AbuseGuardService.class);
+    private final EntitlementService entitlementService = mock(EntitlementService.class);
+    private final FoodLogEnvelopeAssembler envelopeAssembler = mock(FoodLogEnvelopeAssembler.class);
+    private final FoodLogQueryService queryService = mock(FoodLogQueryService.class);
+    private final FoodLogImageAccessService imageAccessService = mock(FoodLogImageAccessService.class);
+    private final FoodLogRetryService retryService = mock(FoodLogRetryService.class);
+    private final FoodLogBarcodeService barcodeService = mock(FoodLogBarcodeService.class);
+    private final FoodLogCreateSupport createSupport = mock(FoodLogCreateSupport.class);
+    private final CapturedTimeResolver timeResolver = mock(CapturedTimeResolver.class);
+    private final UserDailyNutritionSummaryService dailySummaryService = mock(UserDailyNutritionSummaryService.class);
+
     private FoodLogService service;
 
     @BeforeEach
@@ -70,7 +71,8 @@ class FoodLogServiceBarcodeDelegationTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 

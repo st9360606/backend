@@ -37,8 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class
-FoodLogServiceGuardTest {
+class FoodLogServiceGuardTest {
 
     @Mock ProviderClient providerClient;
     @Mock FoodLogRepository repo;
@@ -58,6 +57,8 @@ FoodLogServiceGuardTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
+
     private FoodLogService svc;
 
     @BeforeEach
@@ -80,7 +81,8 @@ FoodLogServiceGuardTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 
@@ -142,6 +144,7 @@ FoodLogServiceGuardTest {
         verifyNoInteractions(taskRepo);
         verify(repo, never()).save(any());
         verifyNoInteractions(envelopeAssembler);
+        verifyNoInteractions(dailySummaryService);
 
         // 因為 uploadTempImage 就失敗了，下面這些都不該觸發
         verifyNoInteractions(abuseGuard);
@@ -154,7 +157,16 @@ FoodLogServiceGuardTest {
         // 也不應 attach / retain / create task
         verify(idem, never()).attach(anyLong(), anyString(), anyString(), any());
         verify(createSupport, never()).retainBlobAndAttach(any(), anyLong(), any());
-        verify(createSupport, never()).newBaseEntity(anyLong(), any(FoodLogMethod.class), any(), anyString(), any(), any(), any(), anyBoolean());
+        verify(createSupport, never()).newBaseEntity(
+                anyLong(),
+                any(FoodLogMethod.class),
+                any(),
+                anyString(),
+                any(),
+                any(),
+                any(),
+                anyBoolean()
+        );
         verify(createSupport, never()).applyCacheHitDraft(any(), any());
         verify(createSupport, never()).applyPendingMiss(any(), any(), anyString());
         verify(createSupport, never()).createQueuedTask(anyString());

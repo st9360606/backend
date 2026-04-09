@@ -34,15 +34,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/**
- * createPhoto() / createLabel() invalid input guard tests
- *
- * 覆蓋：
- * 1. FILE_REQUIRED
- * 2. FILE_TOO_LARGE
- * 3. resolveTierAndCheckRateOrRelease() 失敗 -> failAndReleaseIfNeeded()
- * 4. acquireInFlightOrRelease() 失敗 -> failAndReleaseIfNeeded()
- */
 @ExtendWith(MockitoExtension.class)
 class FoodLogServiceCreateGuardInvalidInputTest {
 
@@ -64,6 +55,8 @@ class FoodLogServiceCreateGuardInvalidInputTest {
     @Mock FoodLogBarcodeService barcodeService;
     @Mock FoodLogCreateSupport createSupport;
     @Mock CapturedTimeResolver timeResolver;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
+
     private FoodLogService svc;
 
     @BeforeEach
@@ -86,7 +79,8 @@ class FoodLogServiceCreateGuardInvalidInputTest {
                 imageAccessService,
                 retryService,
                 barcodeService,
-                createSupport
+                createSupport,
+                dailySummaryService
         );
     }
 
@@ -176,6 +170,7 @@ class FoodLogServiceCreateGuardInvalidInputTest {
         verifyNoInteractions(rateLimiter);
         verify(inFlight, never()).acquireOrThrow(anyLong());
         verifyNoInteractions(createSupport);
+        verifyNoInteractions(dailySummaryService);
     }
 
     // ========= shared helpers =========
@@ -210,6 +205,7 @@ class FoodLogServiceCreateGuardInvalidInputTest {
         verifyNoInteractions(inFlight);
         verifyNoInteractions(createSupport);
         verifyNoInteractions(quota);
+        verifyNoInteractions(dailySummaryService);
         verify(repo, never()).save(any());
         verify(taskRepo, never()).save(any());
         verify(idem, never()).attach(anyLong(), any(), any(), any());
@@ -228,7 +224,7 @@ class FoodLogServiceCreateGuardInvalidInputTest {
 
         MultipartFile tooLargeFile = mock(MultipartFile.class);
         when(tooLargeFile.isEmpty()).thenReturn(false);
-        when(tooLargeFile.getSize()).thenReturn(100_000_000L); // 夠大，確保超過上限
+        when(tooLargeFile.getSize()).thenReturn(100_000_000L);
 
         when(clock.instant()).thenReturn(fixedNow);
         when(idem.reserveOrGetExisting(1L, requestId, fixedNow)).thenReturn(null);
@@ -249,6 +245,7 @@ class FoodLogServiceCreateGuardInvalidInputTest {
         verifyNoInteractions(inFlight);
         verifyNoInteractions(createSupport);
         verifyNoInteractions(quota);
+        verifyNoInteractions(dailySummaryService);
         verify(repo, never()).save(any());
         verify(taskRepo, never()).save(any());
         verify(idem, never()).attach(anyLong(), any(), any(), any());
@@ -303,6 +300,7 @@ class FoodLogServiceCreateGuardInvalidInputTest {
         verify(inFlight, never()).acquireOrThrow(anyLong());
         verifyNoInteractions(createSupport);
         verifyNoInteractions(quota);
+        verifyNoInteractions(dailySummaryService);
         verify(repo, never()).save(any());
         verify(taskRepo, never()).save(any());
         verify(idem, never()).attach(anyLong(), any(), any(), any());
@@ -359,11 +357,11 @@ class FoodLogServiceCreateGuardInvalidInputTest {
 
         verifyNoInteractions(createSupport);
         verifyNoInteractions(quota);
+        verifyNoInteractions(dailySummaryService);
         verify(repo, never()).save(any());
         verify(taskRepo, never()).save(any());
         verify(idem, never()).attach(anyLong(), any(), any(), any());
 
-        // acquire 失敗前沒有拿到 lease，不應 release
         verify(inFlight, never()).release(any());
     }
 

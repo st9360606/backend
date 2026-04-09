@@ -8,6 +8,7 @@ import com.calai.backend.foodlog.provider.routing.ProviderRouter;
 import com.calai.backend.foodlog.provider.spi.ProviderClient;
 import com.calai.backend.foodlog.repo.FoodLogRepository;
 import com.calai.backend.foodlog.repo.FoodLogTaskRepository;
+import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.storage.StorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,20 +29,20 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FoodLogTaskWorkerRateLimitedTest {
 
     @Mock FoodLogTaskRepository taskRepo;
     @Mock FoodLogRepository logRepo;
-    @Mock
-    ProviderRouter router;
+    @Mock ProviderRouter router;
     @Mock StorageService storage;
-    @Mock
-    FoodLogEffectivePostProcessor postProcessor;
-    @Mock
-    ProviderClient providerClient;
+    @Mock FoodLogEffectivePostProcessor postProcessor;
+    @Mock UserDailyNutritionSummaryService dailySummaryService;
+    @Mock ProviderClient providerClient;
     @Mock PlatformTransactionManager txManager;
 
     @Test
@@ -50,8 +51,7 @@ class FoodLogTaskWorkerRateLimitedTest {
         Instant now = Instant.parse("2026-03-03T00:00:00Z");
         Clock clock = Clock.fixed(now, ZoneOffset.UTC);
 
-        // ✅ TransactionTemplate 需要 getTransaction 有回傳即可
-        // commit / rollback 對 mock 預設就是 no-op，不要多 stub，避免 UnnecessaryStubbingException
+        // TransactionTemplate 需要 getTransaction 有回傳即可
         SimpleTransactionStatus txStatus = new SimpleTransactionStatus();
         when(txManager.getTransaction(any())).thenReturn(txStatus);
 
@@ -70,6 +70,8 @@ class FoodLogTaskWorkerRateLimitedTest {
 
         FoodLogEntity log = new FoodLogEntity();
         log.setId("log-1");
+        log.setUserId(1L);
+        log.setCapturedLocalDate(java.time.LocalDate.of(2026, 3, 3));
         log.setStatus(FoodLogStatus.PENDING);
         log.setMethod("PHOTO");
         log.setImageObjectKey("user-1/blobs/sha256/xxx.jpg");
@@ -104,7 +106,14 @@ class FoodLogTaskWorkerRateLimitedTest {
                 .thenThrow(ex);
 
         FoodLogTaskWorker worker = new FoodLogTaskWorker(
-                taskRepo, logRepo, router, storage, postProcessor, txManager, clock
+                taskRepo,
+                logRepo,
+                router,
+                storage,
+                postProcessor,
+                dailySummaryService,
+                txManager,
+                clock
         );
 
         // Act
@@ -121,5 +130,6 @@ class FoodLogTaskWorkerRateLimitedTest {
         assertThat(log.getLastErrorMessage()).contains("suggestedRetryAfterSec=34");
 
         verify(postProcessor, never()).apply(any(), anyString(), anyString());
+        verify(dailySummaryService, never()).recomputeDay(any(), any());
     }
 }
