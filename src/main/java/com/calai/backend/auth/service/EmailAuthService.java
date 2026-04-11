@@ -6,12 +6,11 @@ import com.calai.backend.auth.dto.StartResponse;
 import com.calai.backend.auth.dto.VerifyRequest;
 import com.calai.backend.auth.email.EmailLoginCode;
 import com.calai.backend.auth.entity.AuthProvider;
+import com.calai.backend.auth.repo.EmailLoginCodeRepository;
 import com.calai.backend.fasting.service.FastingPlanService;
 import com.calai.backend.fasting.support.ClientTimeZoneResolver;
 import com.calai.backend.users.user.entity.User;
-import com.calai.backend.auth.repo.EmailLoginCodeRepository;
 import com.calai.backend.users.user.repo.UserRepo;
-import com.calai.backend.users.profile.service.UserProfileService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.SimpleMailMessage;
@@ -34,35 +33,42 @@ public class EmailAuthService {
     private final UserRepo users;
     private final JavaMailSender mail;
     private final TokenService tokens;
-    private final UserProfileService profiles; // ★ 新增
-    private final FastingPlanService fastingPlans;            // ★ 新增
-    private final ClientTimeZoneResolver tzResolver;          // ★ 新增
+    private final FastingPlanService fastingPlans;
+    private final ClientTimeZoneResolver tzResolver;
 
     public EmailAuthService(
             EmailLoginCodeRepository codes,
             UserRepo users,
             JavaMailSender mail,
             TokenService tokens,
-            UserProfileService profiles,
             FastingPlanService fastingPlans,
-            ClientTimeZoneResolver tzResolver // ★ 新增
+            ClientTimeZoneResolver tzResolver
     ) {
         this.codes = codes;
         this.users = users;
         this.mail = mail;
         this.tokens = tokens;
-        this.profiles = profiles; // ★ 新增
         this.fastingPlans = fastingPlans;
         this.tzResolver = tzResolver;
     }
 
-    @Value("${app.email.enabled:true}") boolean enabled;
-    @Value("${app.email.otp-length:4}") int otpLen;
-    @Value("${app.email.ttl-minutes:10}") int ttlMin;
-    @Value("${app.email.sender:no-reply@bitecal.app}") String sender;
+    @Value("${app.email.enabled:true}")
+    boolean enabled;
 
-    @Value("${app.auth.access-ttl-sec:900}") long accessTtlSeconds;
-    @Value("${app.auth.refresh-ttl-sec:2592000}") long refreshTtlSeconds;
+    @Value("${app.email.otp-length:4}")
+    int otpLen;
+
+    @Value("${app.email.ttl-minutes:10}")
+    int ttlMin;
+
+    @Value("${app.email.sender:no-reply@bitecal.app}")
+    String sender;
+
+    @Value("${app.auth.access-ttl-sec:900}")
+    long accessTtlSeconds;
+
+    @Value("${app.auth.refresh-ttl-sec:2592000}")
+    long refreshTtlSeconds;
 
     @Transactional
     public StartResponse start(StartRequest req, String ip, String ua) {
@@ -121,10 +127,10 @@ public class EmailAuthService {
         user.setLastLoginAt(now);
         user = users.save(user);
 
-        // ★ 登入即確保有一筆最小 Profile（避免前端第一拍遇到 404）
-        profiles.ensureDefault(user);
+        // ✅ 不要在登入時預先建立 user_profiles
+        //    否則前端 existsOnServer() 會把新帳號誤判成舊帳號，直接導去 HOME。
 
-        // 2) ★ 確保 fasting_plan 預設一筆（含時區）
+        // 只保留 fasting plan 預設建立
         String clientTz = tzResolver.resolveFromCurrentRequest();
         fastingPlans.ensureDefaultIfMissing(user.getId(), clientTz);
 
@@ -140,13 +146,16 @@ public class EmailAuthService {
         );
     }
 
-    public AuthResponse verify(VerifyRequest req) { return verify(req, null, null, null); }
+    public AuthResponse verify(VerifyRequest req) {
+        return verify(req, null, null, null);
+    }
 
-    // helpers
     private static String genCode(int len) {
         var r = new Random();
         var sb = new StringBuilder(len);
-        for (int i = 0; i < len; i++) sb.append((char) ('0' + r.nextInt(10)));
+        for (int i = 0; i < len; i++) {
+            sb.append((char) ('0' + r.nextInt(10)));
+        }
         return sb.toString();
     }
 
@@ -155,7 +164,9 @@ public class EmailAuthService {
             var md = MessageDigest.getInstance("SHA-256");
             byte[] d = md.digest(s.getBytes(StandardCharsets.UTF_8));
             var hex = new StringBuilder();
-            for (byte b : d) hex.append(String.format("%02x", b));
+            for (byte b : d) {
+                hex.append(String.format("%02x", b));
+            }
             return hex.toString();
         } catch (Exception e) {
             throw new RuntimeException(e);

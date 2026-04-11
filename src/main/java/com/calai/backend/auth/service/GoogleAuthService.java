@@ -7,7 +7,6 @@ import com.calai.backend.fasting.service.FastingPlanService;
 import com.calai.backend.fasting.support.ClientTimeZoneResolver;
 import com.calai.backend.users.user.entity.User;
 import com.calai.backend.users.user.repo.UserRepo;
-import com.calai.backend.users.profile.service.UserProfileService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
@@ -26,21 +25,18 @@ public class GoogleAuthService {
     private final GoogleIdTokenVerifier verifier;
     private final UserRepo userRepo;
     private final TokenService tokenService;
-    private final UserProfileService profiles; // ★ 新增
-    private final FastingPlanService fastingPlans;           // ★ 新增
-    private final ClientTimeZoneResolver tzResolver;         // ★ 新增
+    private final FastingPlanService fastingPlans;
+    private final ClientTimeZoneResolver tzResolver;
 
     public GoogleAuthService(
             @Value("${app.google.web-client-id}") String webClientId,
             UserRepo userRepo,
             TokenService tokenService,
-            UserProfileService profiles,
             FastingPlanService fastingPlans,
-            ClientTimeZoneResolver tzResolver // ★ 新增
+            ClientTimeZoneResolver tzResolver
     ) {
         this.userRepo = userRepo;
         this.tokenService = tokenService;
-        this.profiles = profiles; // ★ 新增
         this.verifier = new GoogleIdTokenVerifier
                 .Builder(new NetHttpTransport(), GsonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(webClientId))
@@ -52,7 +48,9 @@ public class GoogleAuthService {
     @Transactional
     public AuthResponse exchange(GoogleSignInExchangeRequest req, String deviceId, String ip, String ua) throws Exception {
         var idToken = verifier.verify(req.idToken());
-        if (idToken == null) throw new IllegalArgumentException("Invalid Google ID token");
+        if (idToken == null) {
+            throw new IllegalArgumentException("Invalid Google ID token");
+        }
 
         var p = idToken.getPayload();
         final String sub = p.getSubject();
@@ -83,10 +81,8 @@ public class GoogleAuthService {
 
         user = userRepo.save(user);
 
-        // ★ 登入即確保有一筆最小 Profile（避免前端第一拍遇到 404）
-        profiles.ensureDefault(user);
-
-        // ★ 新增：建立預設 fasting_plan
+        // ✅ 不要在登入時預先建立 user_profiles
+        //    否則新帳號會被前端誤判為已完成 onboarding。
         String clientTz = tzResolver.resolveFromCurrentRequest();
         fastingPlans.ensureDefaultIfMissing(user.getId(), clientTz);
 
