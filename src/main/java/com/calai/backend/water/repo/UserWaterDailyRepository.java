@@ -4,6 +4,7 @@ import com.calai.backend.water.entity.UserWaterDaily;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 public interface UserWaterDailyRepository extends JpaRepository<UserWaterDaily, Long> {
@@ -18,4 +19,10 @@ public interface UserWaterDailyRepository extends JpaRepository<UserWaterDaily, 
 
     // （保留以防別處仍引用）單用戶刪除：刪掉 <= cutoff（會刪 T-7）
     void deleteByUserIdAndLocalDateLessThanEqual(Long userId, LocalDate cutoffDate);
+
+    List<UserWaterDaily> findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(
+            Long userId,
+            LocalDate startDate,
+            LocalDate endDate
+    );
 }
