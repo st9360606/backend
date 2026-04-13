@@ -1,55 +1,69 @@
 -- ============================================================
---     workout_session
+-- workout_session
 --
---    使用者實際的一次運動紀錄 (一筆 session)。
+-- 使用者實際的一次運動紀錄（一筆 session）
 --
---    欄位：
---      user_id        : 哪個使用者
---      dictionary_id  : 這次被歸類成哪個標準運動 (ex: Walking)
---      minutes        : 持續多久
---      kcal           : 這次「estimated calories burned」
---      started_at     : 這筆運動被紀錄的時間點 (Instant.now() 轉 TIMESTAMP)
+-- 設計重點：
+-- 1. started_at   : UTC 絕對時間，用於排序 / today 範圍查詢 / 顯示時間
+-- 2. local_date   : 建立當下依使用者時區切出的本地日期，用於 daily bucket 固化
+-- 3. timezone     : 建立當下使用的時區 ID（例如 Asia/Taipei）
 --
---    為什麼不直接存「date」？
---      - 因為「今天是幾號」要看使用者當下的時區。
---        後端在 /today 會用 X-Client-Timezone，把當地 LocalDate
---        映射成 UTC 範圍 [start,end)，再去撈 session。
+-- 這樣可避免：
+-- - 使用者日後換時區
+-- - request header 傳錯
+-- - delete/recompute 時回推錯誤 bucket
 --
---    這樣就能正確處理：
---      - 23:30 的運動，23:35 記錄 ⇒ 落在「當地日期的今天」
---      - 過午夜 00:10 再記錄 ⇒ 自動算入明天
---      - 飛到另一個時區 ⇒ 換新的 dayLocal，不會把卡路里塞錯日
---
---    Google Play 健康/隱私合規：
---      - /api/v1/workouts/{sessionId} 支援 DELETE
---        → 使用者可以刪掉這筆 session
---      - kcal 顯示是「estimated calories burned」，不是醫療宣稱
+-- Google Play 健康/隱私合規：
+-- - session 可刪除
+-- - kcal 僅為 estimated calories burned，不是醫療宣稱
 -- ============================================================
+
 CREATE TABLE workout_session
 (
-    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id       BIGINT    NOT NULL,
-    dictionary_id BIGINT    NOT NULL, -- 參照哪個標準運動
-    minutes       INT       NOT NULL,
-    kcal          INT       NOT NULL, -- 預估消耗熱量 (kcal)
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id         BIGINT       NOT NULL,
+    dictionary_id   BIGINT       NOT NULL,
+    minutes         INT          NOT NULL,
+    kcal            INT          NOT NULL,
 
-    -- 這筆 session 的起始時間點
-    -- 後端目前用 Instant.now() -> TIMESTAMP
-    -- 注意：這是 UTC-ish 絕對時間戳，後端會再依時區去做 LocalDate 切日
-    started_at    TIMESTAMP NOT NULL,
-    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- 真正記錄當下的 UTC 時間點（由後端 Clock / Instant 寫入）
+    started_at      DATETIME(6)  NOT NULL,
 
-    CONSTRAINT fk_session_dict
+    -- 建立這筆 session 當下，以使用者時區切出的本地日期
+    -- 例：started_at = 2026-04-14T15:30:00Z，timezone = Asia/Taipei
+    -- 則 local_date = 2026-04-14
+    local_date      DATE         NOT NULL,
+
+    -- 建立這筆 session 時採用的時區 ID
+    timezone        VARCHAR(64)  NOT NULL,
+
+    -- row 建立時間（UTC）
+    created_at      DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+
+    PRIMARY KEY (id),
+
+    CONSTRAINT fk_workout_session_dictionary
         FOREIGN KEY (dictionary_id)
             REFERENCES workout_dictionary (id)
             ON UPDATE RESTRICT
             ON DELETE RESTRICT
-);
+)
+    ENGINE = InnoDB
+    DEFAULT CHARSET = utf8mb4
+    COLLATE = utf8mb4_0900_ai_ci;
 
--- 幫 /today 這類 API 查「這個 user 在 [start,end) 期間的紀錄」
-CREATE INDEX idx_user_time
+-- ============================================================
+-- Indexes
+-- ============================================================
+
+-- today / history / 排序查詢
+CREATE INDEX idx_workout_session_user_started_at
     ON workout_session (user_id, started_at);
 
+-- summary / weekly progress / delete-recompute / daily aggregate
+CREATE INDEX idx_workout_session_user_local_date
+    ON workout_session (user_id, local_date);
 
-
-
+-- 若未來有依 local_date + started_at 做排序，也可保留這個複合索引
+CREATE INDEX idx_workout_session_user_local_date_started_at
+    ON workout_session (user_id, local_date, started_at);

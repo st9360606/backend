@@ -3,6 +3,7 @@ package com.calai.backend.users.activity.service;
 import com.calai.backend.users.activity.entity.UserDailyActivity;
 import com.calai.backend.users.activity.repo.UserDailyActivityRepository;
 import com.calai.backend.weight.repo.WeightTimeseriesRepo;
+import com.calai.backend.workout.service.UserDailyWorkoutSummaryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -13,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,8 +30,8 @@ class DailyActivityServiceTest {
         // Arrange
         UserDailyActivityRepository repo = mock(UserDailyActivityRepository.class);
         WeightTimeseriesRepo weightSeries = mock(WeightTimeseriesRepo.class);
+        UserDailyWorkoutSummaryService workoutSummaryService = mock(UserDailyWorkoutSummaryService.class);
 
-        var workoutSummaryService = mock(com.calai.backend.workout.service.UserDailyWorkoutSummaryService.class);
         DailyActivityService svc = new DailyActivityService(repo, weightSeries, workoutSummaryService);
 
         Long userId = 1L;
@@ -38,35 +40,30 @@ class DailyActivityServiceTest {
         when(repo.findByUserIdAndLocalDate(eq(userId), eq(day)))
                 .thenReturn(Optional.empty());
 
-        // 這裡的「最新體重 entity」型別，請依你的專案實際類別替換
-        // 你目前 service 用 latest.get(0).getWeightKg()
-        // 所以只要 stub 出 getWeightKg() 即可
         var weightEntity = mock(com.calai.backend.weight.entity.WeightTimeseries.class);
         when(weightEntity.getWeightKg()).thenReturn(BigDecimal.valueOf(80.0)); // 80kg
         when(weightSeries.findLatest(eq(userId), any(PageRequest.class)))
                 .thenReturn(List.of(weightEntity));
 
-        // save 直接回傳參數（或回 null 也行）
         when(repo.save(any(UserDailyActivity.class))).thenAnswer(inv -> inv.getArgument(0));
 
         var req = new DailyActivityService.UpsertReq(
                 day,
                 "Asia/Taipei",
-                1000L,                        // steps
-                null,                         // activeKcal payload
+                1000L,
+                null,
                 UserDailyActivity.IngestSource.HEALTH_CONNECT,
-                "com.google.android.apps.fitness", // dataOriginPackage 必填
+                "com.google.android.apps.fitness",
                 "Google Fit"
         );
-
-        verify(workoutSummaryService).recomputeDay(eq(userId), eq(day), any());
 
         // Act
         svc.upsert(userId, req);
 
-        // Assert (captor 抓 save 的 entity)
+        // Assert
         ArgumentCaptor<UserDailyActivity> captor = ArgumentCaptor.forClass(UserDailyActivity.class);
         verify(repo).save(captor.capture());
+        verify(workoutSummaryService).recomputeDay(eq(userId), eq(day), any(ZoneId.class));
 
         UserDailyActivity saved = captor.getValue();
 
@@ -82,8 +79,8 @@ class DailyActivityServiceTest {
     void upsert_healthConnect_missingDataOriginPackage_should400() {
         UserDailyActivityRepository repo = mock(UserDailyActivityRepository.class);
         WeightTimeseriesRepo weightSeries = mock(WeightTimeseriesRepo.class);
+        UserDailyWorkoutSummaryService workoutSummaryService = mock(UserDailyWorkoutSummaryService.class);
 
-        var workoutSummaryService = mock(com.calai.backend.workout.service.UserDailyWorkoutSummaryService.class);
         DailyActivityService svc = new DailyActivityService(repo, weightSeries, workoutSummaryService);
 
         var req = new DailyActivityService.UpsertReq(
@@ -92,7 +89,7 @@ class DailyActivityServiceTest {
                 1000L,
                 null,
                 UserDailyActivity.IngestSource.HEALTH_CONNECT,
-                "   ",     // 缺 package
+                "   ",
                 null
         );
 
@@ -104,6 +101,8 @@ class DailyActivityServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
         assertNotNull(ex.getReason());
         assertTrue(ex.getReason().contains("dataOriginPackage"));
+
         verify(repo, never()).save(any());
+        verify(workoutSummaryService, never()).recomputeDay(anyLong(), any(), any());
     }
 }

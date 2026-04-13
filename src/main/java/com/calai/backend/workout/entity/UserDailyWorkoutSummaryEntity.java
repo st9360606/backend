@@ -28,41 +28,26 @@ public class UserDailyWorkoutSummaryEntity {
     private LocalDate localDate;
 
     @Column(nullable = false, length = 64)
-    private String timezone = "UTC";
+    private String timezone;
 
     @Column(name = "workout_kcal", nullable = false)
-    private Double workoutKcal = 0d;
+    private Double workoutKcal;
 
     @Column(name = "activity_kcal", nullable = false)
-    private Double activityKcal = 0d;
+    private Double activityKcal;
 
     @Column(name = "total_burned_kcal", nullable = false)
-    private Double totalBurnedKcal = 0d;
+    private Double totalBurnedKcal;
 
     @Column(name = "workout_session_count", nullable = false)
-    private Integer workoutSessionCount = 0;
+    private Integer workoutSessionCount;
 
     @Column(name = "last_recomputed_at_utc", nullable = false)
     private Instant lastRecomputedAtUtc;
 
-    @Column(name = "created_at_utc", nullable = false)
+    @Column(name = "created_at_utc", nullable = false, updatable = false)
     private Instant createdAtUtc;
 
     @Column(name = "updated_at_utc", nullable = false)
     private Instant updatedAtUtc;
-
-    @PrePersist
-    void prePersist() {
-        Instant now = Instant.now();
-        if (lastRecomputedAtUtc == null) lastRecomputedAtUtc = now;
-        if (createdAtUtc == null) createdAtUtc = now;
-        if (updatedAtUtc == null) updatedAtUtc = now;
-        if (timezone == null || timezone.isBlank()) timezone = "UTC";
-    }
-
-    @PreUpdate
-    void preUpdate() {
-        updatedAtUtc = Instant.now();
-        if (timezone == null || timezone.isBlank()) timezone = "UTC";
-    }
 }

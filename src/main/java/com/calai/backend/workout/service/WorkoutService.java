@@ -39,6 +39,7 @@ public class WorkoutService {
     private final WorkoutAliasEventRepo aliasEventRepo;
     private final RateLimiterService rateLimiter; // ★ 新增
     private final UserDailyWorkoutSummaryService dailyWorkoutSummaryService;
+    private final Clock clock;
 
     @Value("${workout.estimate.blacklistPolicy:block}")
     private String blacklistPolicy; // generic（現狀）、block（阻擋）、audit（只記錄與回傳 not_found）
@@ -56,7 +57,7 @@ public class WorkoutService {
             UserProfileRepository profileRepo,
             AuthContext auth,
             WorkoutAliasEventRepo aliasEventRepo,
-            RateLimiterService rateLimiter, UserDailyWorkoutSummaryService dailyWorkoutSummaryService // ★ 新增
+            RateLimiterService rateLimiter, UserDailyWorkoutSummaryService dailyWorkoutSummaryService, Clock clock // ★ 新增
     ) {
         this.dictRepo = dictRepo;
         this.aliasRepo = aliasRepo;
@@ -66,6 +67,7 @@ public class WorkoutService {
         this.aliasEventRepo = aliasEventRepo;
         this.rateLimiter = rateLimiter; // ★ 新增
         this.dailyWorkoutSummaryService = dailyWorkoutSummaryService;
+        this.clock = clock;
     }
 
     // ======== 時間標籤（24h） ========
@@ -324,17 +326,34 @@ public class WorkoutService {
     }
 
     @Transactional
-    public TodayWorkoutResponse deleteSession(Long sessionId, ZoneId zone) {
+    public TodayWorkoutResponse deleteSession(Long sessionId, ZoneId requestZone) {
         Long uid = auth.requireUserId();
         var ws = sessionRepo.findByIdAndUserId(sessionId, uid)
                 .orElseThrow(() -> new IllegalStateException("NOT_FOUND"));
 
-        LocalDate affectedDate = LocalDate.ofInstant(ws.getStartedAt(), zone);
+        ZoneId sessionZone = resolveSessionZone(ws.getTimezone(), requestZone);
+        LocalDate affectedDate = ws.getLocalDate() != null
+                ? ws.getLocalDate()
+                : LocalDate.ofInstant(ws.getStartedAt(), sessionZone);
 
         sessionRepo.delete(ws);
-        dailyWorkoutSummaryService.recomputeDay(uid, affectedDate, zone);
 
-        return buildToday(uid, zone);
+        // 這裡改用 session 自己固化的 local bucket 來重算
+        dailyWorkoutSummaryService.recomputeDay(uid, affectedDate, sessionZone);
+
+        // today endpoint 仍維持「目前 request timezone 的今天」
+        return buildToday(uid, requestZone);
+    }
+
+    private ZoneId resolveSessionZone(String storedTimezone, ZoneId fallbackZone) {
+        if (storedTimezone == null || storedTimezone.isBlank()) {
+            return fallbackZone;
+        }
+        try {
+            return ZoneId.of(storedTimezone);
+        } catch (Exception ex) {
+            return fallbackZone;
+        }
     }
 
     // === ★ 調整：給 /workouts/me/weight 用的 fallback 專用 API ===
@@ -361,9 +380,8 @@ public class WorkoutService {
     }
 
     private void purgeOldSessions(Long uid, ZoneId zone) {
-        Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
-        Instant cutoff = todayStart.minus(Duration.ofDays(7));
-        sessionRepo.deleteOlderThan(uid, cutoff);
+        LocalDate cutoffDate = LocalDate.now(zone).minusDays(7);
+        sessionRepo.deleteByUserIdAndLocalDateBefore(uid, cutoffDate);
     }
 
     @Transactional
@@ -377,19 +395,26 @@ public class WorkoutService {
         int minutes = req.minutes();
         int kcal = calcKcal(dict.getMetValue(), userKg, minutes);
 
+        Instant now = clock.instant();
+        LocalDate localDate = LocalDate.ofInstant(now, zone);
+
         WorkoutSession ws = new WorkoutSession();
         ws.setUserId(uid);
         ws.setDictionary(dict);
         ws.setMinutes(minutes);
         ws.setKcal(kcal);
-        ws.setStartedAt(Instant.now());
+        ws.setStartedAt(now);
+        ws.setLocalDate(localDate);
+        ws.setTimezone(zone.getId());
+        ws.setCreatedAt(now);
+
         sessionRepo.save(ws);
 
-        LocalDate affectedDate = LocalDate.ofInstant(ws.getStartedAt(), zone);
-        dailyWorkoutSummaryService.recomputeDay(uid, affectedDate, zone);
+        // summary 重算吃 persisted localDate，不再靠 startedAt + current request zone 回推
+        dailyWorkoutSummaryService.recomputeDay(uid, localDate, zone);
 
         TodayWorkoutResponse today = buildToday(uid, zone);
-        String timeLabel = formatTime24(ZonedDateTime.ofInstant(ws.getStartedAt(), zone));
+        String timeLabel = formatTime24(now.atZone(zone));
 
         return new LogWorkoutResponse(
                 new WorkoutSessionDto(ws.getId(), dict.getDisplayNameEn(), ws.getMinutes(), ws.getKcal(), timeLabel),
@@ -406,9 +431,8 @@ public class WorkoutService {
 
     @Transactional
     public void purgeOldSessionsPublic(Long userId, ZoneId zone) {
-        Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
-        Instant cutoff = todayStart.minus(Duration.ofDays(7));
-        sessionRepo.deleteOlderThan(userId, cutoff);
+        LocalDate cutoffDate = LocalDate.now(zone).minusDays(7);
+        sessionRepo.deleteByUserIdAndLocalDateBefore(userId, cutoffDate);
     }
 
     @Transactional

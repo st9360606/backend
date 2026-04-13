@@ -12,13 +12,15 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 
-//頻率：@Scheduled(cron = "0 20 4 * * *", zone = "Asia/Taipei") ⇒ 每天台北時間 04:20 觸發一次；@Async("retentionExecutor") 讓它在自訂執行緒池非阻塞執行。
-//掃描方式：每次抓 1000 筆使用者時區分頁處理，直到掃完。
-//刪除條件：對每位使用者，取其 個人時區 的「今天 00:00」，再往回 7 天 得到 cutoff；刪除該使用者 started_at < cutoff 的 workout_session。
-//等價於：保留最近 7 個「完整在地日」+ 今天（不會刪到今天）。
-//時區容錯：使用者沒填或填錯時區 → fallback 為 ZoneId.systemDefault()（依伺服器配置而定）。
+// 頻率：每天台北時間 04:20 觸發一次；@Async("retentionExecutor") 讓它在自訂執行緒池非阻塞執行。
+// 掃描方式：每次抓 1000 筆使用者時區分頁處理，直到掃完。
+// 刪除條件：對每位使用者，取其個人時區的 today local date，再往回 7 天，
+// 刪除該使用者 local_date < cutoffDate 的 workout_session。
+// 等價於：保留最近 7 個完整在地日 + 今天。
+// 時區容錯：使用者沒填或填錯時區 -> fallback UTC。
 
 @Component
 @RequiredArgsConstructor
@@ -57,7 +59,13 @@ public class WorkoutRetentionJob {
     }
 
     private ZoneId nullSafeZone(String tz) {
-        try { return (tz == null || tz.isBlank()) ? ZoneId.systemDefault() : ZoneId.of(tz); }
-        catch (Exception e) { return ZoneId.systemDefault(); }
+        if (tz == null || tz.isBlank()) {
+            return ZoneOffset.UTC;
+        }
+        try {
+            return ZoneId.of(tz);
+        } catch (Exception e) {
+            return ZoneOffset.UTC;
+        }
     }
 }
