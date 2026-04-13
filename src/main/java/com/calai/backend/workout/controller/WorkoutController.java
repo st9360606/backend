@@ -66,4 +66,11 @@ public class WorkoutController {
     ) {
         return svc.deleteSession(sessionId, parseZone(tz));
     }
+
+    @GetMapping("/progress/weekly")
+    public WorkoutWeeklyProgressResponse weeklyProgress(
+            @RequestHeader(value = "X-Client-Timezone", required = false) String tz
+    ) {
+        return svc.weeklyProgress(parseZone(tz));
+    }
 }

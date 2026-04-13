@@ -29,7 +29,8 @@ class DailyActivityServiceTest {
         UserDailyActivityRepository repo = mock(UserDailyActivityRepository.class);
         WeightTimeseriesRepo weightSeries = mock(WeightTimeseriesRepo.class);
 
-        DailyActivityService svc = new DailyActivityService(repo, weightSeries);
+        var workoutSummaryService = mock(com.calai.backend.workout.service.UserDailyWorkoutSummaryService.class);
+        DailyActivityService svc = new DailyActivityService(repo, weightSeries, workoutSummaryService);
 
         Long userId = 1L;
         LocalDate day = LocalDate.of(2026, 1, 3);
@@ -58,6 +59,8 @@ class DailyActivityServiceTest {
                 "Google Fit"
         );
 
+        verify(workoutSummaryService).recomputeDay(eq(userId), eq(day), any());
+
         // Act
         svc.upsert(userId, req);
 
@@ -80,7 +83,8 @@ class DailyActivityServiceTest {
         UserDailyActivityRepository repo = mock(UserDailyActivityRepository.class);
         WeightTimeseriesRepo weightSeries = mock(WeightTimeseriesRepo.class);
 
-        DailyActivityService svc = new DailyActivityService(repo, weightSeries);
+        var workoutSummaryService = mock(com.calai.backend.workout.service.UserDailyWorkoutSummaryService.class);
+        DailyActivityService svc = new DailyActivityService(repo, weightSeries, workoutSummaryService);
 
         var req = new DailyActivityService.UpsertReq(
                 LocalDate.of(2026, 1, 3),

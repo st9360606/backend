@@ -30,6 +30,7 @@ public class UserDataPurgeDao {
             "fasting_plan",
             "workout_session",
             "workout_alias_event",
+            "user_daily_workout_summary",
             "weight_timeseries",
             "auth_tokens",
             "user_profiles",

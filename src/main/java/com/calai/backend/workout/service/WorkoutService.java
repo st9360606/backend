@@ -38,6 +38,7 @@ public class WorkoutService {
     private final AuthContext auth;
     private final WorkoutAliasEventRepo aliasEventRepo;
     private final RateLimiterService rateLimiter; // ★ 新增
+    private final UserDailyWorkoutSummaryService dailyWorkoutSummaryService;
 
     @Value("${workout.estimate.blacklistPolicy:block}")
     private String blacklistPolicy; // generic（現狀）、block（阻擋）、audit（只記錄與回傳 not_found）
@@ -55,7 +56,7 @@ public class WorkoutService {
             UserProfileRepository profileRepo,
             AuthContext auth,
             WorkoutAliasEventRepo aliasEventRepo,
-            RateLimiterService rateLimiter // ★ 新增
+            RateLimiterService rateLimiter, UserDailyWorkoutSummaryService dailyWorkoutSummaryService // ★ 新增
     ) {
         this.dictRepo = dictRepo;
         this.aliasRepo = aliasRepo;
@@ -64,6 +65,7 @@ public class WorkoutService {
         this.auth = auth;
         this.aliasEventRepo = aliasEventRepo;
         this.rateLimiter = rateLimiter; // ★ 新增
+        this.dailyWorkoutSummaryService = dailyWorkoutSummaryService;
     }
 
     // ======== 時間標籤（24h） ========
@@ -326,7 +328,12 @@ public class WorkoutService {
         Long uid = auth.requireUserId();
         var ws = sessionRepo.findByIdAndUserId(sessionId, uid)
                 .orElseThrow(() -> new IllegalStateException("NOT_FOUND"));
+
+        LocalDate affectedDate = LocalDate.ofInstant(ws.getStartedAt(), zone);
+
         sessionRepo.delete(ws);
+        dailyWorkoutSummaryService.recomputeDay(uid, affectedDate, zone);
+
         return buildToday(uid, zone);
     }
 
@@ -378,6 +385,9 @@ public class WorkoutService {
         ws.setStartedAt(Instant.now());
         sessionRepo.save(ws);
 
+        LocalDate affectedDate = LocalDate.ofInstant(ws.getStartedAt(), zone);
+        dailyWorkoutSummaryService.recomputeDay(uid, affectedDate, zone);
+
         TodayWorkoutResponse today = buildToday(uid, zone);
         String timeLabel = formatTime24(ZonedDateTime.ofInstant(ws.getStartedAt(), zone));
 
@@ -399,5 +409,11 @@ public class WorkoutService {
         Instant todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant();
         Instant cutoff = todayStart.minus(Duration.ofDays(7));
         sessionRepo.deleteOlderThan(userId, cutoff);
+    }
+
+    @Transactional
+    public WorkoutWeeklyProgressResponse weeklyProgress(ZoneId zone) {
+        Long uid = auth.requireUserId();
+        return dailyWorkoutSummaryService.getWeeklyProgress(uid, zone);
     }
 }

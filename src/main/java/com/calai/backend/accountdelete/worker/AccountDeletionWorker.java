@@ -90,6 +90,7 @@ public class AccountDeletionWorker {
 
         int delWorkoutSession = purgeDao.deleteByUserId("workout_session", userId, limit);
         int delAliasEvent = purgeDao.deleteByUserId("workout_alias_event", userId, limit);
+        int delWorkoutSummary = purgeDao.deleteByUserId("user_daily_workout_summary", userId, limit);
 
         int delWeightHistory = purgeDao.deleteWeightHistoryWithPhotos(userId, limit);
         int delWeightTs = purgeDao.deleteByUserId("weight_timeseries", userId, limit);

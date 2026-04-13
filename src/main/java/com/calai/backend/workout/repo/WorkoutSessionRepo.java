@@ -31,4 +31,23 @@ public interface WorkoutSessionRepo extends JpaRepository<WorkoutSession, Long> 
     @Query("delete from WorkoutSession ws where ws.userId = ?1 and ws.startedAt < ?2")
     int deleteOlderThan(Long userId, Instant cutoffExclusive);
 
+    @Query("""
+    select coalesce(sum(ws.kcal), 0)
+    from WorkoutSession ws
+    where ws.userId = :userId
+      and ws.startedAt >= :startInclusive
+      and ws.startedAt < :endExclusive
+    """)
+    Integer sumKcalByUserIdAndStartedAtBetween(
+            @org.springframework.data.repository.query.Param("userId") Long userId,
+            @org.springframework.data.repository.query.Param("startInclusive") Instant startInclusive,
+            @org.springframework.data.repository.query.Param("endExclusive") Instant endExclusive
+    );
+
+    long countByUserIdAndStartedAtGreaterThanEqualAndStartedAtLessThan(
+            Long userId,
+            Instant startInclusive,
+            Instant endExclusive
+    );
+
 }

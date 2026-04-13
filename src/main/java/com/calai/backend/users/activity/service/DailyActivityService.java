@@ -3,6 +3,7 @@ package com.calai.backend.users.activity.service;
 import com.calai.backend.users.activity.entity.UserDailyActivity;
 import com.calai.backend.users.activity.repo.UserDailyActivityRepository;
 import com.calai.backend.weight.repo.WeightTimeseriesRepo;
+import com.calai.backend.workout.service.UserDailyWorkoutSummaryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -25,6 +26,7 @@ public class DailyActivityService {
 
     private final UserDailyActivityRepository repo;
     private final WeightTimeseriesRepo weightSeries;
+    private final UserDailyWorkoutSummaryService dailyWorkoutSummaryService;
 
     /**
      * ✅ Retention：保留 8 天（以 Instant/UTC 時間線計算，8*24 小時）
@@ -101,8 +103,11 @@ public class DailyActivityService {
 
         repo.save(e);
 
-        // ✅ Upsert 時順手清理該 user 的過期資料（小範圍）
+        // 先清這個 user 的過期 daily activity
         cleanupExpiredForUser(userId);
+
+        // 再重算該 localDate 的 workout summary
+        dailyWorkoutSummaryService.recomputeDay(userId, req.localDate(), zone);
     }
 
     /**
