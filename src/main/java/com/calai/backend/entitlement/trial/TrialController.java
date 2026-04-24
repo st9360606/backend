@@ -1,4 +1,4 @@
-package com.calai.backend.entitlement.controller;
+package com.calai.backend.entitlement.trial;
 
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.entitlement.entity.UserEntitlementEntity;
@@ -22,7 +22,7 @@ public class TrialController {
     private final TrialGrantService trialGrantService;
     private final UserEntitlementRepository entitlementRepo;
 
-    @Value("${app.trial.days:7}")
+    @Value("${app.trial.days:3}")
     private int trialDays;
 
     @PostMapping("/grant")

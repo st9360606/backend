@@ -72,6 +72,7 @@ app:
         step-minutes: 10   # cooldownStepMinutes
         max-minutes: 30    # maxCooldownMinutes
       trial:
+        days: 3           # trialDays
         premium-limit: 15  # trialPremiumLimit
         total-limit: 30    # trialTotalLimit
       paid:

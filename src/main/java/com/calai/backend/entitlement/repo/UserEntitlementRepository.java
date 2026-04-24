@@ -22,6 +22,27 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
     """)
     List<UserEntitlementEntity> findActive(@Param("userId") Long userId, @Param("now") Instant now, Pageable pageable);
 
+    @Query("""
+    select e from UserEntitlementEntity e
+    where e.userId = :userId
+      and e.status = 'ACTIVE'
+      and e.validFromUtc <= :now
+      and e.validToUtc > :now
+    order by
+      case e.entitlementType
+        when 'YEARLY' then 3
+        when 'MONTHLY' then 2
+        when 'TRIAL' then 1
+        else 0
+      end desc,
+      e.validToUtc desc
+""")
+    List<UserEntitlementEntity> findActiveBestFirst(
+            @Param("userId") Long userId,
+            @Param("now") Instant now,
+            Pageable pageable
+    );
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
     update UserEntitlementEntity e
@@ -33,4 +54,20 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
        and e.validToUtc > :now
 """)
     int expireActiveByUserId(@Param("userId") Long userId, @Param("now") Instant now);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+    update UserEntitlementEntity e
+       set e.status = 'EXPIRED',
+           e.updatedAtUtc = :now,
+           e.validToUtc = case when e.validToUtc > :now then :now else e.validToUtc end
+     where e.userId = :userId
+       and e.status = 'ACTIVE'
+       and e.validToUtc > :now
+       and e.entitlementType in ('MONTHLY', 'YEARLY')
+""")
+    int expireActivePaidByUserId(
+            @Param("userId") Long userId,
+            @Param("now") Instant now
+    );
 }

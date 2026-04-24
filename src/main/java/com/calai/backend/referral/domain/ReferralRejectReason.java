@@ -1,0 +1,16 @@
+package com.calai.backend.referral.domain;
+
+public enum ReferralRejectReason {
+    NONE,
+    SELF_REFERRAL,
+    INVITEE_ALREADY_CLAIMED,
+    INVITEE_ALREADY_SUBSCRIBED,
+    PURCHASE_NOT_VERIFIED,
+    PURCHASE_PENDING,
+    TEST_PURCHASE,
+    REFUNDED_OR_REVOKED,
+    CHARGEBACK,
+    ABUSE_RISK,
+    VERIFICATION_WINDOW_EXPIRED,
+    INVALID_PROMO_CODE
+}

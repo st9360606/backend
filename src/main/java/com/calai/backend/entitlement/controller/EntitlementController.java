@@ -7,6 +7,8 @@ import com.calai.backend.entitlement.service.EntitlementSyncService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/api/v1/entitlements")
@@ -19,5 +21,11 @@ public class EntitlementController {
     public EntitlementSyncResponse sync(@RequestBody EntitlementSyncRequest req) {
         Long userId = auth.requireUserId();
         return service.sync(userId, req);
+    }
+
+    @GetMapping("/me")
+    public EntitlementSyncResponse me() {
+        Long userId = auth.requireUserId();
+        return service.sync(userId, new EntitlementSyncRequest(List.of()));
     }
 }
