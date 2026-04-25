@@ -74,13 +74,19 @@ management:
       show-details: when_authorized
 
 app:
+  trial:
+    days: 3     # trialDays
+    hashSecret: "${TRIAL_HASH_SECRET}"
+
+    entitlement:
+      expiry-worker:
+        fixed-delay: PT10M
   ai:
     quota:
       cooldown:
         step-minutes: 10   # cooldownStepMinutes
         max-minutes: 30    # maxCooldownMinutes
       trial:
-        days: 3           # trialDays
         premium-limit: 15  # trialPremiumLimit
         total-limit: 30    # trialTotalLimit
       paid:
@@ -220,6 +226,15 @@ app:
       food-batch: 200
       check-interval: "PT30S"
       base-retry-delay: "PT10S"
+
+  internal:
+    api-token: ${INTERNAL_API_TOKEN}   #powershell -NoProfile -Command "[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))"
+
+referral:
+  email-outbox:
+    fixed-delay: PT1M
+    batch-size: 20
+    max-retries: 5
 
 alias:
   promotion:

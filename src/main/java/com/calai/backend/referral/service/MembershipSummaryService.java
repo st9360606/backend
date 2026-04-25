@@ -1,5 +1,6 @@
 package com.calai.backend.referral.service;
 
+import com.calai.backend.entitlement.entity.UserEntitlementEntity;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import com.calai.backend.referral.domain.PremiumStatus;
 import com.calai.backend.referral.dto.MembershipSummaryResponse;
@@ -10,27 +11,44 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
 @RequiredArgsConstructor
 @Service
 public class MembershipSummaryService {
+
     private final UserEntitlementRepository entitlementRepository;
     private final MembershipRewardLedgerRepository rewardLedgerRepository;
 
     public MembershipSummaryResponse getMembershipSummary(Long userId) {
         Instant now = Instant.now();
-        Instant currentPremiumUntil = entitlementRepository.findActive(userId, now, PageRequest.of(0, 1))
+
+        UserEntitlementEntity active = entitlementRepository
+                .findActiveBestFirst(userId, now, PageRequest.of(0, 1))
                 .stream()
                 .findFirst()
-                .map(e -> e.getValidToUtc())
                 .orElse(null);
 
-        MembershipRewardLedgerEntity latest = rewardLedgerRepository.findTop1ByUserIdOrderByGrantedAtUtcDesc(userId).orElse(null);
+        Instant currentPremiumUntil = active == null ? null : active.getValidToUtc();
+        String premiumStatus = resolvePremiumStatus(active, now);
+        Instant trialEndsAt = PremiumStatus.TRIAL.name().equals(premiumStatus)
+                ? currentPremiumUntil
+                : null;
+        Integer trialDaysLeft = PremiumStatus.TRIAL.name().equals(premiumStatus)
+                ? calcDaysLeft(now, currentPremiumUntil)
+                : null;
+
+        MembershipRewardLedgerEntity latest = rewardLedgerRepository
+                .findTop1ByUserIdOrderByGrantedAtUtcDesc(userId)
+                .orElse(null);
+
         return new MembershipSummaryResponse(
-                currentPremiumUntil != null && currentPremiumUntil.isAfter(now) ? PremiumStatus.PREMIUM.name() : PremiumStatus.FREE.name(),
+                premiumStatus,
                 currentPremiumUntil,
+                trialEndsAt,
+                trialDaysLeft,
                 latest == null ? null : latest.getSourceType(),
                 latest == null ? null : latest.getOldPremiumUntil(),
                 latest == null ? null : latest.getNewPremiumUntil(),
@@ -43,6 +61,28 @@ public class MembershipSummaryService {
                 .stream()
                 .map(this::map)
                 .toList();
+    }
+
+    private String resolvePremiumStatus(UserEntitlementEntity active, Instant now) {
+        if (active == null) return PremiumStatus.FREE.name();
+
+        Instant validTo = active.getValidToUtc();
+        if (validTo == null || !validTo.isAfter(now)) {
+            return PremiumStatus.FREE.name();
+        }
+
+        String type = active.getEntitlementType();
+        if ("TRIAL".equalsIgnoreCase(type)) {
+            return PremiumStatus.TRIAL.name();
+        }
+
+        return PremiumStatus.PREMIUM.name();
+    }
+
+    private int calcDaysLeft(Instant now, Instant end) {
+        if (end == null || !end.isAfter(now)) return 0;
+        long seconds = Duration.between(now, end).getSeconds();
+        return (int) Math.max(1, Math.ceil(seconds / 86_400.0));
     }
 
     private RewardHistoryItemDto map(MembershipRewardLedgerEntity entity) {

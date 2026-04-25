@@ -3,15 +3,14 @@ package com.calai.backend.entitlement.trial;
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.entitlement.entity.UserEntitlementEntity;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
-import com.calai.backend.entitlement.trial.TrialGrantService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -27,17 +26,46 @@ public class TrialController {
 
     @PostMapping("/grant")
     @Transactional
-    public Map<String, Object> grantTrial(
+    public TrialGrantResponse grantTrial(
             @RequestHeader(value = "X-Device-Id", required = false) String deviceId
     ) {
         Long uid = auth.requireUserId();
         Instant now = Instant.now();
 
-        // 1) 檢查 email/device 一次性
-        trialGrantService.ensureTrialEligibleOrThrow(uid, deviceId, now);
+        UserEntitlementEntity active = entitlementRepo
+                .findActiveBestFirst(uid, now, PageRequest.of(0, 1))
+                .stream()
+                .findFirst()
+                .orElse(null);
 
-        // 2) 發 TRIAL entitlement
-        entitlementRepo.expireActiveByUserId(uid, now);
+        if (active != null) {
+            String type = active.getEntitlementType();
+
+            if ("MONTHLY".equalsIgnoreCase(type) || "YEARLY".equalsIgnoreCase(type)) {
+                return new TrialGrantResponse(
+                        true,
+                        "PREMIUM",
+                        type,
+                        active.getValidToUtc()
+                );
+            }
+
+            if ("TRIAL".equalsIgnoreCase(type)) {
+                return new TrialGrantResponse(
+                        true,
+                        "TRIAL",
+                        "TRIAL",
+                        active.getValidToUtc()
+                );
+            }
+        }
+
+        boolean trialAlreadyUsed = entitlementRepo.existsByUserIdAndEntitlementType(uid, "TRIAL");
+        if (trialAlreadyUsed) {
+            throw new TrialNotEligibleException("TRIAL_ALREADY_USED");
+        }
+
+        trialGrantService.ensureTrialEligibleOrThrow(uid, deviceId, now);
 
         UserEntitlementEntity e = new UserEntitlementEntity();
         e.setUserId(uid);
@@ -49,10 +77,11 @@ public class TrialController {
 
         entitlementRepo.save(e);
 
-        return Map.of(
-                "ok", true,
-                "tier", "TRIAL",
-                "validToUtc", e.getValidToUtc().toString()
+        return new TrialGrantResponse(
+                true,
+                "TRIAL",
+                "TRIAL",
+                e.getValidToUtc()
         );
     }
 }

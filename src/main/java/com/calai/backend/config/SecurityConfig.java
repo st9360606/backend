@@ -30,10 +30,14 @@ public class SecurityConfig {
                 .logout(l -> l.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(reg -> reg
-                        // ✅ 公開讀取：體重照片 (只放行 GET)
-                        .requestMatchers(HttpMethod.GET, "/static/weight-photos/**").permitAll()
-                        .requestMatchers("/auth/**").permitAll()
-                        .anyRequest().authenticated()
+                                // ✅ 公開讀取：體重照片 (只放行 GET)
+                                .requestMatchers(HttpMethod.GET, "/static/weight-photos/**").permitAll()
+                                .requestMatchers("/auth/**").permitAll()
+
+                                // internal API 不走 App Bearer token，改由 X-Internal-Token 保護。
+                                // 注意：每支 /internal/** controller 都必須呼叫 InternalApiGuard。
+                                .requestMatchers("/internal/**").permitAll()
+                                .anyRequest().authenticated()
                 )
                 // 把我們的 Bearer 過濾器掛進 Security 鏈
                 .addFilterBefore(accessTokenFilter, UsernamePasswordAuthenticationFilter.class)

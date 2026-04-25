@@ -9,7 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import com.calai.backend.referral.service.ReferralBillingBridgeService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
@@ -23,6 +23,7 @@ public class EntitlementSyncService {
     private final SubscriptionVerifier verifier;
     private final UserEntitlementRepository entitlementRepo;
     private final BillingProductProperties productProps;
+    private final ReferralBillingBridgeService referralBillingBridgeService;
 
     @Transactional
     public EntitlementSyncResponse sync(Long userId, EntitlementSyncRequest req) {
@@ -57,7 +58,7 @@ public class EntitlementSyncService {
         }
 
         // 2) 沒任何有效訂閱
-        if (bestExpiry == null || bestProductId == null) {
+        if (bestExpiry == null || bestProductId == null || bestTokenHash == null || bestTokenHash.isBlank()) {
             return buildSummaryResponse(userId, Instant.now());
         }
 
@@ -69,8 +70,13 @@ public class EntitlementSyncService {
 
         Instant now = Instant.now();
 
-        // 4) 先把這個 user 既有 ACTIVE 改成 EXPIRED（避免多筆 ACTIVE）
-        entitlementRepo.expireActivePaidByUserId(userId, now);
+        // 4) 付款成功後，先把這個 user 既有 ACTIVE entitlement 全部改成 EXPIRED。
+        // 包含：
+        // - 舊 TRIAL ACTIVE
+        // - 舊 MONTHLY ACTIVE
+        // - 舊 YEARLY ACTIVE
+        // 這樣可以保證付款成功後只會有一筆新的 paid ACTIVE entitlement。
+        entitlementRepo.expireActiveByUserId(userId, now);
 
         // 5) 插入新 ACTIVE entitlement（validTo=expiry）
         UserEntitlementEntity e = new UserEntitlementEntity();
@@ -83,6 +89,18 @@ public class EntitlementSyncService {
         e.setLastVerifiedAtUtc(now);
 
         entitlementRepo.save(e);
+
+        // invitee 如果之前有輸入邀請碼，首次有效付費訂閱後進入 7 天驗證期。
+        // 目前 SubscriptionVerifier 還沒有回 pending/test/autoRenew 細節，先用保守預設值。
+        // 下一步接 RTDN / Google Play API 狀態時，要把 pending/test/refund 正確映射進來。
+        referralBillingBridgeService.onFirstPaidSubscriptionVerified(
+                userId,
+                bestTokenHash,
+                now,
+                true,
+                false,
+                false
+        );
 
         return buildSummaryResponse(userId, now);
     }
@@ -143,7 +161,7 @@ public class EntitlementSyncService {
             byte[] out = md.digest(s.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(out);
         } catch (Exception e) {
-            return null;
+            throw new IllegalStateException("SHA256_FAILED", e);
         }
     }
 }

@@ -18,11 +18,15 @@ public class TrialGrantService {
     private final UserTrialGrantRepository trialRepo;
     private final UserRepo userRepo;
 
-    @Value("${app.trial.hashSecret:CHANGE_ME_IN_PROD}")
+    @Value("${app.trial.hashSecret}")
     private String hashSecret;
 
     @Transactional
     public void ensureTrialEligibleOrThrow(Long userId, String deviceId, Instant nowUtc) {
+        if (hashSecret == null || hashSecret.isBlank()) {
+            throw new TrialNotEligibleException("TRIAL_HASH_SECRET_NOT_CONFIGURED");
+        }
+
         if (deviceId == null || deviceId.isBlank()) {
             throw new TrialNotEligibleException("DEVICE_ID_REQUIRED");
         }
@@ -35,12 +39,19 @@ public class TrialGrantService {
             throw new TrialNotEligibleException("EMAIL_REQUIRED");
         }
 
-        String emailHash = HmacSha256.hex(hashSecret, email.trim().toLowerCase(Locale.ROOT));
-        String deviceHash = HmacSha256.hex(hashSecret, deviceId.trim());
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+        String normalizedDeviceId = deviceId.trim();
 
-        // 已領過 → 擋
-        if (trialRepo.findByEmailHash(emailHash).isPresent()) throw new TrialNotEligibleException("EMAIL_ALREADY_USED");
-        if (trialRepo.findByDeviceHash(deviceHash).isPresent()) throw new TrialNotEligibleException("DEVICE_ALREADY_USED");
+        String emailHash = HmacSha256.hex(hashSecret, normalizedEmail);
+        String deviceHash = HmacSha256.hex(hashSecret, normalizedDeviceId);
+
+        if (trialRepo.findByEmailHash(emailHash).isPresent()) {
+            throw new TrialNotEligibleException("EMAIL_ALREADY_USED");
+        }
+
+        if (trialRepo.findByDeviceHash(deviceHash).isPresent()) {
+            throw new TrialNotEligibleException("DEVICE_ALREADY_USED");
+        }
 
         try {
             UserTrialGrantEntity g = new UserTrialGrantEntity();
@@ -50,7 +61,6 @@ public class TrialGrantService {
             g.setGrantedAtUtc(nowUtc);
             trialRepo.save(g);
         } catch (DataIntegrityViolationException e) {
-            // 競態：同時兩次請求
             throw new TrialNotEligibleException("TRIAL_ALREADY_USED");
         }
     }
