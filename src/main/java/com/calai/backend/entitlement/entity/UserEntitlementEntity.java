@@ -12,14 +12,16 @@ import java.util.UUID;
 @Entity
 @Table(
         name = "user_entitlements",
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "uk_entitlements_purchase_token_hash",
+                        columnNames = "purchase_token_hash"
+                )
+        },
         indexes = {
                 @Index(
                         name = "idx_entitlements_user",
                         columnList = "user_id,status,valid_to_utc"
-                ),
-                @Index(
-                        name = "idx_entitlements_purchase_token_hash",
-                        columnList = "purchase_token_hash"
                 ),
                 @Index(
                         name = "idx_entitlements_linked_purchase_token_hash",

@@ -58,20 +58,6 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
         update UserEntitlementEntity e
-           set e.status = 'EXPIRED',
-               e.updatedAtUtc = :now,
-               e.validToUtc = case when e.validToUtc > :now then :now else e.validToUtc end
-         where e.userId = :userId
-           and e.status = 'ACTIVE'
-    """)
-    int expireActiveByUserId(
-            @Param("userId") Long userId,
-            @Param("now") Instant now
-    );
-
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("""
-        update UserEntitlementEntity e
            set e.status = :status,
                e.updatedAtUtc = :now,
                e.revokedAtUtc = :revokedAtUtc,

@@ -138,7 +138,8 @@ public class GoogleRtdnService {
 
                 entitlementSyncService.syncPurchaseTokenFromRtdn(
                         purchaseToken,
-                        eventTime
+                        eventTime,
+                        "REVOKED"
                 );
 
                 referralBillingBridgeService.markRefundedOrRevoked(
@@ -188,7 +189,8 @@ public class GoogleRtdnService {
          */
         entitlementSyncService.syncPurchaseTokenFromRtdn(
                 purchaseToken,
-                eventTime
+                eventTime,
+                "REVOKED"
         );
 
         referralBillingBridgeService.markRefundedOrRevoked(

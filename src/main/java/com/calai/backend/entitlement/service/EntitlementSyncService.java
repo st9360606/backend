@@ -175,6 +175,9 @@ public class EntitlementSyncService {
                 .findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(purchaseTokenHash)
                 .orElse(null);
 
+        boolean newlyCreated = false;
+        String previousType = e == null ? null : e.getEntitlementType();
+
         if (e != null && !userId.equals(e.getUserId())) {
             log.warn(
                     "purchase_token_already_bound requestedUserId={} ownerUserId={} productId={} tokenHash={}",
@@ -183,10 +186,12 @@ public class EntitlementSyncService {
                     v.productId(),
                     purchaseTokenHash
             );
-            return;
+            throw new IllegalStateException("PURCHASE_TOKEN_ALREADY_BOUND");
         }
 
         if (e == null) {
+            newlyCreated = true;
+
             e = new UserEntitlementEntity();
             e.setId(UUID.randomUUID().toString());
             e.setUserId(userId);
@@ -224,7 +229,16 @@ public class EntitlementSyncService {
                 v.acknowledgementState()
         );
 
-        if (!ackOk && !"ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED".equals(v.acknowledgementState())) {
+        if (ackOk) {
+            saved.setAcknowledgementState("ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED");
+            saved.setUpdatedAtUtc(now);
+
+            /*
+             * expireActiveByUserIdExcept 使用 clearAutomatically=true，
+             * saved 可能已 detached，因此這裡明確 save，避免 ack 狀態沒有持久化。
+             */
+            entitlementRepo.save(saved);
+        } else if (!"ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED".equals(v.acknowledgementState())) {
             log.warn(
                     "google_play_ack_not_confirmed userId={} productId={} tokenHash={} acknowledgementState={}",
                     userId,
@@ -238,7 +252,14 @@ public class EntitlementSyncService {
          * Play free trial 不算首次有效付費。
          * 等 trial 結束後 Google Play 真正續訂付費，freeTrial=false 才觸發 referral verification。
          */
-        if (allowReferralUpdate && !v.freeTrial()) {
+        boolean becamePaid =
+                !v.freeTrial()
+                        && (
+                        newlyCreated
+                                || "TRIAL".equalsIgnoreCase(previousType)
+                );
+
+        if (allowReferralUpdate && becamePaid) {
             referralBillingBridgeService.onFirstPaidSubscriptionVerified(
                     userId,
                     purchaseTokenHash,
@@ -317,6 +338,19 @@ public class EntitlementSyncService {
             String purchaseToken,
             Instant eventTime
     ) {
+        return syncPurchaseTokenFromRtdn(
+                purchaseToken,
+                eventTime,
+                "EXPIRED"
+        );
+    }
+
+    @Transactional
+    public EntitlementSyncResponse syncPurchaseTokenFromRtdn(
+            String purchaseToken,
+            Instant eventTime,
+            String inactiveCloseStatus
+    ) {
         Instant now = Instant.now();
 
         if (purchaseToken == null || purchaseToken.isBlank()) {
@@ -378,12 +412,38 @@ public class EntitlementSyncService {
         }
 
         if (!verified.active() || verified.expiryTimeUtc() == null || verified.productId() == null) {
+            String closeStatus = "REVOKED".equalsIgnoreCase(inactiveCloseStatus)
+                    ? "REVOKED"
+                    : "EXPIRED";
+
+            Instant effectiveEventTime = eventTime == null ? now : eventTime;
+            Instant revokedAt = "REVOKED".equals(closeStatus)
+                    ? effectiveEventTime
+                    : null;
+
             log.info(
-                    "rtdn_linked_token_inactive userId={} tokenHash={} linkedHash={} subscriptionState={}",
+                    "rtdn_linked_token_inactive_close_previous userId={} tokenHash={} linkedHash={} subscriptionState={} closeStatus={}",
                     previous.getUserId(),
                     tokenHash,
                     linkedHash,
-                    verified.subscriptionState()
+                    verified.subscriptionState(),
+                    closeStatus
+            );
+
+            entitlementRepo.closeActiveByPurchaseTokenHash(
+                    linkedHash,
+                    closeStatus,
+                    now,
+                    revokedAt,
+                    effectiveEventTime
+            );
+
+            entitlementRepo.closeActiveByPurchaseTokenHash(
+                    tokenHash,
+                    closeStatus,
+                    now,
+                    revokedAt,
+                    effectiveEventTime
             );
 
             return buildSummaryResponse(previous.getUserId(), now);
