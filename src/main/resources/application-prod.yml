@@ -74,13 +74,9 @@ management:
       show-details: when_authorized
 
 app:
-  trial:
-    days: 3     # trialDays
-    hashSecret: "${TRIAL_HASH_SECRET}"
-
-    entitlement:
-      expiry-worker:
-        fixed-delay: PT10M
+  entitlement:
+    expiry-worker:
+      fixed-delay: PT10M
   ai:
     quota:
       cooldown:

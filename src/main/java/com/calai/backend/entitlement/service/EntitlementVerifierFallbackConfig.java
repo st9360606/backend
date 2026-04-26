@@ -10,6 +10,19 @@ public class EntitlementVerifierFallbackConfig {
     @Bean
     @ConditionalOnMissingBean(SubscriptionVerifier.class)
     public SubscriptionVerifier noopSubscriptionVerifier() {
-        return purchaseToken -> new SubscriptionVerifier.VerifiedSubscription(false, null, null);
+        return purchaseToken -> new SubscriptionVerifier.VerifiedSubscription(
+                false,      // active
+                null,       // productId
+                null,       // expiryTimeUtc
+                false,      // freeTrial
+                null,       // subscriptionState
+                null,       // acknowledgementState
+                false,      // autoRenewEnabled
+                "UNKNOWN",  // offerPhase
+                null,       // latestOrderId
+                null,       // linkedPurchaseToken
+                false,      // testPurchase
+                false       // pending
+        );
     }
 }

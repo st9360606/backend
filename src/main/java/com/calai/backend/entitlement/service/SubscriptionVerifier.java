@@ -7,12 +7,21 @@ public interface SubscriptionVerifier {
     record VerifiedSubscription(
             boolean active,
             String productId,
-            Instant expiryTimeUtc
+            Instant expiryTimeUtc,
+            boolean freeTrial,
+            String subscriptionState,
+            String acknowledgementState,
+            boolean autoRenewEnabled,
+            String offerPhase,
+            String latestOrderId,
+            String linkedPurchaseToken,
+            boolean testPurchase,
+            boolean pending
     ) {}
 
     /**
-     * 驗證 purchaseToken 是否有效（仍在有效期）
-     * - productId 只是「輔助」，真正 productId 以 Google 回傳為準
+     * 驗證 purchaseToken 是否有效。
+     * productId / expiry / offer phase / state 一律以 Google Play Developer API 回傳為準。
      */
     VerifiedSubscription verify(String purchaseToken) throws Exception;
 }

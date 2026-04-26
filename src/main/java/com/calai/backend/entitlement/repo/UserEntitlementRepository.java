@@ -9,8 +9,16 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public interface UserEntitlementRepository extends JpaRepository<UserEntitlementEntity, String> {
+
+    Optional<UserEntitlementEntity> findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(String purchaseTokenHash);
+
+    Optional<UserEntitlementEntity> findTopByLinkedPurchaseTokenHashOrderByUpdatedAtUtcDesc(
+            String linkedPurchaseTokenHash
+    );
+
 
     @Query("""
         select e from UserEntitlementEntity e
@@ -47,19 +55,6 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
             Pageable pageable
     );
 
-    /**
-     * 付款成功後使用：
-     * 將該 user 所有 ACTIVE entitlement 關閉。
-     *
-     * 包含：
-     * - TRIAL ACTIVE
-     * - MONTHLY ACTIVE
-     * - YEARLY ACTIVE
-     *
-     * 注意：
-     * 這裡故意不限制 validToUtc > now，
-     * 因為過期但尚未被 worker 清理的 TRIAL，也要在付款成功後改成 EXPIRED。
-     */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
         update UserEntitlementEntity e
@@ -74,31 +69,25 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
             @Param("now") Instant now
     );
 
-    /**
-     * 保留給只想關閉 paid entitlement 的舊流程使用。
-     * 新的付款 sync 主流程請使用 expireActiveByUserId。
-     */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
         update UserEntitlementEntity e
-           set e.status = 'EXPIRED',
+           set e.status = :status,
                e.updatedAtUtc = :now,
+               e.revokedAtUtc = :revokedAtUtc,
+               e.lastRtdnAtUtc = :lastRtdnAtUtc,
                e.validToUtc = case when e.validToUtc > :now then :now else e.validToUtc end
-         where e.userId = :userId
+         where e.purchaseTokenHash = :purchaseTokenHash
            and e.status = 'ACTIVE'
-           and e.validToUtc > :now
-           and e.entitlementType in ('MONTHLY', 'YEARLY')
     """)
-    int expireActivePaidByUserId(
-            @Param("userId") Long userId,
-            @Param("now") Instant now
+    int closeActiveByPurchaseTokenHash(
+            @Param("purchaseTokenHash") String purchaseTokenHash,
+            @Param("status") String status,
+            @Param("now") Instant now,
+            @Param("revokedAtUtc") Instant revokedAtUtc,
+            @Param("lastRtdnAtUtc") Instant lastRtdnAtUtc
     );
 
-    /**
-     * Trial / paid 過期後的資料清理：
-     * API 判斷是否有效仍以 validToUtc > now 為準；
-     * 這個方法主要是避免 DB 顯示 ACTIVE 但其實已過期。
-     */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
         update UserEntitlementEntity e
@@ -109,9 +98,20 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
     """)
     int expireAllEndedEntitlements(@Param("now") Instant now);
 
-    /**
-     * Trial 防重複領取：
-     * 只要歷史上曾經有 TRIAL，就不再發第二次。
-     */
-    boolean existsByUserIdAndEntitlementType(Long userId, String entitlementType);
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+    update UserEntitlementEntity e
+       set e.status = 'EXPIRED',
+           e.updatedAtUtc = :now,
+           e.validToUtc = case when e.validToUtc > :now then :now else e.validToUtc end
+     where e.userId = :userId
+       and e.status = 'ACTIVE'
+       and e.id <> :keepId
+""")
+    int expireActiveByUserIdExcept(
+            @Param("userId") Long userId,
+            @Param("keepId") String keepId,
+            @Param("now") Instant now
+    );
+
 }

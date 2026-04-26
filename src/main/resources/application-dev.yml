@@ -66,10 +66,6 @@ management:
       show-details: when_authorized
 
 app:
-  trial:
-    days: 3     # trialDays
-    hashSecret: "${TRIAL_HASH_SECRET:dev-local-trial-secret-change-me}"
-
   entitlement:
     expiry-worker:
       fixed-delay: PT10M

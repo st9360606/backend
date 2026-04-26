@@ -2,21 +2,24 @@ package com.calai.backend.entitlement.service;
 
 import com.calai.backend.entitlement.dto.EntitlementSyncRequest;
 import com.calai.backend.entitlement.dto.EntitlementSyncResponse;
-
 import com.calai.backend.entitlement.entity.UserEntitlementEntity;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
+import com.calai.backend.referral.service.ReferralBillingBridgeService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.calai.backend.referral.service.ReferralBillingBridgeService;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.UUID;
 
 @RequiredArgsConstructor
+@Slf4j
 @Service
 public class EntitlementSyncService {
 
@@ -24,17 +27,17 @@ public class EntitlementSyncService {
     private final UserEntitlementRepository entitlementRepo;
     private final BillingProductProperties productProps;
     private final ReferralBillingBridgeService referralBillingBridgeService;
+    private final PurchaseAcknowledger purchaseAcknowledger;
 
     @Transactional
     public EntitlementSyncResponse sync(Long userId, EntitlementSyncRequest req) {
+        Instant now = Instant.now();
+
         if (req == null || req.purchases() == null || req.purchases().isEmpty()) {
-            return buildSummaryResponse(userId, Instant.now());
+            return buildSummaryResponse(userId, now);
         }
 
-        // 1) 驗證所有 token，挑「最晚到期」那個（也可改成 YEARLY 優先）
-        Instant bestExpiry = null;
-        String bestProductId = null;
-        String bestTokenHash = null;
+        VerifiedCandidate best = null;
 
         for (var p : req.purchases()) {
             String token = (p == null) ? null : p.purchaseToken();
@@ -44,70 +47,207 @@ public class EntitlementSyncService {
             try {
                 v = verifier.verify(token);
             } catch (Exception ex) {
-                // 驗證失敗就略過（不要讓整個登入流程卡住；你要嚴格也可以改成直接回 INACTIVE）
+                log.warn("entitlement_sync_verify_failed userId={} productId={} error={}",
+                        userId, p == null ? null : p.productId(), ex.toString());
                 continue;
             }
 
-            if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) continue;
+            if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) {
+                continue;
+            }
 
-            if (bestExpiry == null || v.expiryTimeUtc().isAfter(bestExpiry)) {
-                bestExpiry = v.expiryTimeUtc();
-                bestProductId = v.productId();
-                bestTokenHash = sha256Hex(token);
+            String tier = productProps.toTierOrNull(v.productId());
+            if (tier == null) {
+                log.warn("entitlement_sync_unknown_product userId={} productId={}", userId, v.productId());
+                continue;
+            }
+
+            String tokenHash = sha256Hex(token);
+            if (best == null || v.expiryTimeUtc().isAfter(best.verified().expiryTimeUtc())) {
+                best = new VerifiedCandidate(tokenHash, token, tier, v);
             }
         }
 
-        // 2) 沒任何有效訂閱
-        if (bestExpiry == null || bestProductId == null || bestTokenHash == null || bestTokenHash.isBlank()) {
-            return buildSummaryResponse(userId, Instant.now());
+        if (best == null) {
+            return buildSummaryResponse(userId, now);
         }
 
-        // 3) productId -> entitlementType（只允許白名單）
-        String tier = productProps.toTierOrNull(bestProductId);
-        if (tier == null) {
-            return buildSummaryResponse(userId, Instant.now());
-        }
-
-        Instant now = Instant.now();
-
-        // 4) 付款成功後，先把這個 user 既有 ACTIVE entitlement 全部改成 EXPIRED。
-        // 包含：
-        // - 舊 TRIAL ACTIVE
-        // - 舊 MONTHLY ACTIVE
-        // - 舊 YEARLY ACTIVE
-        // 這樣可以保證付款成功後只會有一筆新的 paid ACTIVE entitlement。
-        entitlementRepo.expireActiveByUserId(userId, now);
-
-        // 5) 插入新 ACTIVE entitlement（validTo=expiry）
-        UserEntitlementEntity e = new UserEntitlementEntity();
-        e.setUserId(userId);
-        e.setEntitlementType(tier);
-        e.setStatus("ACTIVE");
-        e.setValidFromUtc(now);
-        e.setValidToUtc(bestExpiry);
-        e.setPurchaseTokenHash(bestTokenHash);
-        e.setLastVerifiedAtUtc(now);
-
-        entitlementRepo.save(e);
-
-        // invitee 如果之前有輸入邀請碼，首次有效付費訂閱後進入 7 天驗證期。
-        // 目前 SubscriptionVerifier 還沒有回 pending/test/autoRenew 細節，先用保守預設值。
-        // 下一步接 RTDN / Google Play API 狀態時，要把 pending/test/refund 正確映射進來。
-        referralBillingBridgeService.onFirstPaidSubscriptionVerified(
+        upsertGooglePlayEntitlement(
                 userId,
-                bestTokenHash,
+                best.purchaseTokenHash(),
+                best.rawPurchaseToken(),
+                best.tier(),
+                best.verified(),
                 now,
-                true,
-                false,
-                false
+                null,
+                true
         );
 
         return buildSummaryResponse(userId, now);
     }
 
+    /**
+     * RTDN 專用：RTDN 只告訴你 purchaseToken 狀態有變，完整狀態仍要回查 Google Play。
+     */
+    @Transactional
+    public EntitlementSyncResponse syncKnownPurchaseTokenFromRtdn(
+            Long userId,
+            String purchaseToken,
+            Instant eventTime
+    ) {
+        Instant now = Instant.now();
+        String tokenHash = sha256Hex(purchaseToken);
+
+        SubscriptionVerifier.VerifiedSubscription v;
+        try {
+            v = verifier.verify(purchaseToken);
+        } catch (Exception ex) {
+            log.warn("entitlement_rtdn_verify_failed userId={} tokenHash={} error={}",
+                    userId, tokenHash, ex.toString());
+            return buildSummaryResponse(userId, now);
+        }
+
+        if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) {
+            entitlementRepo.closeActiveByPurchaseTokenHash(
+                    tokenHash,
+                    "EXPIRED",
+                    now,
+                    null,
+                    eventTime == null ? now : eventTime
+            );
+            return buildSummaryResponse(userId, now);
+        }
+
+        String tier = productProps.toTierOrNull(v.productId());
+        if (tier == null) {
+            log.warn("entitlement_rtdn_unknown_product userId={} tokenHash={} productId={}",
+                    userId, tokenHash, v.productId());
+            return buildSummaryResponse(userId, now);
+        }
+
+        upsertGooglePlayEntitlement(
+                userId,
+                tokenHash,
+                purchaseToken,
+                tier,
+                v,
+                now,
+                eventTime,
+                true
+        );
+
+        return buildSummaryResponse(userId, now);
+    }
+
+    @Transactional
+    public void closeByPurchaseTokenHash(String purchaseTokenHash, String status, Instant eventTime) {
+        Instant now = Instant.now();
+        entitlementRepo.closeActiveByPurchaseTokenHash(
+                purchaseTokenHash,
+                status,
+                now,
+                "REVOKED".equals(status) ? (eventTime == null ? now : eventTime) : null,
+                eventTime == null ? now : eventTime
+        );
+    }
+
     @Transactional(readOnly = true)
     public EntitlementSyncResponse me(Long userId) {
         return buildSummaryResponse(userId, Instant.now());
+    }
+
+    private void upsertGooglePlayEntitlement(
+            Long userId,
+            String purchaseTokenHash,
+            String rawPurchaseToken,
+            String tier,
+            SubscriptionVerifier.VerifiedSubscription v,
+            Instant now,
+            Instant rtdnEventTime,
+            boolean allowReferralUpdate
+    ) {
+        String entitlementTypeToStore = v.freeTrial() ? "TRIAL" : tier;
+        String linkedPurchaseTokenHash = v.linkedPurchaseToken() == null || v.linkedPurchaseToken().isBlank()
+                ? null
+                : sha256Hex(v.linkedPurchaseToken());
+
+        UserEntitlementEntity e = entitlementRepo
+                .findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(purchaseTokenHash)
+                .orElse(null);
+
+        if (e != null && !userId.equals(e.getUserId())) {
+            log.warn(
+                    "purchase_token_already_bound requestedUserId={} ownerUserId={} productId={} tokenHash={}",
+                    userId,
+                    e.getUserId(),
+                    v.productId(),
+                    purchaseTokenHash
+            );
+            return;
+        }
+
+        if (e == null) {
+            e = new UserEntitlementEntity();
+            e.setId(UUID.randomUUID().toString());
+            e.setUserId(userId);
+            e.setPurchaseTokenHash(purchaseTokenHash);
+            e.setCreatedAtUtc(now);
+        }
+
+        e.setEntitlementType(entitlementTypeToStore);
+        e.setStatus("ACTIVE");
+        e.setValidFromUtc(now);
+        e.setValidToUtc(v.expiryTimeUtc());
+        e.setLastVerifiedAtUtc(now);
+        e.setSource("GOOGLE_PLAY");
+        e.setProductId(v.productId());
+        e.setSubscriptionState(v.subscriptionState());
+        e.setOfferPhase(v.offerPhase());
+        e.setAutoRenewEnabled(v.autoRenewEnabled());
+        e.setAcknowledgementState(v.acknowledgementState());
+        e.setLatestOrderId(v.latestOrderId());
+        e.setLinkedPurchaseTokenHash(linkedPurchaseTokenHash);
+        e.setLastRtdnAtUtc(rtdnEventTime);
+        e.setUpdatedAtUtc(now);
+
+        UserEntitlementEntity saved = entitlementRepo.save(e);
+
+        entitlementRepo.expireActiveByUserIdExcept(
+                userId,
+                saved.getId(),
+                now
+        );
+
+        boolean ackOk = purchaseAcknowledger.acknowledgeWithRetry(
+                v.productId(),
+                rawPurchaseToken,
+                v.acknowledgementState()
+        );
+
+        if (!ackOk && !"ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED".equals(v.acknowledgementState())) {
+            log.warn(
+                    "google_play_ack_not_confirmed userId={} productId={} tokenHash={} acknowledgementState={}",
+                    userId,
+                    v.productId(),
+                    purchaseTokenHash,
+                    v.acknowledgementState()
+            );
+        }
+
+        /*
+         * Play free trial 不算首次有效付費。
+         * 等 trial 結束後 Google Play 真正續訂付費，freeTrial=false 才觸發 referral verification。
+         */
+        if (allowReferralUpdate && !v.freeTrial()) {
+            referralBillingBridgeService.onFirstPaidSubscriptionVerified(
+                    userId,
+                    purchaseTokenHash,
+                    now,
+                    v.autoRenewEnabled(),
+                    v.pending(),
+                    v.testPurchase()
+            );
+        }
     }
 
     private EntitlementSyncResponse buildSummaryResponse(Long userId, Instant now) {
@@ -149,13 +289,20 @@ public class EntitlementSyncService {
         );
     }
 
+    private record VerifiedCandidate(
+            String purchaseTokenHash,
+            String rawPurchaseToken,
+            String tier,
+            SubscriptionVerifier.VerifiedSubscription verified
+    ) {}
+
     private static int calcDaysLeft(Instant now, Instant end) {
         if (end == null || !end.isAfter(now)) return 0;
         long seconds = Duration.between(now, end).getSeconds();
         return (int) Math.max(1, Math.ceil(seconds / 86_400.0));
     }
 
-    private static String sha256Hex(String s) {
+    public static String sha256Hex(String s) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] out = md.digest(s.getBytes(StandardCharsets.UTF_8));
@@ -163,5 +310,107 @@ public class EntitlementSyncService {
         } catch (Exception e) {
             throw new IllegalStateException("SHA256_FAILED", e);
         }
+    }
+
+    @Transactional
+    public EntitlementSyncResponse syncPurchaseTokenFromRtdn(
+            String purchaseToken,
+            Instant eventTime
+    ) {
+        Instant now = Instant.now();
+
+        if (purchaseToken == null || purchaseToken.isBlank()) {
+            return null;
+        }
+
+        String tokenHash = sha256Hex(purchaseToken);
+
+        var existing = entitlementRepo
+                .findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(tokenHash)
+                .orElse(null);
+
+        if (existing != null) {
+            return syncKnownPurchaseTokenFromRtdn(
+                    existing.getUserId(),
+                    purchaseToken,
+                    eventTime
+            );
+        }
+
+        SubscriptionVerifier.VerifiedSubscription verified;
+        try {
+            verified = verifier.verify(purchaseToken);
+        } catch (Exception ex) {
+            log.warn(
+                    "rtdn_unbound_token_verify_failed tokenHash={} error={}",
+                    tokenHash,
+                    ex.toString()
+            );
+            return null;
+        }
+
+        String linkedToken = verified.linkedPurchaseToken();
+        if (linkedToken == null || linkedToken.isBlank()) {
+            log.warn(
+                    "rtdn_purchase_token_not_bound tokenHash={} productId={} latestOrderId={}",
+                    tokenHash,
+                    verified.productId(),
+                    verified.latestOrderId()
+            );
+            return null;
+        }
+
+        String linkedHash = sha256Hex(linkedToken);
+
+        var previous = entitlementRepo
+                .findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(linkedHash)
+                .or(() -> entitlementRepo.findTopByLinkedPurchaseTokenHashOrderByUpdatedAtUtcDesc(linkedHash))
+                .orElse(null);
+
+        if (previous == null) {
+            log.warn(
+                    "rtdn_linked_purchase_token_not_bound tokenHash={} linkedHash={} productId={}",
+                    tokenHash,
+                    linkedHash,
+                    verified.productId()
+            );
+            return null;
+        }
+
+        if (!verified.active() || verified.expiryTimeUtc() == null || verified.productId() == null) {
+            log.info(
+                    "rtdn_linked_token_inactive userId={} tokenHash={} linkedHash={} subscriptionState={}",
+                    previous.getUserId(),
+                    tokenHash,
+                    linkedHash,
+                    verified.subscriptionState()
+            );
+
+            return buildSummaryResponse(previous.getUserId(), now);
+        }
+
+        String tier = productProps.toTierOrNull(verified.productId());
+        if (tier == null) {
+            log.warn(
+                    "rtdn_unknown_product_for_linked_token userId={} productId={} tokenHash={}",
+                    previous.getUserId(),
+                    verified.productId(),
+                    tokenHash
+            );
+            return buildSummaryResponse(previous.getUserId(), now);
+        }
+
+        upsertGooglePlayEntitlement(
+                previous.getUserId(),
+                tokenHash,
+                purchaseToken,
+                tier,
+                verified,
+                now,
+                eventTime,
+                true
+        );
+
+        return buildSummaryResponse(previous.getUserId(), now);
     }
 }

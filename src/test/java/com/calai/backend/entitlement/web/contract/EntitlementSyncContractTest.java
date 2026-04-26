@@ -1,28 +1,36 @@
 package com.calai.backend.entitlement.web.contract;
 
+import com.calai.backend.auth.entity.AuthProvider;
+import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.entitlement.dto.EntitlementSyncRequest;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
+import com.calai.backend.entitlement.service.BillingProductProperties;
+import com.calai.backend.entitlement.service.SubscriptionVerifier;
 import com.calai.backend.testsupport.db.MySqlContainerBaseTest;
 import com.calai.backend.users.user.entity.User;
 import com.calai.backend.users.user.repo.UserRepo;
-import com.calai.backend.entitlement.service.SubscriptionVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.*;
-import org.springframework.context.annotation.*;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.beans.factory.annotation.Autowired;
+
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -32,8 +40,7 @@ public class EntitlementSyncContractTest extends MySqlContainerBaseTest {
     @Autowired ObjectMapper om;
 
     @Autowired UserRepo userRepo;
-    @Autowired
-    UserEntitlementRepository entitlementRepo;
+    @Autowired UserEntitlementRepository entitlementRepo;
 
     @TestConfiguration
     static class TestOverrideConfig {
@@ -42,46 +49,72 @@ public class EntitlementSyncContractTest extends MySqlContainerBaseTest {
 
         @Bean
         @Primary
-        public com.calai.backend.auth.security.AuthContext authContext() {
-            return new com.calai.backend.auth.security.AuthContext() {
-                @Override public Long requireUserId() { return UID.get(); }
+        public AuthContext authContext() {
+            return new AuthContext() {
+                @Override
+                public Long requireUserId() {
+                    long id = UID.get();
+                    if (id <= 0) {
+                        throw new IllegalStateException("TEST_USER_ID_NOT_SET");
+                    }
+                    return id;
+                }
             };
         }
 
         @Bean
         @Primary
         public SubscriptionVerifier verifier() {
-            return purchaseToken -> new SubscriptionVerifier.VerifiedSubscription(
-                    true,
-                    "monthly001",
-                    Instant.now().plus(30, ChronoUnit.DAYS)
-            );
+            return purchaseToken -> {
+                if ("trialTok123".equals(purchaseToken)) {
+                    return new SubscriptionVerifier.VerifiedSubscription(
+                            true,                                           // active
+                            "monthly001",                                   // productId
+                            Instant.now().plus(3, ChronoUnit.DAYS),          // expiryTimeUtc
+                            true,                                           // freeTrial
+                            "SUBSCRIPTION_STATE_ACTIVE",                    // subscriptionState
+                            "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",           // acknowledgementState
+                            true,                                           // autoRenewEnabled
+                            "FREE_TRIAL",                                   // offerPhase
+                            "GPA.1111-2222-3333-44444",                    // latestOrderId
+                            null,                                           // linkedPurchaseToken
+                            true,                                           // testPurchase
+                            false                                           // pending
+                    );
+                }
+
+                return new SubscriptionVerifier.VerifiedSubscription(
+                        true,                                               // active
+                        "monthly001",                                       // productId
+                        Instant.now().plus(30, ChronoUnit.DAYS),             // expiryTimeUtc
+                        false,                                              // freeTrial
+                        "SUBSCRIPTION_STATE_ACTIVE",                        // subscriptionState
+                        "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",               // acknowledgementState
+                        true,                                               // autoRenewEnabled
+                        "BASE",                                             // offerPhase
+                        "GPA.5555-6666-7777-88888",                        // latestOrderId
+                        null,                                               // linkedPurchaseToken
+                        true,                                               // testPurchase
+                        false                                               // pending
+                );
+            };
         }
 
         @Bean
         @Primary
-        public com.calai.backend.entitlement.service.BillingProductProperties billingProductProperties() {
-            var p = new com.calai.backend.entitlement.service.BillingProductProperties();
-            p.setMonthly(new java.util.HashSet<>(List.of("monthly001")));
-            p.setYearly(new java.util.HashSet<>());
+        public BillingProductProperties billingProductProperties() {
+            var p = new BillingProductProperties();
+            p.setMonthly(new HashSet<>(List.of("monthly001")));
+            p.setYearly(new HashSet<>());
             return p;
         }
     }
 
     @Test
     @WithMockUser(username = "test", roles = {"USER"})
-    void sync_should_insert_active_entitlement() throws Exception {
-        // ensure user id=1 exists
-        if (userRepo.findById(1L).isEmpty()) {
-            User u = new User();
-            u.setEmail("test@example.com");
-            u.setProvider(com.calai.backend.auth.entity.AuthProvider.EMAIL);
-            u.setStatus("ACTIVE");
-            userRepo.saveAndFlush(u);
-            EntitlementSyncContractTest.TestOverrideConfig.UID.set(u.getId());
-            // 你 DB 可能自增不是 1；若不是 1，請改 AuthContext 回傳 u.getId()
-            // 這裡先假設你的測試庫會從 1 開始
-        }
+    void sync_should_insert_active_paid_entitlement() throws Exception {
+        User user = createUser();
+        TestOverrideConfig.UID.set(user.getId());
 
         var body = new EntitlementSyncRequest(
                 List.of(new EntitlementSyncRequest.PurchaseTokenPayload("monthly001", "tok123"))
@@ -92,11 +125,80 @@ public class EntitlementSyncContractTest extends MySqlContainerBaseTest {
                         .content(om.writeValueAsString(body)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
-                .andExpect(jsonPath("$.entitlementType").value("MONTHLY"));
+                .andExpect(jsonPath("$.entitlementType").value("MONTHLY"))
+                .andExpect(jsonPath("$.premiumStatus").value("PREMIUM"))
+                .andExpect(jsonPath("$.trialEndsAt").doesNotExist())
+                .andExpect(jsonPath("$.trialDaysLeft").doesNotExist());
 
-        var active = entitlementRepo.findActive(1L, Instant.now(), org.springframework.data.domain.PageRequest.of(0, 5));
+        var active = entitlementRepo.findActive(
+                user.getId(),
+                Instant.now(),
+                org.springframework.data.domain.PageRequest.of(0, 5)
+        );
+
         assertThat(active).isNotEmpty();
-        assertThat(active.get(0).getEntitlementType()).isEqualTo("MONTHLY");
-        assertThat(active.get(0).getStatus()).isEqualTo("ACTIVE");
+
+        var e = active.get(0);
+        assertThat(e.getEntitlementType()).isEqualTo("MONTHLY");
+        assertThat(e.getStatus()).isEqualTo("ACTIVE");
+
+        // 這些是這次新增的 Google Play subscription metadata
+        assertThat(e.getSource()).isEqualTo("GOOGLE_PLAY");
+        assertThat(e.getProductId()).isEqualTo("monthly001");
+        assertThat(e.getSubscriptionState()).isEqualTo("SUBSCRIPTION_STATE_ACTIVE");
+        assertThat(e.getOfferPhase()).isEqualTo("BASE");
+        assertThat(e.getAutoRenewEnabled()).isTrue();
+        assertThat(e.getAcknowledgementState()).isEqualTo("ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED");
+        assertThat(e.getLatestOrderId()).isEqualTo("GPA.5555-6666-7777-88888");
+    }
+
+    @Test
+    @WithMockUser(username = "test", roles = {"USER"})
+    void sync_should_map_google_play_free_trial_to_trial_status() throws Exception {
+        User user = createUser();
+        TestOverrideConfig.UID.set(user.getId());
+
+        var body = new EntitlementSyncRequest(
+                List.of(new EntitlementSyncRequest.PurchaseTokenPayload("monthly001", "trialTok123"))
+        );
+
+        mvc.perform(post("/api/v1/entitlements/sync")
+                        .contentType(APPLICATION_JSON)
+                        .content(om.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.entitlementType").value("TRIAL"))
+                .andExpect(jsonPath("$.premiumStatus").value("TRIAL"))
+                .andExpect(jsonPath("$.trialEndsAt").exists())
+                .andExpect(jsonPath("$.trialDaysLeft").value(3));
+
+        var active = entitlementRepo.findActive(
+                user.getId(),
+                Instant.now(),
+                org.springframework.data.domain.PageRequest.of(0, 5)
+        );
+
+        assertThat(active).isNotEmpty();
+
+        var e = active.get(0);
+        assertThat(e.getEntitlementType()).isEqualTo("TRIAL");
+        assertThat(e.getStatus()).isEqualTo("ACTIVE");
+
+        // 重點：Google Play trial 也要保留 Google Play metadata
+        assertThat(e.getSource()).isEqualTo("GOOGLE_PLAY");
+        assertThat(e.getProductId()).isEqualTo("monthly001");
+        assertThat(e.getSubscriptionState()).isEqualTo("SUBSCRIPTION_STATE_ACTIVE");
+        assertThat(e.getOfferPhase()).isEqualTo("FREE_TRIAL");
+        assertThat(e.getAutoRenewEnabled()).isTrue();
+        assertThat(e.getAcknowledgementState()).isEqualTo("ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED");
+        assertThat(e.getLatestOrderId()).isEqualTo("GPA.1111-2222-3333-44444");
+    }
+
+    private User createUser() {
+        User u = new User();
+        u.setEmail("entitlement-test-" + System.nanoTime() + "@example.com");
+        u.setProvider(AuthProvider.EMAIL);
+        u.setStatus("ACTIVE");
+        return userRepo.saveAndFlush(u);
     }
 }

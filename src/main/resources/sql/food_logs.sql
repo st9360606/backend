@@ -146,31 +146,6 @@ CREATE TABLE IF NOT EXISTS usage_counters
   COLLATE = utf8mb4_0900_ai_ci;
 
 
--- === user_entitlements（訂閱/試用）===
-DROP TABLE IF EXISTS user_entitlements;
-CREATE TABLE IF NOT EXISTS user_entitlements
-(
-    id                   CHAR(36)    NOT NULL,
-    user_id              BIGINT      NOT NULL,
-    entitlement_type     VARCHAR(16) NOT NULL, -- TRIAL/MONTHLY/YEARLY
-    status               VARCHAR(16) NOT NULL, -- ACTIVE/EXPIRED/CANCELLED
-    valid_from_utc       DATETIME(6) NOT NULL,
-    valid_to_utc         DATETIME(6) NOT NULL,
-
-    purchase_token_hash  CHAR(64)    NULL,
-    last_verified_at_utc DATETIME(6) NULL,
-
-    created_at_utc       DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at_utc       DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-
-    PRIMARY KEY (id),
-
-    INDEX idx_entitlements_user (user_id, status, valid_to_utc)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_0900_ai_ci;
-
-
 -- === deletion_jobs（刪圖/刪 payload 任務）===
 DROP TABLE IF EXISTS deletion_jobs;
 

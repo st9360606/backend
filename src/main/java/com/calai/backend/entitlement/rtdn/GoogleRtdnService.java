@@ -1,5 +1,6 @@
 package com.calai.backend.entitlement.rtdn;
 
+import com.calai.backend.entitlement.service.EntitlementSyncService;
 import com.calai.backend.referral.service.ReferralBillingBridgeService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,21 +9,31 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.HexFormat;
 
 @RequiredArgsConstructor
 @Slf4j
 @Service
 public class GoogleRtdnService {
 
+    private static final int SUBSCRIPTION_RECOVERED = 1;
+    private static final int SUBSCRIPTION_RENEWED = 2;
+    private static final int SUBSCRIPTION_CANCELED = 3;
+    private static final int SUBSCRIPTION_PURCHASED = 4;
+    private static final int SUBSCRIPTION_ON_HOLD = 5;
+    private static final int SUBSCRIPTION_IN_GRACE_PERIOD = 6;
+    private static final int SUBSCRIPTION_RESTARTED = 7;
+    private static final int SUBSCRIPTION_DEFERRED = 9;
+    private static final int SUBSCRIPTION_PAUSED = 10;
+    private static final int SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED = 11;
     private static final int SUBSCRIPTION_REVOKED = 12;
+    private static final int SUBSCRIPTION_EXPIRED = 13;
     private static final int SUBSCRIPTION_PENDING_PURCHASE_CANCELED = 20;
 
     private final ObjectMapper objectMapper;
     private final ReferralBillingBridgeService referralBillingBridgeService;
+    private final EntitlementSyncService entitlementSyncService;
 
     public void handlePubSubMessage(String base64Data, String messageId) {
         if (base64Data == null || base64Data.isBlank()) {
@@ -40,12 +51,20 @@ public class GoogleRtdnService {
             Instant eventTime = resolveEventTime(root);
 
             if (root.hasNonNull("subscriptionNotification")) {
-                handleSubscriptionNotification(root.path("subscriptionNotification"), eventTime, messageId);
+                handleSubscriptionNotification(
+                        root.path("subscriptionNotification"),
+                        eventTime,
+                        messageId
+                );
                 return;
             }
 
             if (root.hasNonNull("voidedPurchaseNotification")) {
-                handleVoidedPurchaseNotification(root.path("voidedPurchaseNotification"), eventTime, messageId);
+                handleVoidedPurchaseNotification(
+                        root.path("voidedPurchaseNotification"),
+                        eventTime,
+                        messageId
+                );
                 return;
             }
 
@@ -70,25 +89,77 @@ public class GoogleRtdnService {
         String purchaseToken = subscription.path("purchaseToken").asText(null);
 
         if (purchaseToken == null || purchaseToken.isBlank()) {
-            log.warn("rtdn_subscription_missing_purchase_token messageId={} type={}", messageId, notificationType);
+            log.warn(
+                    "rtdn_subscription_missing_purchase_token messageId={} type={}",
+                    messageId,
+                    notificationType
+            );
             return;
         }
 
-        String tokenHash = sha256Hex(purchaseToken);
+        String tokenHash = EntitlementSyncService.sha256Hex(purchaseToken);
 
         switch (notificationType) {
-            case SUBSCRIPTION_REVOKED, SUBSCRIPTION_PENDING_PURCHASE_CANCELED -> {
+            case SUBSCRIPTION_PURCHASED,
+                 SUBSCRIPTION_RENEWED,
+                 SUBSCRIPTION_RECOVERED,
+                 SUBSCRIPTION_CANCELED,
+                 SUBSCRIPTION_RESTARTED,
+                 SUBSCRIPTION_DEFERRED,
+                 SUBSCRIPTION_IN_GRACE_PERIOD,
+                 SUBSCRIPTION_ON_HOLD,
+                 SUBSCRIPTION_PAUSED,
+                 SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED,
+                 SUBSCRIPTION_EXPIRED -> {
+                entitlementSyncService.syncPurchaseTokenFromRtdn(
+                        purchaseToken,
+                        eventTime
+                );
+
+                log.info(
+                        "rtdn_subscription_sync_requested messageId={} type={} tokenHash={}",
+                        messageId,
+                        notificationType,
+                        tokenHash
+                );
+            }
+
+            case SUBSCRIPTION_REVOKED,
+                 SUBSCRIPTION_PENDING_PURCHASE_CANCELED -> {
+                /*
+                 * revoke / pending cancelled 可以先立即關閉已綁定 token。
+                 * 若 token 是新 token 且尚未綁定，syncPurchaseTokenFromRtdn 仍有機會透過 linkedPurchaseToken 找回 user。
+                 */
+                entitlementSyncService.closeByPurchaseTokenHash(
+                        tokenHash,
+                        "REVOKED",
+                        eventTime
+                );
+
+                entitlementSyncService.syncPurchaseTokenFromRtdn(
+                        purchaseToken,
+                        eventTime
+                );
+
                 referralBillingBridgeService.markRefundedOrRevoked(
                         tokenHash,
                         false,
                         eventTime
                 );
-                log.info("rtdn_subscription_rejected messageId={} type={} tokenHash={}",
-                        messageId, notificationType, tokenHash);
+
+                log.info(
+                        "rtdn_subscription_closed messageId={} type={} tokenHash={}",
+                        messageId,
+                        notificationType,
+                        tokenHash
+                );
             }
 
-            default -> log.info("rtdn_subscription_no_referral_action messageId={} type={}",
-                    messageId, notificationType);
+            default -> log.info(
+                    "rtdn_subscription_unknown_type messageId={} type={}",
+                    messageId,
+                    notificationType
+            );
         }
     }
 
@@ -104,7 +175,21 @@ public class GoogleRtdnService {
             return;
         }
 
-        String tokenHash = sha256Hex(purchaseToken);
+        String tokenHash = EntitlementSyncService.sha256Hex(purchaseToken);
+
+        entitlementSyncService.closeByPurchaseTokenHash(
+                tokenHash,
+                "REVOKED",
+                eventTime
+        );
+
+        /*
+         * 如果 voided token 是新 token，仍嘗試透過 linkedPurchaseToken 回查 user。
+         */
+        entitlementSyncService.syncPurchaseTokenFromRtdn(
+                purchaseToken,
+                eventTime
+        );
 
         referralBillingBridgeService.markRefundedOrRevoked(
                 tokenHash,
@@ -112,7 +197,11 @@ public class GoogleRtdnService {
                 eventTime
         );
 
-        log.info("rtdn_voided_purchase_rejected messageId={} tokenHash={}", messageId, tokenHash);
+        log.info(
+                "rtdn_voided_purchase_closed messageId={} tokenHash={}",
+                messageId,
+                tokenHash
+        );
     }
 
     private Instant resolveEventTime(JsonNode root) {
@@ -125,16 +214,6 @@ public class GoogleRtdnService {
             return Instant.ofEpochMilli(Long.parseLong(millisText));
         } catch (Exception ignored) {
             return Instant.now();
-        }
-    }
-
-    private static String sha256Hex(String s) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] out = md.digest(s.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(out);
-        } catch (Exception e) {
-            throw new IllegalStateException("SHA256_FAILED", e);
         }
     }
 }
