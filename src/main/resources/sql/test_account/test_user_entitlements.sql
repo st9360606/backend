@@ -302,18 +302,18 @@ WHERE user_id = 1
 
 
 /**
-| 情境 ID | 情境名稱            | entitlement_type | status      | autoRenew | valid_to_utc | revoked_at_utc | subscription_state            | 預期 premiumStatus | Onboarding 登入後預期導頁                      |   是否必測 |
-| ----- | --------------- | ---------------- | ----------- | --------: | ------------ | -------------- | ----------------------------- | ---------------- | --------------------------------------- | -----: |
-| A     | 月訂閱有效           | `MONTHLY`        | `ACTIVE`    |    `true` | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_ACTIVE`   | `PREMIUM`        | `HOME`                                  |      ✅ |
-| B     | 年訂閱有效           | `YEARLY`         | `ACTIVE`    |    `true` | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_ACTIVE`   | `PREMIUM`        | `HOME`                                  |      ✅ |
-| C     | Trial 試用中       | `TRIAL`          | `ACTIVE`    |    `NULL` | 未過期          | `NULL`         | `TRIAL_ACTIVE`                | `TRIAL`          | `HOME`                                  |      ✅ |
-| D     | Trial 已過期       | `TRIAL`          | `EXPIRED`   |    `NULL` | 已過期          | `NULL`         | `TRIAL_EXPIRED`               | `FREE`           | `ONBOARD_SUBSCRIPTION`                  |      ✅ |
-| E     | 月訂閱取消續訂但尚未到期    | `MONTHLY`        | `ACTIVE`    |   `false` | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_CANCELED` | `PREMIUM`        | `HOME`                                  |      ✅ |
-| F     | 月訂閱已過期          | `MONTHLY`        | `EXPIRED`   |   `false` | 已過期          | `NULL`         | `SUBSCRIPTION_STATE_EXPIRED`  | `FREE`           | `ONBOARD_SUBSCRIPTION` 或 `SUBSCRIPTION` |      ✅ |
-| G     | 月訂閱退款 / 撤銷      | `MONTHLY`        | `REVOKED`   |   `false` | 通常現在或過去      | 有值             | `SUBSCRIPTION_STATE_REVOKED`  | `FREE`           | `ONBOARD_SUBSCRIPTION` 或 `SUBSCRIPTION` |      ✅ |
-| J     | 年訂閱取消續訂但尚未到期    | `YEARLY`         | `ACTIVE`    |   `false` | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_CANCELED` | `PREMIUM`        | `HOME`                                  |      ✅ |
-| K     | 年訂閱已過期          | `YEARLY`         | `EXPIRED`   |   `false` | 已過期          | `NULL`         | `SUBSCRIPTION_STATE_EXPIRED`  | `FREE`           | `ONBOARD_SUBSCRIPTION` 或 `SUBSCRIPTION` |      ✅ |
-| L     | 年訂閱取消且已過期       | `YEARLY`         | `CANCELLED` |   `false` | 已過期          | `NULL`         | `SUBSCRIPTION_STATE_CANCELED` | `FREE`           | `ONBOARD_SUBSCRIPTION` 或 `SUBSCRIPTION` |      ✅ |
-| M     | 年訂閱退款 / 撤銷      | `YEARLY`         | `REVOKED`   |   `false` | 通常現在或過去      | 有值             | `SUBSCRIPTION_STATE_REVOKED`  | `FREE`           | `ONBOARD_SUBSCRIPTION` 或 `SUBSCRIPTION` |      ✅ |
-| H     | 髒資料：ACTIVE 但已過期 | `MONTHLY`        | `ACTIVE`    |    `true` | 已過期          | `NULL`         | `SUBSCRIPTION_STATE_ACTIVE`   | `FREE`           | 不可進 `HOME`                              | ✅ 防呆必測 |
+|情境 ID | 情境名稱                  | entitlement_type | status      | autoRenew  | valid_to_utc   | revoked_at_utc | subscription_state              | 預期 premiumStatus | Onboarding 登入後預期導頁              | 是否必測 |
+| ----- | ------------------------ | ---------------- | ----------- | --------: | --------------  | -------------  | ------------------------------- | ----------------- | ------------------------------------ | ------: |
+| A     | 月訂閱有效                | `MONTHLY`        | `ACTIVE`    |    `true`  | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_ACTIVE`      | `PREMIUM`        | `HOME`                               |      ✅ |
+| B     | 年訂閱有效                | `YEARLY`         | `ACTIVE`    |    `true`  | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_ACTIVE`      | `PREMIUM`        | `HOME`                               |      ✅ |
+| C     | Trial 試用中             | `TRIAL`          | `ACTIVE`    |    `NULL`  | 未過期          | `NULL`         | `TRIAL_ACTIVE`                   | `TRIAL`          | `HOME`                               |      ✅ |
+| D     | Trial 已過期             | `TRIAL`          | `EXPIRED`   |    `NULL`  | 已過期          | `NULL`         | `TRIAL_EXPIRED`                  | `FREE`           | `ONBOARD_SUBSCRIPTION`               |      ✅ |
+| E     | 月訂閱取消續訂但尚未到期    | `MONTHLY`        | `ACTIVE`    |   `false`  | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_CANCELED`    | `PREMIUM`        | `HOME`                               |      ✅ |
+| F     | 月訂閱已過期              | `MONTHLY`        | `EXPIRED`   |   `false`  | 已過期          | `NULL`         | `SUBSCRIPTION_STATE_EXPIRED`     | `FREE`           | `ONBOARD_SUBSCRIPTION`               |      ✅ |
+| G     | 月訂閱退款 / 撤銷         | `MONTHLY`        | `REVOKED`   |   `false`  | 通常現在或過去    | 有值            | `SUBSCRIPTION_STATE_REVOKED`    | `FREE`           | `ONBOARD_SUBSCRIPTION`               |      ✅ |
+| J     | 年訂閱取消續訂但尚未到期    | `YEARLY`         | `ACTIVE`    |   `false`  | 未過期          | `NULL`         | `SUBSCRIPTION_STATE_CANCELED`    | `PREMIUM`        | `HOME`                               |      ✅ |
+| K     | 年訂閱已過期              | `YEARLY`         | `EXPIRED`   |   `false`  | 已過期          | `NULL`         | `SUBSCRIPTION_STATE_EXPIRED`     | `FREE`           | `ONBOARD_SUBSCRIPTION`               |      ✅ |
+| L     | 年訂閱取消且已過期         | `YEARLY`         | `CANCELLED` |   `false`  | 已過期          | `NULL`         | `SUBSCRIPTION_STATE_CANCELED`    | `FREE`           | `ONBOARD_SUBSCRIPTION`               |      ✅ |
+| M     | 年訂閱退款 / 撤銷         | `YEARLY`         | `REVOKED`   |   `false`  | 通常現在或過去    | 有值           | `SUBSCRIPTION_STATE_REVOKED`     | `FREE`           | `ONBOARD_SUBSCRIPTION`               |      ✅ |
+| H     | 髒資料：ACTIVE 但已過期   | `MONTHLY`        | `ACTIVE`    |    `true`  | 已過期           | `NULL`        | `SUBSCRIPTION_STATE_ACTIVE`      | `FREE`           | 不可進 `HOME`                         | ✅ 防呆必測 |
 */
