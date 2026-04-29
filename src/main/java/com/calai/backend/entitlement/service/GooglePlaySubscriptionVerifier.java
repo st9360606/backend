@@ -23,6 +23,10 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
 
     @Override
     public VerifiedSubscription verify(String purchaseToken) throws Exception {
+        if (props.isDevFakeTokensEnabled() && isDevFakePurchaseToken(purchaseToken)) {
+            return verifyDevFakeSubscription(purchaseToken);
+        }
+
         SubscriptionPurchaseV2 v2 = publisher.purchases()
                 .subscriptionsv2()
                 .get(props.getPackageName(), purchaseToken)
@@ -84,6 +88,52 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
                 v2.getLinkedPurchaseToken(),
                 v2.getTestPurchase() != null,
                 isPendingState(state)
+        );
+    }
+
+    private static final String DEV_FAKE_TOKEN_PREFIX = "fake-dev-sub::";
+
+    private static boolean isDevFakePurchaseToken(String purchaseToken) {
+        return purchaseToken != null && purchaseToken.startsWith(DEV_FAKE_TOKEN_PREFIX);
+    }
+
+    private static VerifiedSubscription verifyDevFakeSubscription(String purchaseToken) {
+        String[] parts = purchaseToken.split("::");
+
+        if (parts.length < 4) {
+            return inactive(
+                    "DEV_FAKE_TOKEN_INVALID",
+                    "ACKNOWLEDGEMENT_STATE_UNSPECIFIED",
+                    null,
+                    null,
+                    true,
+                    false
+            );
+        }
+
+        String productId = parts[1];
+        String phase = parts[2];
+
+        boolean freeTrial = "trial".equalsIgnoreCase(phase);
+        boolean yearly = productId != null && productId.toLowerCase().contains("yearly");
+
+        Instant expiry = Instant.now().plusSeconds(
+                freeTrial ? 3L * 86_400L : yearly ? 365L * 86_400L : 30L * 86_400L
+        );
+
+        return new VerifiedSubscription(
+                true,
+                productId,
+                expiry,
+                freeTrial,
+                "SUBSCRIPTION_STATE_ACTIVE",
+                "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+                true,
+                freeTrial ? "FREE_TRIAL" : "BASE",
+                "DEV-FAKE-ORDER-" + System.currentTimeMillis(),
+                null,
+                true,
+                false
         );
     }
 

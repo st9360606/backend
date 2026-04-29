@@ -41,28 +41,76 @@ public class EntitlementSyncService {
 
         for (var p : req.purchases()) {
             String token = (p == null) ? null : p.purchaseToken();
-            if (token == null || token.isBlank()) continue;
+            if (token == null || token.isBlank()) {
+                continue;
+            }
+
+            String tokenHash = sha256Hex(token);
 
             SubscriptionVerifier.VerifiedSubscription v;
             try {
                 v = verifier.verify(token);
             } catch (Exception ex) {
-                log.warn("entitlement_sync_verify_failed userId={} productId={} error={}",
-                        userId, p == null ? null : p.productId(), ex.toString());
+                /*
+                 * Google Play 驗證 API 失敗時，不要直接關閉 entitlement。
+                 * 原因：
+                 * - 可能只是暫時網路錯誤
+                 * - 可能 Google Play API 暫時不可用
+                 * - 若此時誤關閉，會造成有效付費用戶被降級
+                 */
+                log.warn(
+                        "entitlement_sync_verify_failed userId={} productId={} tokenHash={} error={}",
+                        userId,
+                        p == null ? null : p.productId(),
+                        tokenHash,
+                        ex.toString()
+                );
                 continue;
             }
 
+            /*
+             * ✅ 關鍵修正：
+             * 如果 client 帶上來的 purchaseToken 經 Google Play 驗證後已經不是 active，
+             * 要主動關閉 DB 內同 tokenHash 的舊 ACTIVE entitlement。
+             *
+             * 這可以補 RTDN 延遲或漏接時的風險：
+             * - 月訂閱過期
+             * - 年訂閱過期
+             * - 月訂閱退款撤銷
+             * - 年訂閱退款撤銷
+             */
             if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) {
+                entitlementRepo.closeActiveByPurchaseTokenHash(
+                        tokenHash,
+                        "EXPIRED",
+                        now,
+                        null,
+                        now
+                );
+
+                log.info(
+                        "entitlement_sync_inactive_token_closed userId={} tokenHash={} subscriptionState={} expiryTimeUtc={} productId={}",
+                        userId,
+                        tokenHash,
+                        v.subscriptionState(),
+                        v.expiryTimeUtc(),
+                        v.productId()
+                );
+
                 continue;
             }
 
             String tier = productProps.toTierOrNull(v.productId());
             if (tier == null) {
-                log.warn("entitlement_sync_unknown_product userId={} productId={}", userId, v.productId());
+                log.warn(
+                        "entitlement_sync_unknown_product userId={} productId={} tokenHash={}",
+                        userId,
+                        v.productId(),
+                        tokenHash
+                );
                 continue;
             }
 
-            String tokenHash = sha256Hex(token);
             if (best == null || v.expiryTimeUtc().isAfter(best.verified().expiryTimeUtc())) {
                 best = new VerifiedCandidate(tokenHash, token, tier, v);
             }

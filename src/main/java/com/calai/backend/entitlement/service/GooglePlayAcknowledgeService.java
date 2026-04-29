@@ -22,6 +22,13 @@ public class GooglePlayAcknowledgeService implements PurchaseAcknowledger {
             String purchaseToken,
             String acknowledgementState
     ) {
+        if (props.isDevFakeTokensEnabled()
+                && purchaseToken != null
+                && purchaseToken.startsWith("fake-dev-sub::")) {
+            log.info("dev_fake_purchase_ack_skipped productId={}", productId);
+            return true;
+        }
+
         if (productId == null || productId.isBlank()) return false;
         if (purchaseToken == null || purchaseToken.isBlank()) return false;
 

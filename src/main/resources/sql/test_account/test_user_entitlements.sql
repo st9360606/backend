@@ -317,3 +317,17 @@ WHERE user_id = 1
 | M     | 年訂閱退款 / 撤銷         | `YEARLY`         | `REVOKED`   |   `false`  | 通常現在或過去    | 有值           | `SUBSCRIPTION_STATE_REVOKED`     | `FREE`           | `ONBOARD_SUBSCRIPTION`               |      ✅ |
 | H     | 髒資料：ACTIVE 但已過期   | `MONTHLY`        | `ACTIVE`    |    `true`  | 已過期           | `NULL`        | `SUBSCRIPTION_STATE_ACTIVE`      | `FREE`           | 不可進 `HOME`                         | ✅ 防呆必測 |
 */
+
+
+-- 試用3天後，處理方式
+/**
+| Google Play 狀態                  | 你的 App 狀態           | UI 顯示                       | Camera      |
+| -------------------------------- | ---------------------- | ---------------------------- | ----------- |
+| 試用中，未取消                     | `TRIAL`                | `TRIAL / 3 days left`        | 可用         |
+| 試用中，已取消                     | `TRIAL`                | `TRIAL / Until YYYY-MM-DD`   | 可用到試用結束 |
+| 第 4 天，扣款成功                  | `PREMIUM`              | `PREMIUM / Until YYYY-MM-DD` | 可用         |
+| 第 4 天才取消，已扣年費             | `PREMIUM`              | `PREMIUM / Until YYYY-MM-DD` | 可用到年費到期 |
+| 第 4 天扣款失敗但 grace period     | `PREMIUM` 				| `Payment issue`              | 可用，如果寬限期到了還是無法成功扣款則會變成不可用Camera   |
+| account hold / expired          | `FREE`                  | `FREE / Upgrade`             | 不可用        |
+| refunded / revoked              | `FREE`                  | `FREE / Upgrade`             | 不可用        |
+*/

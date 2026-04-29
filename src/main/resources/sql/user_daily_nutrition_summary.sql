@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS user_daily_nutrition_summary;
+
 CREATE TABLE user_daily_nutrition_summary
 (
     id                       BIGINT       NOT NULL AUTO_INCREMENT,
