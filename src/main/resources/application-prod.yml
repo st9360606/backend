@@ -77,6 +77,14 @@ app:
   entitlement:
     expiry-worker:
       fixed-delay: PT10M
+    google-play-reverify:
+      fixed-delay: PT30M
+      stale-after: PT6H
+      batch-size: 50
+    google-play-ack-retry:
+      fixed-delay: PT10M
+      stale-after: PT10M
+      batch-size: 50
   ai:
     quota:
       cooldown:
@@ -147,8 +155,9 @@ app:
     play:
       enabled: true
       package-name: "com.calai.bitecal"
-      service-account-json-path: "${GOOGLE_PLAY_BITE_CAL_SA_JSON_PATH:}"  # dev 可用
+      service-account-json-path: "${GOOGLE_PLAY_BITE_CAL_SA_JSON_PATH:}"  # prod 必須設定
       dev-fake-tokens-enabled: false  # Prod must be false
+      purchase-token-encryption-key: "${GOOGLE_PLAY_PURCHASE_TOKEN_AES_KEY:}" # prod 必須設定
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
   billing:
     products:

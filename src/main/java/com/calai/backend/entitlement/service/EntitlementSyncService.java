@@ -28,6 +28,7 @@ public class EntitlementSyncService {
     private final BillingProductProperties productProps;
     private final ReferralBillingBridgeService referralBillingBridgeService;
     private final PurchaseAcknowledger purchaseAcknowledger;
+    private final PurchaseTokenCrypto purchaseTokenCrypto;
 
     @Transactional
     public EntitlementSyncResponse sync(Long userId, EntitlementSyncRequest req) {
@@ -82,9 +83,13 @@ public class EntitlementSyncService {
             if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) {
                 entitlementRepo.closeActiveByPurchaseTokenHash(
                         tokenHash,
-                        "EXPIRED",
+                        inactiveCloseStatus(v.subscriptionState()),
                         now,
-                        null,
+                        inactiveRevokedAt(v.subscriptionState(), now),
+                        now,
+                        v.subscriptionState(),
+                        paymentState(v.subscriptionState()),
+                        inactiveCloseReason(v.subscriptionState()),
                         now
                 );
 
@@ -156,13 +161,20 @@ public class EntitlementSyncService {
         }
 
         if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) {
+            Instant effectiveEventTime = eventTime == null ? now : eventTime;
+
             entitlementRepo.closeActiveByPurchaseTokenHash(
                     tokenHash,
-                    "EXPIRED",
+                    inactiveCloseStatus(v.subscriptionState()),
                     now,
-                    null,
-                    eventTime == null ? now : eventTime
+                    inactiveRevokedAt(v.subscriptionState(), effectiveEventTime),
+                    effectiveEventTime,
+                    v.subscriptionState(),
+                    paymentState(v.subscriptionState()),
+                    inactiveCloseReason(v.subscriptionState()),
+                    now
             );
+
             return buildSummaryResponse(userId, now);
         }
 
@@ -190,12 +202,26 @@ public class EntitlementSyncService {
     @Transactional
     public void closeByPurchaseTokenHash(String purchaseTokenHash, String status, Instant eventTime) {
         Instant now = Instant.now();
+        Instant effectiveEventTime = eventTime == null ? now : eventTime;
+
+        String paymentState = "REVOKED".equalsIgnoreCase(status)
+                ? "REVOKED"
+                : "EXPIRED";
+
+        String closeReason = "REVOKED".equalsIgnoreCase(status)
+                ? "GOOGLE_PLAY_REVOKED"
+                : "GOOGLE_PLAY_EXPIRED";
+
         entitlementRepo.closeActiveByPurchaseTokenHash(
                 purchaseTokenHash,
                 status,
                 now,
-                "REVOKED".equals(status) ? (eventTime == null ? now : eventTime) : null,
-                eventTime == null ? now : eventTime
+                "REVOKED".equalsIgnoreCase(status) ? effectiveEventTime : null,
+                effectiveEventTime,
+                null,
+                paymentState,
+                closeReason,
+                now
         );
     }
 
@@ -252,9 +278,14 @@ public class EntitlementSyncService {
         e.setValidFromUtc(now);
         e.setValidToUtc(v.expiryTimeUtc());
         e.setLastVerifiedAtUtc(now);
+        e.setLastGoogleVerifiedAtUtc(now);
+        e.setPurchaseTokenCiphertext(purchaseTokenCrypto.encryptOrNull(rawPurchaseToken));
         e.setSource("GOOGLE_PLAY");
         e.setProductId(v.productId());
         e.setSubscriptionState(v.subscriptionState());
+        e.setPaymentState(paymentState(v.subscriptionState()));
+        e.setGraceUntilUtc(null);
+        e.setCloseReason(null);
         e.setOfferPhase(v.offerPhase());
         e.setAutoRenewEnabled(v.autoRenewEnabled());
         e.setAcknowledgementState(v.acknowledgementState());
@@ -350,8 +381,7 @@ public class EntitlementSyncService {
             );
         }
 
-        boolean paymentIssue =
-                "SUBSCRIPTION_STATE_IN_GRACE_PERIOD".equals(e.getSubscriptionState());
+        boolean paymentIssue = isPaymentIssueState(e.getSubscriptionState());
 
         return new EntitlementSyncResponse(
                 "ACTIVE",
@@ -370,6 +400,50 @@ public class EntitlementSyncService {
             String tier,
             SubscriptionVerifier.VerifiedSubscription verified
     ) {}
+
+    static boolean isPaymentIssueState(String state) {
+        return "SUBSCRIPTION_STATE_IN_GRACE_PERIOD".equals(state);
+    }
+
+    static boolean isHardBlockedState(String state) {
+        return "SUBSCRIPTION_STATE_PENDING".equals(state)
+                || "SUBSCRIPTION_STATE_ON_HOLD".equals(state)
+                || "SUBSCRIPTION_STATE_EXPIRED".equals(state)
+                || "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED".equals(state)
+                || "SUBSCRIPTION_STATE_PAUSED".equals(state);
+    }
+
+    static String paymentState(String state) {
+        if ("SUBSCRIPTION_STATE_IN_GRACE_PERIOD".equals(state)) return "GRACE";
+        if ("SUBSCRIPTION_STATE_ON_HOLD".equals(state)) return "ON_HOLD";
+        if ("SUBSCRIPTION_STATE_EXPIRED".equals(state)) return "EXPIRED";
+        if ("SUBSCRIPTION_STATE_PENDING".equals(state)) return "PENDING";
+        if ("SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED".equals(state)) return "PENDING_PURCHASE_CANCELED";
+        if ("SUBSCRIPTION_STATE_PAUSED".equals(state)) return "ON_HOLD";
+        if ("SUBSCRIPTION_STATE_CANCELED".equals(state)) return "OK";
+        if ("SUBSCRIPTION_STATE_ACTIVE".equals(state)) return "OK";
+        return "UNKNOWN";
+    }
+
+    static String inactiveCloseStatus(String state) {
+        if ("SUBSCRIPTION_STATE_REVOKED".equals(state)) return "REVOKED";
+        return "EXPIRED";
+    }
+
+    static String inactiveCloseReason(String state) {
+        if ("SUBSCRIPTION_STATE_ON_HOLD".equals(state)) return "GOOGLE_PLAY_ON_HOLD";
+        if ("SUBSCRIPTION_STATE_EXPIRED".equals(state)) return "GOOGLE_PLAY_EXPIRED";
+        if ("SUBSCRIPTION_STATE_PENDING".equals(state)) return "GOOGLE_PLAY_PENDING_PURCHASE";
+        if ("SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED".equals(state)) return "GOOGLE_PLAY_PENDING_PURCHASE_CANCELED";
+        if ("SUBSCRIPTION_STATE_PAUSED".equals(state)) return "GOOGLE_PLAY_PAUSED";
+        if ("SUBSCRIPTION_STATE_REVOKED".equals(state)) return "GOOGLE_PLAY_REVOKED";
+        if (state == null || state.isBlank()) return "GOOGLE_PLAY_INACTIVE_UNKNOWN";
+        return "GOOGLE_PLAY_INACTIVE_" + state;
+    }
+
+    static Instant inactiveRevokedAt(String state, Instant eventTime) {
+        return "SUBSCRIPTION_STATE_REVOKED".equals(state) ? eventTime : null;
+    }
 
     private static int calcDaysLeft(Instant now, Instant end) {
         if (end == null || !end.isAfter(now)) return 0;
@@ -475,6 +549,14 @@ public class EntitlementSyncService {
                     ? effectiveEventTime
                     : null;
 
+            String closePaymentState = "REVOKED".equals(closeStatus)
+                    ? "REVOKED"
+                    : paymentState(verified.subscriptionState());
+
+            String closeReason = "REVOKED".equals(closeStatus)
+                    ? "GOOGLE_PLAY_REVOKED"
+                    : inactiveCloseReason(verified.subscriptionState());
+
             log.info(
                     "rtdn_linked_token_inactive_close_previous userId={} tokenHash={} linkedHash={} subscriptionState={} closeStatus={}",
                     previous.getUserId(),
@@ -489,7 +571,11 @@ public class EntitlementSyncService {
                     closeStatus,
                     now,
                     revokedAt,
-                    effectiveEventTime
+                    effectiveEventTime,
+                    verified.subscriptionState(),
+                    closePaymentState,
+                    closeReason,
+                    now
             );
 
             entitlementRepo.closeActiveByPurchaseTokenHash(
@@ -497,7 +583,11 @@ public class EntitlementSyncService {
                     closeStatus,
                     now,
                     revokedAt,
-                    effectiveEventTime
+                    effectiveEventTime,
+                    verified.subscriptionState(),
+                    closePaymentState,
+                    closeReason,
+                    now
             );
 
             return buildSummaryResponse(previous.getUserId(), now);
@@ -526,5 +616,38 @@ public class EntitlementSyncService {
         );
 
         return buildSummaryResponse(previous.getUserId(), now);
+    }
+
+    @Transactional
+    public void retryAcknowledgeForStoredToken(String entitlementId, Instant now) {
+        UserEntitlementEntity e = entitlementRepo.findById(entitlementId).orElse(null);
+        if (e == null) return;
+
+        if (!"GOOGLE_PLAY".equals(e.getSource())) return;
+        if (!"ACTIVE".equals(e.getStatus())) return;
+        if ("ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED".equals(e.getAcknowledgementState())) return;
+
+        String token = purchaseTokenCrypto.decryptOrNull(e.getPurchaseTokenCiphertext());
+        if (token == null || token.isBlank()) {
+            log.warn(
+                    "ack_retry_skipped_token_missing entitlementId={} userId={} tokenHash={}",
+                    e.getId(),
+                    e.getUserId(),
+                    e.getPurchaseTokenHash()
+            );
+            return;
+        }
+
+        boolean ackOk = purchaseAcknowledger.acknowledgeWithRetry(
+                e.getProductId(),
+                token,
+                e.getAcknowledgementState()
+        );
+
+        if (ackOk) {
+            e.setAcknowledgementState("ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED");
+            e.setUpdatedAtUtc(now);
+            entitlementRepo.save(e);
+        }
     }
 }
