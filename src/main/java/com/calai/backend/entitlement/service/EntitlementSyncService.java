@@ -329,7 +329,8 @@ public class EntitlementSyncService {
                     "FREE",
                     null,
                     null,
-                    null
+                    null,
+                    false
             );
         }
 
@@ -344,9 +345,13 @@ public class EntitlementSyncService {
                     "TRIAL",
                     validTo,
                     validTo,
-                    calcDaysLeft(now, validTo)
+                    calcDaysLeft(now, validTo),
+                    false
             );
         }
+
+        boolean paymentIssue =
+                "SUBSCRIPTION_STATE_IN_GRACE_PERIOD".equals(e.getSubscriptionState());
 
         return new EntitlementSyncResponse(
                 "ACTIVE",
@@ -354,7 +359,8 @@ public class EntitlementSyncService {
                 "PREMIUM",
                 validTo,
                 null,
-                null
+                null,
+                paymentIssue
         );
     }
 

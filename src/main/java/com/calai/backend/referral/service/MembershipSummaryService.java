@@ -44,11 +44,17 @@ public class MembershipSummaryService {
                 .findTop1ByUserIdOrderByGrantedAtUtcDesc(userId)
                 .orElse(null);
 
+        boolean paymentIssue =
+                PremiumStatus.PREMIUM.name().equals(premiumStatus)
+                        && active != null
+                        && "SUBSCRIPTION_STATE_IN_GRACE_PERIOD".equals(active.getSubscriptionState());
+
         return new MembershipSummaryResponse(
                 premiumStatus,
                 currentPremiumUntil,
                 trialEndsAt,
                 trialDaysLeft,
+                paymentIssue,
                 latest == null ? null : latest.getSourceType(),
                 latest == null ? null : latest.getOldPremiumUntil(),
                 latest == null ? null : latest.getNewPremiumUntil(),

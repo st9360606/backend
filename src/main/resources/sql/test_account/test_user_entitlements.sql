@@ -331,3 +331,41 @@ WHERE user_id = 1
 | account hold / expired          | `FREE`                  | `FREE / Upgrade`             | 不可用        |
 | refunded / revoked              | `FREE`                  | `FREE / Upgrade`             | 不可用        |
 */
+
+-- TRIAL方案、FREE方案、PREMIUM方案
+/**
+| Google Play 狀態                                 | 你的 App 狀態 | UI 顯示     | Camera |
+| ------------------------------------------------| --------- | ------------- | ------ |
+| 月訂閱有效 (`ACTIVE`, expiry > now)               | `PREMIUM` | `PREMIUM `    | ✅      |
+| 年訂閱有效 (`ACTIVE`, expiry > now)               | `PREMIUM` | `PREMIUM `    | ✅      |
+| 月訂閱取消續訂但尚未到期 (`CANCELED`, expiry > now) | `PREMIUM` | `PREMIUM `     | ✅ 可用到月費到期     |
+| 年訂閱取消續訂但尚未到期 (`CANCELED`, expiry > now) | `PREMIUM` | `PREMIUM `     | ✅ 可用到年費到期     |
+| 月訂閱已過期 (`EXPIRED`, expiry <= now)           | `FREE`    | `FREE`         | ❌      |
+| 年訂閱已過期 (`EXPIRED`, expiry <= now)           | `FREE`    | `FREE`         | ❌      |
+| 年訂閱取消且已過期                                 | `FREE`    | `FREE`        | ❌      |
+| 月訂閱退款 / 撤銷 (`REVOKED`)                     | `FREE`    | `FREE`         | ❌      |
+| 年訂閱退款 / 撤銷 (`REVOKED`)                     | `FREE`    | `FREE`          | ❌      |
+
+
+| Google Play 狀態                                              | 你的 App 狀態 | UI 顯示       | Camera |
+| ------------------------------------------------------------ | ------------ | ------------ | ------ |
+| Trial 試用中 (`FREE_TRIAL`, expiry > now, autoRenew=true)     | `TRIAL`      | `TRIAL`      | ✅ 可用到試用結束   |
+| 試用中，未取消訂閱                                              | `TRIAL`      | `TRIAL`      | ✅ 可用到試用結束     |
+| 試用中，已取消訂閱 (`CANCELED`, expiry > now)                   | `TRIAL`      | `TRIAL`      | ✅ 可用到試用結束    |
+| Trial 已過期（且未續訂）                                        | `FREE`       | `FREE`       | ❌      |
+
+| Google Play 狀態                                   | 你的 App 狀態 | UI 顯示    | Camera |
+| ------------------------------------------------- | -------------| --------- | ------- |
+| 第 4 天扣款成功 (`ACTIVE`, BASE phase)              | `PREMIUM`    | `PREMIUM` |   ✅   |
+| 第 4 天才取消（已扣年費） (`CANCELED`, expiry > now)  | `PREMIUM`    | `PREMIUM` |   ✅可用到年費到期   |
+
+| Google Play 狀態                                   | 你的 App 狀態 | UI 顯示            | Camera |
+| ------------------------------------------------- | ------------ | ----------------- | ------ |
+| 第 4 天扣款失敗 → grace period (`IN_GRACE_PERIOD`)  | `PREMIUM`    | `Payment Issue`   | ✅可用，如果寬限期到了還是無法成功扣款則會變成不能用Camera功能   |
+| account hold (`ON_HOLD`)                          | `FREE`       | `FREE`            | ❌     |
+| expired（無付款成功）                               | `FREE`       | `FREE`            | ❌     |
+
+| Google Play 狀態                   | 你的 App 狀態        | UI 顯示           | Camera |
+| --------------------------------- | ------------------- | ---------------- | ------ |
+| 髒資料：`ACTIVE` 但 `expiry <= now` | ❌ 必須強制當 `FREE` | `FREE`           | ❌      |
+*/

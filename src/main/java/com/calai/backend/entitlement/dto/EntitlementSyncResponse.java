@@ -8,5 +8,6 @@ public record EntitlementSyncResponse(
         String premiumStatus,       // TRIAL / PREMIUM / FREE
         Instant currentPremiumUntil,
         Instant trialEndsAt,
-        Integer trialDaysLeft
+        Integer trialDaysLeft,
+        Boolean paymentIssue
 ) {}
