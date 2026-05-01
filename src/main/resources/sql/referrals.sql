@@ -45,13 +45,21 @@ CREATE TABLE IF NOT EXISTS membership_reward_ledger
     source_type        VARCHAR(32)  NOT NULL,
     source_ref_id      BIGINT       NOT NULL,
     grant_status       VARCHAR(16)  NOT NULL,
+    reward_channel     VARCHAR(32)  NULL,
+    google_purchase_token_hash CHAR(64) NULL,
+    google_defer_status VARCHAR(32) NULL,
+    google_defer_response_json JSON NULL,
+    error_code         VARCHAR(64)  NULL,
+    error_message      VARCHAR(500) NULL,
     days_added         INT          NOT NULL,
     old_premium_until  DATETIME(6)  NULL,
     new_premium_until  DATETIME(6)  NULL,
     granted_at_utc     DATETIME(6)  NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY ux_membership_reward_source_ref (source_type, source_ref_id),
-    INDEX idx_membership_reward_user_granted (user_id, granted_at_utc)
+    INDEX idx_membership_reward_user_granted (user_id, granted_at_utc),
+    INDEX idx_membership_reward_google_token (google_purchase_token_hash),
+    INDEX idx_membership_reward_channel_status (reward_channel, google_defer_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS referral_risk_signals
@@ -98,7 +106,8 @@ CREATE TABLE IF NOT EXISTS user_notifications
     created_at_utc DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
     UNIQUE KEY ux_user_notifications_source (user_id, source_type, source_ref_id),
-    INDEX idx_user_notifications_user_created (user_id, created_at_utc)
+    INDEX idx_user_notifications_user_created (user_id, created_at_utc),
+    INDEX idx_user_notifications_user_source (user_id, source_type, source_ref_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS email_outbox
@@ -115,5 +124,6 @@ CREATE TABLE IF NOT EXISTS email_outbox
     sent_at_utc           DATETIME(6)  NULL,
     PRIMARY KEY (id),
     UNIQUE KEY ux_email_outbox_dedupe (dedupe_key),
-    INDEX idx_email_outbox_status_created (status, created_at_utc)
+    INDEX idx_email_outbox_status_created (status, created_at_utc),
+    INDEX idx_email_outbox_user_created (user_id, created_at_utc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
