@@ -5,7 +5,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.Objects;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Component
 public class InternalApiGuard {
@@ -28,11 +29,17 @@ public class InternalApiGuard {
             );
         }
 
-        if (!Objects.equals(expectedToken, actualToken)) {
+        if (!constantTimeEquals(expectedToken, actualToken)) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     "INVALID_INTERNAL_API_TOKEN"
             );
         }
+    }
+
+    private boolean constantTimeEquals(String expected, String actual) {
+        byte[] expectedBytes = expected.getBytes(StandardCharsets.UTF_8);
+        byte[] actualBytes = actual.getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(expectedBytes, actualBytes);
     }
 }

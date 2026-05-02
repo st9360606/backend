@@ -12,7 +12,8 @@ import java.time.Instant;
 @Table(name = "referral_claims",
         indexes = {
                 @Index(name = "idx_referral_claims_inviter_status", columnList = "inviter_user_id,status,verification_deadline_utc"),
-                @Index(name = "idx_referral_claims_status_deadline", columnList = "status,verification_deadline_utc")
+                @Index(name = "idx_referral_claims_status_deadline", columnList = "status,verification_deadline_utc"),
+                @Index(name = "idx_referral_claims_status_updated", columnList = "status,updated_at_utc")
         },
         uniqueConstraints = {
                 @UniqueConstraint(name = "ux_referral_claims_invitee", columnNames = "invitee_user_id"),

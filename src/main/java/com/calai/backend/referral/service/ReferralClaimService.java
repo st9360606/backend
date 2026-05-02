@@ -1,5 +1,6 @@
 package com.calai.backend.referral.service;
 
+import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import com.calai.backend.referral.domain.ReferralClaimStatus;
 import com.calai.backend.referral.domain.ReferralRejectReason;
 import com.calai.backend.referral.entity.ReferralClaimEntity;
@@ -15,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class ReferralClaimService {
     private final ReferralCodeService referralCodeService;
     private final ReferralClaimRepository claimRepository;
+    private final UserEntitlementRepository entitlementRepository;
 
     @Transactional
     public void claim(Long inviteeUserId, String rawPromoCode) {
@@ -28,6 +30,14 @@ public class ReferralClaimService {
         }
         if (claimRepository.findByInviteeUserId(inviteeUserId).isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ReferralRejectReason.INVITEE_ALREADY_CLAIMED.name());
+        }
+
+        /*
+         * Referral v1.3：invitee 必須完成「首次」有效付費訂閱。
+         * 若使用者歷史上已經有 Google Play paid subscription，不能再 claim referral。
+         */
+        if (entitlementRepository.existsAnyGooglePlayPaidSubscriptionHistory(inviteeUserId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ReferralRejectReason.INVITEE_ALREADY_SUBSCRIBED.name());
         }
 
         ReferralClaimEntity entity = new ReferralClaimEntity();

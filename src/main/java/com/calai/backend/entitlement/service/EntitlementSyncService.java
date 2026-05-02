@@ -81,6 +81,20 @@ public class EntitlementSyncService {
              * - 年訂閱退款撤銷
              */
             if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) {
+                /*
+                 * Referral v1.3 pending purchase fix:
+                 * Google Play pending purchase is not active yet, so it enters this inactive branch.
+                 * Still, we must persist the purchaseTokenHash on referral_claims so a later
+                 * SUBSCRIPTION_PENDING_PURCHASE_CANCELED RTDN can find and reject the claim.
+                 */
+                recordPendingReferralPurchaseIfNeeded(
+                        userId,
+                        tokenHash,
+                        v,
+                        now,
+                        "client_sync"
+                );
+
                 entitlementRepo.closeActiveByPurchaseTokenHash(
                         tokenHash,
                         inactiveCloseStatus(v.subscriptionState()),
@@ -162,6 +176,18 @@ public class EntitlementSyncService {
 
         if (!v.active() || v.expiryTimeUtc() == null || v.productId() == null) {
             Instant effectiveEventTime = eventTime == null ? now : eventTime;
+
+            /*
+             * Referral v1.3 pending purchase fix for RTDN-known token:
+             * pending is not active, but referral must remember the token hash.
+             */
+            recordPendingReferralPurchaseIfNeeded(
+                    userId,
+                    tokenHash,
+                    v,
+                    effectiveEventTime,
+                    "rtdn_known_token"
+            );
 
             entitlementRepo.closeActiveByPurchaseTokenHash(
                     tokenHash,
@@ -252,6 +278,15 @@ public class EntitlementSyncService {
         boolean newlyCreated = false;
         String previousType = e == null ? null : e.getEntitlementType();
 
+        /*
+         * Referral v1.3:
+         * 必須是 lifetime first paid subscription 才可觸發 referral verification。
+         * 這個查詢一定要在本次 entitlement save 之前執行，
+         * 否則新 paid row 會把自己算成 prior paid history。
+         */
+        boolean hadAnyPriorGooglePlayPaidHistory =
+                entitlementRepo.existsAnyGooglePlayPaidSubscriptionHistory(userId);
+
         if (e != null && !userId.equals(e.getUserId())) {
             log.warn(
                     "purchase_token_already_bound requestedUserId={} ownerUserId={} productId={} tokenHash={}",
@@ -333,6 +368,7 @@ public class EntitlementSyncService {
          */
         boolean becamePaid =
                 !v.freeTrial()
+                        && !hadAnyPriorGooglePlayPaidHistory
                         && (
                         newlyCreated
                                 || "TRIAL".equalsIgnoreCase(previousType)
@@ -347,7 +383,66 @@ public class EntitlementSyncService {
                     v.pending(),
                     v.testPurchase()
             );
+        } else if (allowReferralUpdate
+                && !v.freeTrial()
+                && hadAnyPriorGooglePlayPaidHistory
+                && (newlyCreated || "TRIAL".equalsIgnoreCase(previousType))) {
+            referralBillingBridgeService.onPaidSubscriptionNotEligible(
+                    userId,
+                    now,
+                    "INVITEE_ALREADY_SUBSCRIBED"
+            );
         }
+    }
+
+    /**
+     * Referral v1.3:
+     * Google Play pending purchase is not an active paid subscription yet, so it must not start
+     * the 7-day verification window and must not grant rewards. However, we still persist the
+     * purchaseTokenHash on the pending referral claim so a later
+     * SUBSCRIPTION_PENDING_PURCHASE_CANCELED RTDN can find and reject the claim.
+     *
+     * Important: SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED is intentionally excluded here.
+     * That terminal state is handled by RTDN close/revoke flow and must not be converted back
+     * into PENDING_SUBSCRIPTION.
+     */
+    private void recordPendingReferralPurchaseIfNeeded(
+            Long userId,
+            String purchaseTokenHash,
+            SubscriptionVerifier.VerifiedSubscription v,
+            Instant detectedAtUtc,
+            String source
+    ) {
+        if (userId == null || purchaseTokenHash == null || purchaseTokenHash.isBlank() || v == null) {
+            return;
+        }
+
+        if (!isPendingPurchaseState(v.subscriptionState())) {
+            return;
+        }
+
+        Instant resolvedDetectedAtUtc = detectedAtUtc == null ? Instant.now() : detectedAtUtc;
+
+        referralBillingBridgeService.onFirstPaidSubscriptionVerified(
+                userId,
+                purchaseTokenHash,
+                resolvedDetectedAtUtc,
+                v.autoRenewEnabled(),
+                true,
+                v.testPurchase()
+        );
+
+        log.info(
+                "referral_pending_purchase_recorded userId={} tokenHash={} subscriptionState={} source={}",
+                userId,
+                purchaseTokenHash,
+                v.subscriptionState(),
+                source
+        );
+    }
+
+    static boolean isPendingPurchaseState(String state) {
+        return "SUBSCRIPTION_STATE_PENDING".equals(state);
     }
 
     private EntitlementSyncResponse buildSummaryResponse(Long userId, Instant now) {
@@ -556,6 +651,30 @@ public class EntitlementSyncService {
             String closeReason = "REVOKED".equals(closeStatus)
                     ? "GOOGLE_PLAY_REVOKED"
                     : inactiveCloseReason(verified.subscriptionState());
+
+            /*
+             * Referral v1.3 pending purchase fix for linked RTDN tokens:
+             * If Google reports the new token as pending and it can be linked back to a known user,
+             * persist the pending token hash on the referral claim before returning.
+             */
+            recordPendingReferralPurchaseIfNeeded(
+                    previous.getUserId(),
+                    tokenHash,
+                    verified,
+                    effectiveEventTime,
+                    "rtdn_linked_token"
+            );
+
+            if (isPendingPurchaseState(verified.subscriptionState())) {
+                log.info(
+                        "rtdn_linked_pending_token_recorded_without_closing_previous userId={} tokenHash={} linkedHash={} subscriptionState={}",
+                        previous.getUserId(),
+                        tokenHash,
+                        linkedHash,
+                        verified.subscriptionState()
+                );
+                return buildSummaryResponse(previous.getUserId(), now);
+            }
 
             log.info(
                     "rtdn_linked_token_inactive_close_previous userId={} tokenHash={} linkedHash={} subscriptionState={} closeStatus={}",

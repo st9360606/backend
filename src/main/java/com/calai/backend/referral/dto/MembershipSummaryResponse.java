@@ -9,6 +9,9 @@ public record MembershipSummaryResponse(
         Integer trialDaysLeft,
         Boolean paymentIssue,
         String latestRewardSource,
+        String latestRewardChannel,
+        String latestRewardGrantStatus,
+        String latestGoogleDeferStatus,
         Instant latestOldPremiumUntil,
         Instant latestNewPremiumUntil,
         Instant latestGrantedAtUtc

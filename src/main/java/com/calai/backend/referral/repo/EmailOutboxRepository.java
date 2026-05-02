@@ -4,6 +4,7 @@ import com.calai.backend.referral.entity.EmailOutboxEntity;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 
@@ -17,5 +18,15 @@ public interface EmailOutboxRepository extends JpaRepository<EmailOutboxEntity, 
           and e.retryCount < :maxRetries
         order by e.createdAtUtc asc
     """)
-    List<EmailOutboxEntity> findPendingToSend(int maxRetries, Pageable pageable);
+    List<EmailOutboxEntity> findPendingToSend(
+            @Param("maxRetries") int maxRetries,
+            Pageable pageable
+    );
+
+    List<EmailOutboxEntity> findTop20ByUserIdOrderByCreatedAtUtcDesc(Long userId);
+
+    List<EmailOutboxEntity> findTop20ByUserIdAndDedupeKeyContainingOrderByCreatedAtUtcDesc(
+            Long userId,
+            String dedupeKeyPart
+    );
 }

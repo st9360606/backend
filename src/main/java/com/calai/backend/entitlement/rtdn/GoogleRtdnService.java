@@ -195,7 +195,7 @@ public class GoogleRtdnService {
 
         referralBillingBridgeService.markRefundedOrRevoked(
                 tokenHash,
-                false,
+                voided.path("voidedReason").asInt(-1) == 7,
                 eventTime
         );
 

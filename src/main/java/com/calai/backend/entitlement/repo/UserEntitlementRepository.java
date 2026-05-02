@@ -45,19 +45,103 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
           and (e.paymentState is null or e.paymentState not in ('PENDING','ON_HOLD', 'EXPIRED', 'REVOKED', 'PENDING_PURCHASE_CANCELED','UNKNOWN','PAUSED'))
           and not (e.source = 'INTERNAL' and e.entitlementType = 'TRIAL')
         order by
+          e.validToUtc desc,
           case e.entitlementType
             when 'YEARLY' then 3
             when 'MONTHLY' then 2
+            when 'REFERRAL_REWARD' then 2
             when 'TRIAL' then 1
             else 0
-          end desc,
-          e.validToUtc desc
+          end desc
     """)
     List<UserEntitlementEntity> findActiveBestFirst(
             @Param("userId") Long userId,
             @Param("now") Instant now,
             Pageable pageable
     );
+
+    /**
+     * Referral v1.3 commercial rule:
+     * 判斷 inviter 是否「目前有有效 Google Play paid subscription」時，不能要求
+     * purchaseTokenCiphertext 一定存在。若這裡漏判，paid Google Play inviter 會錯誤
+     * fallback 到 backend-only reward，違反「必須真的延後 Google Play 扣款」規格。
+     */
+    @Query("""
+        select e from UserEntitlementEntity e
+        where e.userId = :userId
+          and e.source = 'GOOGLE_PLAY'
+          and e.status = 'ACTIVE'
+          and e.validFromUtc <= :now
+          and e.validToUtc > :now
+          and e.entitlementType in ('MONTHLY', 'YEARLY')
+          and (
+              e.paymentState is null
+              or e.paymentState not in (
+                  'PENDING',
+                  'ON_HOLD',
+                  'EXPIRED',
+                  'REVOKED',
+                  'PENDING_PURCHASE_CANCELED',
+                  'UNKNOWN',
+                  'PAUSED'
+              )
+          )
+        order by e.validToUtc desc
+    """)
+    List<UserEntitlementEntity> findAnyActivePaidGooglePlayForReferral(
+            @Param("userId") Long userId,
+            @Param("now") Instant now,
+            Pageable pageable
+    );
+
+    /**
+     * 保留給需要「可立即呼叫 Google Play API」的背景 reverify / ack 場景。
+     * Referral 發獎決策請用 findAnyActivePaidGooglePlayForReferral，避免 token cipher 缺失時 fallback。
+     */
+    @Query("""
+        select e from UserEntitlementEntity e
+        where e.userId = :userId
+          and e.source = 'GOOGLE_PLAY'
+          and e.status = 'ACTIVE'
+          and e.validFromUtc <= :now
+          and e.validToUtc > :now
+          and e.purchaseTokenCiphertext is not null
+          and e.entitlementType in ('MONTHLY', 'YEARLY')
+          and (
+              e.paymentState is null
+              or e.paymentState not in (
+                  'PENDING',
+                  'ON_HOLD',
+                  'EXPIRED',
+                  'REVOKED',
+                  'PENDING_PURCHASE_CANCELED',
+                  'UNKNOWN',
+                  'PAUSED'
+              )
+          )
+        order by e.validToUtc desc
+    """)
+    List<UserEntitlementEntity> findActivePaidGooglePlayForReferral(
+            @Param("userId") Long userId,
+            @Param("now") Instant now,
+            Pageable pageable
+    );
+
+    @Query("""
+        select count(e) > 0 from UserEntitlementEntity e
+        where e.userId = :userId
+          and e.source = 'GOOGLE_PLAY'
+          and e.entitlementType in ('MONTHLY', 'YEARLY')
+          and (
+              e.paymentState is null
+              or e.paymentState not in (
+                  'PENDING',
+                  'PENDING_PURCHASE_CANCELED',
+                  'UNKNOWN'
+              )
+          )
+    """)
+    boolean existsAnyGooglePlayPaidSubscriptionHistory(@Param("userId") Long userId);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""

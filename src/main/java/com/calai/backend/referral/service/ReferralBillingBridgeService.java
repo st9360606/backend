@@ -18,6 +18,7 @@ public class ReferralBillingBridgeService {
 
     private final ReferralClaimRepository claimRepository;
     private final ReferralOutcomePublisher outcomePublisher;
+    private final ReferralRiskService referralRiskService;
 
     @Transactional
     public void onFirstPaidSubscriptionVerified(
@@ -34,32 +35,38 @@ public class ReferralBillingBridgeService {
             }
 
             if (pending) {
-                claim.setStatus(ReferralClaimStatus.REJECTED.name());
-                claim.setRejectReason(ReferralRejectReason.PURCHASE_PENDING.name());
-                outcomePublisher.publish(new ReferralOutcomeEvent(
-                        claim.getId(),
-                        claim.getInviterUserId(),
-                        ReferralOutcomeType.REJECTED,
-                        claim.getRejectReason(),
-                        null,
-                        null,
-                        null
-                ));
+                referralRiskService.assessPaidSubscription(
+                        claim,
+                        purchaseTokenHash,
+                        true,
+                        testPurchase,
+                        subscribedAtUtc
+                );
+
+                claim.setPurchaseTokenHash(purchaseTokenHash);
+                claim.setSubscribedAtUtc(subscribedAtUtc);
+                claim.setAutoRenewStatus(autoRenewEnabled ? "ON" : "OFF");
+                claim.setStatus(ReferralClaimStatus.PENDING_SUBSCRIPTION.name());
+                claim.setRejectReason(ReferralRejectReason.NONE.name());
                 return;
             }
 
             if (testPurchase) {
-                claim.setStatus(ReferralClaimStatus.REJECTED.name());
-                claim.setRejectReason(ReferralRejectReason.TEST_PURCHASE.name());
-                outcomePublisher.publish(new ReferralOutcomeEvent(
-                        claim.getId(),
-                        claim.getInviterUserId(),
-                        ReferralOutcomeType.REJECTED,
-                        claim.getRejectReason(),
-                        null,
-                        null,
-                        null
-                ));
+                referralRiskService.assessPaidSubscription(claim, purchaseTokenHash, pending, true, subscribedAtUtc);
+                reject(claim, ReferralRejectReason.TEST_PURCHASE.name());
+                return;
+            }
+
+            ReferralRiskService.RiskResult risk = referralRiskService.assessPaidSubscription(
+                    claim,
+                    purchaseTokenHash,
+                    false,
+                    false,
+                    subscribedAtUtc
+            );
+
+            if (risk.denied()) {
+                reject(claim, ReferralRejectReason.ABUSE_RISK.name());
                 return;
             }
 
@@ -70,6 +77,24 @@ public class ReferralBillingBridgeService {
             claim.setAutoRenewStatus(autoRenewEnabled ? "ON" : "OFF");
             claim.setStatus(ReferralClaimStatus.PENDING_VERIFICATION.name());
             claim.setRejectReason(ReferralRejectReason.NONE.name());
+        });
+    }
+
+    @Transactional
+    public void onPaidSubscriptionNotEligible(
+            Long inviteeUserId,
+            Instant detectedAtUtc,
+            String rejectReason
+    ) {
+        claimRepository.findByInviteeUserId(inviteeUserId).ifPresent(claim -> {
+            if (!ReferralClaimStatus.PENDING_SUBSCRIPTION.name().equals(claim.getStatus())) {
+                return;
+            }
+
+            claim.setSubscribedAtUtc(detectedAtUtc);
+            claim.setQualifiedAtUtc(null);
+            claim.setVerificationDeadlineUtc(null);
+            reject(claim, rejectReason);
         });
     }
 
@@ -100,5 +125,19 @@ public class ReferralBillingBridgeService {
                     null
             ));
         });
+    }
+
+    private void reject(com.calai.backend.referral.entity.ReferralClaimEntity claim, String reason) {
+        claim.setStatus(ReferralClaimStatus.REJECTED.name());
+        claim.setRejectReason(reason);
+        outcomePublisher.publish(new ReferralOutcomeEvent(
+                claim.getId(),
+                claim.getInviterUserId(),
+                ReferralOutcomeType.REJECTED,
+                claim.getRejectReason(),
+                null,
+                null,
+                null
+        ));
     }
 }

@@ -6,6 +6,10 @@
 -- MySQL-safe idempotent version.
 
 -- Drop old unique constraint if it exists. It blocked append-only reward attempts.
+
+-- 這段 SQL 代碼的主要目的是執行 「冪等性（Idempotent）索引創建」。
+-- 簡單來說，它的邏輯是：「先檢查索引是否存在，如果不存在才建立，避免報錯。」
+
 SET @ddl = (
     SELECT IF(
         COUNT(*) > 0,

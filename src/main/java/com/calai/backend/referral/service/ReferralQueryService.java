@@ -38,6 +38,10 @@ public class ReferralQueryService {
         return switch (reason) {
             case "REFUNDED_OR_REVOKED", "CHARGEBACK" -> "Payment was refunded or revoked";
             case "ABUSE_RISK" -> "This referral did not meet verification requirements";
+            case "PURCHASE_PENDING" -> "The subscription payment was not completed";
+            case "PURCHASE_NOT_VERIFIED" -> "The subscription payment could not be verified";
+            case "TEST_PURCHASE" -> "Test purchases do not qualify for referral rewards";
+            case "REWARD_GRANT_FAILED" -> "We could not apply the referral reward";
             default -> "This referral did not qualify for a reward";
         };
     }
