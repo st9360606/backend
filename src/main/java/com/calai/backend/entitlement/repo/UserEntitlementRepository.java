@@ -19,14 +19,43 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
             String linkedPurchaseTokenHash
     );
 
-
+    /**
+     * Hard-blocked Google Play states must never unlock premium/camera.
+     *
+     * Why both paymentState and subscriptionState?
+     * - paymentState blocks normal new data.
+     * - subscriptionState blocks legacy dirty rows where paymentState is NULL
+     *   but subscriptionState is PENDING / ON_HOLD / EXPIRED / REVOKED / PAUSED.
+     */
     @Query("""
         select e from UserEntitlementEntity e
         where e.userId = :userId
           and e.status = 'ACTIVE'
           and e.validFromUtc <= :now
           and e.validToUtc > :now
-          and (e.paymentState is null or e.paymentState not in ('PENDING','ON_HOLD', 'EXPIRED', 'REVOKED', 'PENDING_PURCHASE_CANCELED','UNKNOWN','PAUSED'))
+          and (
+              e.paymentState is null
+              or e.paymentState not in (
+                  'PENDING',
+                  'ON_HOLD',
+                  'EXPIRED',
+                  'REVOKED',
+                  'PENDING_PURCHASE_CANCELED',
+                  'UNKNOWN',
+                  'PAUSED'
+              )
+          )
+          and (
+              e.subscriptionState is null
+              or e.subscriptionState not in (
+                  'SUBSCRIPTION_STATE_PENDING',
+                  'SUBSCRIPTION_STATE_ON_HOLD',
+                  'SUBSCRIPTION_STATE_EXPIRED',
+                  'SUBSCRIPTION_STATE_REVOKED',
+                  'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+                  'SUBSCRIPTION_STATE_PAUSED'
+              )
+          )
           and not (e.source = 'INTERNAL' and e.entitlementType = 'TRIAL')
         order by e.validToUtc desc
     """)
@@ -36,13 +65,39 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
             Pageable pageable
     );
 
+    /**
+     * Same hard-block logic as findActive(), with business ordering.
+     * This is the main source for membership summary and Camera access.
+     */
     @Query("""
         select e from UserEntitlementEntity e
         where e.userId = :userId
           and e.status = 'ACTIVE'
           and e.validFromUtc <= :now
           and e.validToUtc > :now
-          and (e.paymentState is null or e.paymentState not in ('PENDING','ON_HOLD', 'EXPIRED', 'REVOKED', 'PENDING_PURCHASE_CANCELED','UNKNOWN','PAUSED'))
+          and (
+              e.paymentState is null
+              or e.paymentState not in (
+                  'PENDING',
+                  'ON_HOLD',
+                  'EXPIRED',
+                  'REVOKED',
+                  'PENDING_PURCHASE_CANCELED',
+                  'UNKNOWN',
+                  'PAUSED'
+              )
+          )
+          and (
+              e.subscriptionState is null
+              or e.subscriptionState not in (
+                  'SUBSCRIPTION_STATE_PENDING',
+                  'SUBSCRIPTION_STATE_ON_HOLD',
+                  'SUBSCRIPTION_STATE_EXPIRED',
+                  'SUBSCRIPTION_STATE_REVOKED',
+                  'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+                  'SUBSCRIPTION_STATE_PAUSED'
+              )
+          )
           and not (e.source = 'INTERNAL' and e.entitlementType = 'TRIAL')
         order by
           e.validToUtc desc,
@@ -65,6 +120,10 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
      * 判斷 inviter 是否「目前有有效 Google Play paid subscription」時，不能要求
      * purchaseTokenCiphertext 一定存在。若這裡漏判，paid Google Play inviter 會錯誤
      * fallback 到 backend-only reward，違反「必須真的延後 Google Play 扣款」規格。
+     *
+     * Pending / hold / expired / revoked / paused states are hard-blocked by both
+     * paymentState and subscriptionState to prevent legacy dirty rows from being
+     * treated as deferable paid subscriptions.
      */
     @Query("""
         select e from UserEntitlementEntity e
@@ -84,6 +143,17 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
                   'PENDING_PURCHASE_CANCELED',
                   'UNKNOWN',
                   'PAUSED'
+              )
+          )
+          and (
+              e.subscriptionState is null
+              or e.subscriptionState not in (
+                  'SUBSCRIPTION_STATE_PENDING',
+                  'SUBSCRIPTION_STATE_ON_HOLD',
+                  'SUBSCRIPTION_STATE_EXPIRED',
+                  'SUBSCRIPTION_STATE_REVOKED',
+                  'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+                  'SUBSCRIPTION_STATE_PAUSED'
               )
           )
         order by e.validToUtc desc
@@ -119,6 +189,17 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
                   'PAUSED'
               )
           )
+          and (
+              e.subscriptionState is null
+              or e.subscriptionState not in (
+                  'SUBSCRIPTION_STATE_PENDING',
+                  'SUBSCRIPTION_STATE_ON_HOLD',
+                  'SUBSCRIPTION_STATE_EXPIRED',
+                  'SUBSCRIPTION_STATE_REVOKED',
+                  'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+                  'SUBSCRIPTION_STATE_PAUSED'
+              )
+          )
         order by e.validToUtc desc
     """)
     List<UserEntitlementEntity> findActivePaidGooglePlayForReferral(
@@ -138,6 +219,13 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
                   'PENDING',
                   'PENDING_PURCHASE_CANCELED',
                   'UNKNOWN'
+              )
+          )
+          and (
+              e.subscriptionState is null
+              or e.subscriptionState not in (
+                  'SUBSCRIPTION_STATE_PENDING',
+                  'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED'
               )
           )
     """)
@@ -205,6 +293,29 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
     where e.source = 'GOOGLE_PLAY'
       and e.status = 'ACTIVE'
       and e.purchaseTokenCiphertext is not null
+      and (
+          e.paymentState is null
+          or e.paymentState not in (
+              'PENDING',
+              'ON_HOLD',
+              'EXPIRED',
+              'REVOKED',
+              'PENDING_PURCHASE_CANCELED',
+              'UNKNOWN',
+              'PAUSED'
+          )
+      )
+      and (
+          e.subscriptionState is null
+          or e.subscriptionState not in (
+              'SUBSCRIPTION_STATE_PENDING',
+              'SUBSCRIPTION_STATE_ON_HOLD',
+              'SUBSCRIPTION_STATE_EXPIRED',
+              'SUBSCRIPTION_STATE_REVOKED',
+              'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+              'SUBSCRIPTION_STATE_PAUSED'
+          )
+      )
       and (e.lastGoogleVerifiedAtUtc is null or e.lastGoogleVerifiedAtUtc <= :verifiedBefore)
     order by case when e.lastGoogleVerifiedAtUtc is null then 0 else 1 end asc,
              e.lastGoogleVerifiedAtUtc asc,
@@ -223,6 +334,29 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
       and (
           e.acknowledgementState is null
           or e.acknowledgementState <> 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
+      )
+      and (
+          e.paymentState is null
+          or e.paymentState not in (
+              'PENDING',
+              'ON_HOLD',
+              'EXPIRED',
+              'REVOKED',
+              'PENDING_PURCHASE_CANCELED',
+              'UNKNOWN',
+              'PAUSED'
+          )
+      )
+      and (
+          e.subscriptionState is null
+          or e.subscriptionState not in (
+              'SUBSCRIPTION_STATE_PENDING',
+              'SUBSCRIPTION_STATE_ON_HOLD',
+              'SUBSCRIPTION_STATE_EXPIRED',
+              'SUBSCRIPTION_STATE_REVOKED',
+              'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+              'SUBSCRIPTION_STATE_PAUSED'
+          )
       )
       and e.updatedAtUtc <= :updatedBefore
     order by e.updatedAtUtc asc
