@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS referral_claims
     UNIQUE KEY ux_referral_claims_invitee (invitee_user_id),
     UNIQUE KEY ux_referral_claims_purchase_token (purchase_token_hash),
     INDEX idx_referral_claims_inviter_status (inviter_user_id, status, verification_deadline_utc),
-    INDEX idx_referral_claims_status_deadline (status, verification_deadline_utc)
+    INDEX idx_referral_claims_status_deadline (status, verification_deadline_utc),
+    INDEX idx_referral_claims_status_updated (status, updated_at_utc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS membership_reward_ledger
@@ -44,23 +45,35 @@ CREATE TABLE IF NOT EXISTS membership_reward_ledger
     user_id            BIGINT       NOT NULL,
     source_type        VARCHAR(32)  NOT NULL,
     source_ref_id      BIGINT       NOT NULL,
-    grant_status       VARCHAR(16)  NOT NULL,
+    attempt_no         INT          NOT NULL DEFAULT 1,
+    trace_id           VARCHAR(64)  NULL,
+    grant_status       VARCHAR(32)  NOT NULL,
     reward_channel     VARCHAR(32)  NULL,
     google_purchase_token_hash CHAR(64) NULL,
     google_defer_status VARCHAR(32) NULL,
-    google_defer_response_json JSON NULL,
+    google_defer_request_json LONGTEXT NULL,
+    google_defer_response_json LONGTEXT NULL,
+    google_defer_http_status INT NULL,
     error_code         VARCHAR(64)  NULL,
     error_message      VARCHAR(500) NULL,
     days_added         INT          NOT NULL,
     old_premium_until  DATETIME(6)  NULL,
     new_premium_until  DATETIME(6)  NULL,
+    next_retry_at_utc  DATETIME(6)  NULL,
     granted_at_utc     DATETIME(6)  NOT NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY ux_membership_reward_source_ref (source_type, source_ref_id),
     INDEX idx_membership_reward_user_granted (user_id, granted_at_utc),
+    INDEX idx_membership_reward_source_status (source_type, source_ref_id, grant_status),
+    INDEX idx_membership_reward_trace (trace_id),
     INDEX idx_membership_reward_google_token (google_purchase_token_hash),
     INDEX idx_membership_reward_channel_status (reward_channel, google_defer_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE INDEX idx_reward_ledger_claim_channel_attempt
+    ON membership_reward_ledger (source_type, source_ref_id, reward_channel, attempt_no);
+
+CREATE INDEX idx_reward_ledger_in_progress
+    ON membership_reward_ledger (grant_status, reward_channel, next_retry_at_utc);
 
 CREATE TABLE IF NOT EXISTS referral_risk_signals
 (

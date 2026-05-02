@@ -1,6 +1,60 @@
--- Referral v1.3 reward trace migration.
+-- Referral v1.3 stable commercial migration.
+-- Purpose:
+-- 1. membership_reward_ledger becomes append-only attempt trace.
+-- 2. Google Play defer request/response/http status/trace id are kept for CS.
+-- 3. The old unique (source_type, source_ref_id) is removed so retry attempts are not overwritten.
 -- MySQL-safe idempotent version.
--- 可重複執行；欄位或 index 已存在時不會失敗。
+
+-- Drop old unique constraint if it exists. It blocked append-only reward attempts.
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) > 0,
+        'ALTER TABLE membership_reward_ledger DROP INDEX ux_membership_reward_source_ref',
+        'SELECT 1'
+    )
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND INDEX_NAME = 'ux_membership_reward_source_ref'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- attempt_no
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE membership_reward_ledger ADD COLUMN attempt_no INT NOT NULL DEFAULT 1 AFTER source_ref_id',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND COLUMN_NAME = 'attempt_no'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- trace_id
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE membership_reward_ledger ADD COLUMN trace_id VARCHAR(64) NULL AFTER attempt_no',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND COLUMN_NAME = 'trace_id'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- widen grant_status because commercial statuses include FAILED_RETRYABLE / FAILED_FINAL.
+ALTER TABLE membership_reward_ledger MODIFY COLUMN grant_status VARCHAR(32) NOT NULL;
 
 -- reward_channel
 SET @ddl = (
@@ -50,12 +104,28 @@ PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- google_defer_response_json
+-- google_defer_request_json as LONGTEXT. It can include raw request JSON for trace.
 SET @ddl = (
     SELECT IF(
         COUNT(*) = 0,
-        'ALTER TABLE membership_reward_ledger ADD COLUMN google_defer_response_json JSON NULL AFTER google_defer_status',
+        'ALTER TABLE membership_reward_ledger ADD COLUMN google_defer_request_json LONGTEXT NULL AFTER google_defer_status',
         'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND COLUMN_NAME = 'google_defer_request_json'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- google_defer_response_json was JSON before. Change to LONGTEXT so non-2xx HTTP error bodies are preserved safely.
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE membership_reward_ledger ADD COLUMN google_defer_response_json LONGTEXT NULL AFTER google_defer_request_json',
+        'ALTER TABLE membership_reward_ledger MODIFY COLUMN google_defer_response_json LONGTEXT NULL'
     )
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
@@ -66,11 +136,27 @@ PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- google_defer_http_status
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE membership_reward_ledger ADD COLUMN google_defer_http_status INT NULL AFTER google_defer_response_json',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND COLUMN_NAME = 'google_defer_http_status'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- error_code
 SET @ddl = (
     SELECT IF(
         COUNT(*) = 0,
-        'ALTER TABLE membership_reward_ledger ADD COLUMN error_code VARCHAR(64) NULL AFTER google_defer_response_json',
+        'ALTER TABLE membership_reward_ledger ADD COLUMN error_code VARCHAR(64) NULL AFTER google_defer_http_status',
         'SELECT 1'
     )
     FROM information_schema.COLUMNS
@@ -93,6 +179,54 @@ SET @ddl = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'membership_reward_ledger'
       AND COLUMN_NAME = 'error_message'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- next_retry_at_utc
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE membership_reward_ledger ADD COLUMN next_retry_at_utc DATETIME(6) NULL AFTER new_premium_until',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND COLUMN_NAME = 'next_retry_at_utc'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- idx_membership_reward_source_status
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'CREATE INDEX idx_membership_reward_source_status ON membership_reward_ledger (source_type, source_ref_id, grant_status)',
+        'SELECT 1'
+    )
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND INDEX_NAME = 'idx_membership_reward_source_status'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- idx_membership_reward_trace
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'CREATE INDEX idx_membership_reward_trace ON membership_reward_ledger (trace_id)',
+        'SELECT 1'
+    )
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'membership_reward_ledger'
+      AND INDEX_NAME = 'idx_membership_reward_trace'
 );
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
@@ -157,6 +291,21 @@ SET @ddl = (
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'email_outbox'
       AND INDEX_NAME = 'idx_email_outbox_user_created'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @ddl = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'CREATE INDEX idx_referral_claims_status_updated ON referral_claims (status, updated_at_utc)',
+        'SELECT 1'
+    )
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'referral_claims'
+      AND INDEX_NAME = 'idx_referral_claims_status_updated'
 );
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
