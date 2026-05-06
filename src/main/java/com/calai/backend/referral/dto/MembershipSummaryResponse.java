@@ -7,6 +7,7 @@ public record MembershipSummaryResponse(
         Instant currentPremiumUntil,
         Instant trialEndsAt,
         Integer trialDaysLeft,
+        Boolean trialEligible,
         Boolean paymentIssue,
         String latestRewardSource,
         String latestRewardChannel,

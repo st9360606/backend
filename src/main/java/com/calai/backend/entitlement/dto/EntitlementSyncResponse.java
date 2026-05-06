@@ -9,5 +9,6 @@ public record EntitlementSyncResponse(
         Instant currentPremiumUntil,
         Instant trialEndsAt,
         Integer trialDaysLeft,
+        Boolean trialEligible,
         Boolean paymentIssue
 ) {}

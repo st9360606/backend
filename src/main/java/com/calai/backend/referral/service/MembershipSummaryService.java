@@ -39,6 +39,7 @@ public class MembershipSummaryService {
         Integer trialDaysLeft = PremiumStatus.TRIAL.name().equals(premiumStatus)
                 ? calcDaysLeft(now, currentPremiumUntil)
                 : null;
+        boolean trialEligible = !entitlementRepository.existsAnyTrialHistory(userId);
 
         MembershipRewardLedgerEntity latest = rewardLedgerRepository
                 .findTop1ByUserIdOrderByGrantedAtUtcDesc(userId)
@@ -54,6 +55,7 @@ public class MembershipSummaryService {
                 currentPremiumUntil,
                 trialEndsAt,
                 trialDaysLeft,
+                trialEligible,
                 paymentIssue,
                 latest == null ? null : latest.getSourceType(),
                 latest == null ? null : latest.getRewardChannel(),

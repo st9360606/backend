@@ -127,6 +127,7 @@ public class EntitlementSyncContractTest extends MySqlContainerBaseTest {
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.entitlementType").value("MONTHLY"))
                 .andExpect(jsonPath("$.premiumStatus").value("PREMIUM"))
+                .andExpect(jsonPath("$.trialEligible").value(true))
                 .andExpect(jsonPath("$.trialEndsAt").doesNotExist())
                 .andExpect(jsonPath("$.trialDaysLeft").doesNotExist());
 
@@ -169,6 +170,7 @@ public class EntitlementSyncContractTest extends MySqlContainerBaseTest {
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.entitlementType").value("TRIAL"))
                 .andExpect(jsonPath("$.premiumStatus").value("TRIAL"))
+                .andExpect(jsonPath("$.trialEligible").value(false))
                 .andExpect(jsonPath("$.trialEndsAt").exists())
                 .andExpect(jsonPath("$.trialDaysLeft").value(3));
 

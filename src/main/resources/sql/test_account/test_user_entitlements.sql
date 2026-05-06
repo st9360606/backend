@@ -12,6 +12,137 @@
 
 
 -- ============================================================
+-- 情境 1：完全新用戶，沒有任何 entitlement history
+-- 預期：
+-- premiumStatus = FREE
+-- trialEligible = true
+-- OneTimeOffer = 可顯示 Start Free Trial
+-- Camera = ❌
+-- ============================================================
+
+SET @uid = 1;
+
+DELETE FROM user_entitlements
+WHERE user_id = @uid;
+
+-- ============================================================
+-- 情境 2：Trial expired
+-- 預期：
+-- premiumStatus = FREE
+-- trialEligible = false
+-- OneTimeOffer switch disabled
+-- CTA = Continue
+-- Camera = ❌
+-- ============================================================
+
+SET @uid = 1;
+SET @token_a = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+DELETE FROM user_entitlements
+WHERE user_id = @uid;
+
+INSERT INTO user_entitlements (
+    id, user_id, entitlement_type, status,
+    valid_from_utc, valid_to_utc,
+    purchase_token_hash, purchase_token_ciphertext,
+    last_verified_at_utc, last_google_verified_at_utc,
+    source, product_id, subscription_state, payment_state,
+    grace_until_utc, close_reason, offer_phase,
+    auto_renew_enabled, acknowledgement_state, latest_order_id,
+    linked_purchase_token_hash, last_rtdn_at_utc, revoked_at_utc,
+    created_at_utc, updated_at_utc
+) VALUES (
+             UUID(), @uid, 'TRIAL', 'EXPIRED',
+             UTC_TIMESTAMP(6) - INTERVAL 5 DAY,
+             UTC_TIMESTAMP(6) - INTERVAL 2 DAY,
+             @token_a, NULL,
+             UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+             'GOOGLE_PLAY', 'bitecal_yearly',
+             'SUBSCRIPTION_STATE_EXPIRED', 'EXPIRED',
+             NULL, 'GOOGLE_PLAY_EXPIRED', 'FREE_TRIAL',
+             FALSE, 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+             'DEV-TRIAL-EXPIRED-TRIAL-ELIGIBLE-FALSE-001',
+             NULL, UTC_TIMESTAMP(6), NULL,
+             UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+         );
+
+-- ============================================================
+-- 情境 3：Legacy dirty row：payment_state NULL + subscription_state ON_HOLD
+-- 預期：
+-- premiumStatus = FREE
+-- Camera = ❌
+-- ============================================================
+
+SET @uid = 1;
+SET @token_a = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+DELETE FROM user_entitlements
+WHERE user_id = @uid;
+
+INSERT INTO user_entitlements (
+    id, user_id, entitlement_type, status,
+    valid_from_utc, valid_to_utc,
+    purchase_token_hash, purchase_token_ciphertext,
+    last_verified_at_utc, last_google_verified_at_utc,
+    source, product_id, subscription_state, payment_state,
+    grace_until_utc, close_reason, offer_phase,
+    auto_renew_enabled, acknowledgement_state, latest_order_id,
+    linked_purchase_token_hash, last_rtdn_at_utc, revoked_at_utc,
+    created_at_utc, updated_at_utc
+) VALUES (
+             UUID(), @uid, 'YEARLY', 'ACTIVE',
+             UTC_TIMESTAMP(6) - INTERVAL 10 DAY,
+             UTC_TIMESTAMP(6) + INTERVAL 20 DAY,
+             @token_a, NULL,
+             UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+             'GOOGLE_PLAY', 'bitecal_yearly',
+             'SUBSCRIPTION_STATE_ON_HOLD', NULL,
+             NULL, 'GOOGLE_PLAY_ON_HOLD', 'BASE',
+             TRUE, 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+             'DEV-LEGACY-ON-HOLD-PAYMENT-NULL-001',
+             NULL, UTC_TIMESTAMP(6), NULL,
+             UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+         );
+
+-- ============================================================
+-- 情境 4：Legacy dirty row：subscription_state NULL + payment_state ON_HOLD
+-- 預期：
+-- premiumStatus = FREE
+-- Camera = ❌
+-- ============================================================
+
+SET @uid = 1;
+SET @token_a = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+DELETE FROM user_entitlements
+WHERE user_id = @uid;
+
+INSERT INTO user_entitlements (
+    id, user_id, entitlement_type, status,
+    valid_from_utc, valid_to_utc,
+    purchase_token_hash, purchase_token_ciphertext,
+    last_verified_at_utc, last_google_verified_at_utc,
+    source, product_id, subscription_state, payment_state,
+    grace_until_utc, close_reason, offer_phase,
+    auto_renew_enabled, acknowledgement_state, latest_order_id,
+    linked_purchase_token_hash, last_rtdn_at_utc, revoked_at_utc,
+    created_at_utc, updated_at_utc
+) VALUES (
+             UUID(), @uid, 'YEARLY', 'ACTIVE',
+             UTC_TIMESTAMP(6) - INTERVAL 10 DAY,
+             UTC_TIMESTAMP(6) + INTERVAL 20 DAY,
+             @token_a, NULL,
+             UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+             'GOOGLE_PLAY', 'bitecal_yearly',
+             NULL, 'ON_HOLD',
+             NULL, 'GOOGLE_PLAY_ON_HOLD', 'BASE',
+             TRUE, 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+             'DEV-LEGACY-ON-HOLD-SUBSCRIPTION-NULL-001',
+             NULL, UTC_TIMESTAMP(6), NULL,
+             UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+         );
+
+-- ============================================================
 -- 情境 A：月訂閱有效 MONTHLY + ACTIVE
 -- 預期：
 -- App 狀態 = PREMIUM
@@ -93,8 +224,8 @@ UPDATE user_entitlements
 SET
     entitlement_type = 'TRIAL',
     status = 'ACTIVE',
-    valid_from_utc = UTC_TIMESTAMP(6) - INTERVAL 1 DAY,
-    valid_to_utc = UTC_TIMESTAMP(6) + INTERVAL 2 DAY,
+    valid_from_utc = UTC_TIMESTAMP(6),
+    valid_to_utc = UTC_TIMESTAMP(6) + INTERVAL 3 DAY,
     source = 'GOOGLE_PLAY',
     product_id = 'bitecal_yearly',
     subscription_state = 'SUBSCRIPTION_STATE_ACTIVE',
@@ -757,126 +888,241 @@ WHERE user_id = 1
 -- App 狀態 = PREMIUM
 -- UI = PREMIUM
 -- Camera = ✅
+--
+-- 注意：
+-- 1. 僅限 local/dev 測試資料使用。
+-- 2. 這版不用 UPDATE，改用 DELETE + INSERT，避免 row 不存在時 0 rows affected。
+-- 3. 每次執行 U 前會清掉 user_id = 1 的 entitlement，避免 bbbb token 污染後續情境。
 -- ============================================================
 
--- 舊月訂閱
-UPDATE user_entitlements
-SET
-    entitlement_type = 'MONTHLY',
-    status = 'EXPIRED',
-    valid_from_utc = UTC_TIMESTAMP(6) - INTERVAL 20 DAY,
-    valid_to_utc = UTC_TIMESTAMP(6),
-    source = 'GOOGLE_PLAY',
-    product_id = 'bitecal_monthly',
-    subscription_state = 'SUBSCRIPTION_STATE_CANCELED',
-    payment_state = 'EXPIRED',
-    grace_until_utc = NULL,
-    close_reason = 'SUPERSEDED_BY_NEW_ENTITLEMENT',
-    offer_phase = 'BASE',
-    auto_renew_enabled = FALSE,
-    acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
-    latest_order_id = 'DEV-MONTHLY-SUPERSEDED-001',
-    linked_purchase_token_hash = NULL,
-    purchase_token_ciphertext = NULL,
-    last_verified_at_utc = UTC_TIMESTAMP(6),
-    last_google_verified_at_utc = UTC_TIMESTAMP(6),
-    last_rtdn_at_utc = UTC_TIMESTAMP(6),
-    revoked_at_utc = NULL,
-    updated_at_utc = UTC_TIMESTAMP(6)
-WHERE user_id = 1
-  AND purchase_token_hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+SET @uid = 1;
+SET @old_monthly_token_hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+SET @new_yearly_token_hash  = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
--- 新年訂閱：注意這裡要用另一個 purchase_token_hash
-UPDATE user_entitlements
-SET
-    entitlement_type = 'YEARLY',
-    status = 'ACTIVE',
-    valid_from_utc = UTC_TIMESTAMP(6),
-    valid_to_utc = UTC_TIMESTAMP(6) + INTERVAL 365 DAY,
-    source = 'GOOGLE_PLAY',
-    product_id = 'bitecal_yearly',
-    subscription_state = 'SUBSCRIPTION_STATE_ACTIVE',
-    payment_state = 'OK',
-    grace_until_utc = NULL,
-    close_reason = NULL,
-    offer_phase = 'BASE',
-    auto_renew_enabled = TRUE,
-    acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
-    latest_order_id = 'DEV-YEARLY-UPGRADED-001',
-    linked_purchase_token_hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    purchase_token_ciphertext = NULL,
-    last_verified_at_utc = UTC_TIMESTAMP(6),
-    last_google_verified_at_utc = UTC_TIMESTAMP(6),
-    last_rtdn_at_utc = UTC_TIMESTAMP(6),
-    revoked_at_utc = NULL,
-    updated_at_utc = UTC_TIMESTAMP(6)
-WHERE user_id = 1
-  AND purchase_token_hash = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-
+-- 只限 local/dev：
+-- 清掉這個測試 user 的 entitlement，避免舊資料污染本情境與後續情境。
+DELETE FROM user_entitlements
+WHERE user_id = @uid;
 
 -- ============================================================
--- 情境 V：同 user 同時有 Trial + Premium
+-- 舊月訂閱：已被新方案取代
+-- ============================================================
+
+INSERT INTO user_entitlements (
+    id,
+    user_id,
+    entitlement_type,
+    status,
+    valid_from_utc,
+    valid_to_utc,
+    purchase_token_hash,
+    purchase_token_ciphertext,
+    last_verified_at_utc,
+    last_google_verified_at_utc,
+    source,
+    product_id,
+    subscription_state,
+    payment_state,
+    grace_until_utc,
+    close_reason,
+    offer_phase,
+    auto_renew_enabled,
+    acknowledgement_state,
+    latest_order_id,
+    linked_purchase_token_hash,
+    last_rtdn_at_utc,
+    revoked_at_utc,
+    created_at_utc,
+    updated_at_utc
+) VALUES (
+             UUID(),
+             @uid,
+             'MONTHLY',
+             'EXPIRED',
+             UTC_TIMESTAMP(6) - INTERVAL 20 DAY,
+             UTC_TIMESTAMP(6),
+             @old_monthly_token_hash,
+             NULL,
+             UTC_TIMESTAMP(6),
+             UTC_TIMESTAMP(6),
+             'GOOGLE_PLAY',
+             'bitecal_monthly',
+             'SUBSCRIPTION_STATE_CANCELED',
+             'EXPIRED',
+             NULL,
+             'SUPERSEDED_BY_NEW_ENTITLEMENT',
+             'BASE',
+             FALSE,
+             'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+             'DEV-MONTHLY-SUPERSEDED-001',
+             NULL,
+             UTC_TIMESTAMP(6),
+             NULL,
+             UTC_TIMESTAMP(6),
+             UTC_TIMESTAMP(6)
+         );
+
+-- ============================================================
+-- 新年訂閱：目前有效方案
+-- linked_purchase_token_hash 指向舊月訂閱 token
+-- ============================================================
+
+INSERT INTO user_entitlements (
+    id,
+    user_id,
+    entitlement_type,
+    status,
+    valid_from_utc,
+    valid_to_utc,
+    purchase_token_hash,
+    purchase_token_ciphertext,
+    last_verified_at_utc,
+    last_google_verified_at_utc,
+    source,
+    product_id,
+    subscription_state,
+    payment_state,
+    grace_until_utc,
+    close_reason,
+    offer_phase,
+    auto_renew_enabled,
+    acknowledgement_state,
+    latest_order_id,
+    linked_purchase_token_hash,
+    last_rtdn_at_utc,
+    revoked_at_utc,
+    created_at_utc,
+    updated_at_utc
+) VALUES (
+             UUID(),
+             @uid,
+             'YEARLY',
+             'ACTIVE',
+             UTC_TIMESTAMP(6),
+             UTC_TIMESTAMP(6) + INTERVAL 365 DAY,
+             @new_yearly_token_hash,
+             NULL,
+             UTC_TIMESTAMP(6),
+             UTC_TIMESTAMP(6),
+             'GOOGLE_PLAY',
+             'bitecal_yearly',
+             'SUBSCRIPTION_STATE_ACTIVE',
+             'OK',
+             NULL,
+             NULL,
+             'BASE',
+             TRUE,
+             'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+             'DEV-YEARLY-UPGRADED-001',
+             @old_monthly_token_hash,
+             UTC_TIMESTAMP(6),
+             NULL,
+             UTC_TIMESTAMP(6),
+             UTC_TIMESTAMP(6)
+         );
+
+-- ============================================================
+-- 檢查目前測試資料
 -- 預期：
--- App 狀態 = PREMIUM
--- UI = PREMIUM
--- Camera = ✅
--- 原因：
--- YEARLY / MONTHLY 應優先於 TRIAL
+-- 1. 有兩筆資料
+-- 2. MONTHLY = EXPIRED
+-- 3. YEARLY = ACTIVE
+-- 4. YEARLY.linked_purchase_token_hash = MONTHLY.purchase_token_hash
 -- ============================================================
 
--- Trial row
-UPDATE user_entitlements
-SET
-    entitlement_type = 'TRIAL',
-    status = 'ACTIVE',
-    valid_from_utc = UTC_TIMESTAMP(6) - INTERVAL 1 DAY,
-    valid_to_utc = UTC_TIMESTAMP(6) + INTERVAL 2 DAY,
-    source = 'GOOGLE_PLAY',
-    product_id = 'bitecal_yearly',
-    subscription_state = 'SUBSCRIPTION_STATE_ACTIVE',
-    payment_state = 'OK',
-    grace_until_utc = NULL,
-    close_reason = NULL,
-    offer_phase = 'FREE_TRIAL',
-    auto_renew_enabled = TRUE,
-    acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
-    latest_order_id = 'DEV-TRIAL-ACTIVE-CONFLICT-001',
-    linked_purchase_token_hash = NULL,
-    purchase_token_ciphertext = NULL,
-    last_verified_at_utc = UTC_TIMESTAMP(6),
-    last_google_verified_at_utc = UTC_TIMESTAMP(6),
-    last_rtdn_at_utc = UTC_TIMESTAMP(6),
-    revoked_at_utc = NULL,
-    updated_at_utc = UTC_TIMESTAMP(6)
-WHERE user_id = 1
-  AND purchase_token_hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+SELECT
+    user_id,
+    entitlement_type,
+    status,
+    source,
+    product_id,
+    subscription_state,
+    payment_state,
+    offer_phase,
+    auto_renew_enabled,
+    acknowledgement_state,
+    valid_from_utc,
+    valid_to_utc,
+    close_reason,
+    purchase_token_hash,
+    linked_purchase_token_hash,
+    updated_at_utc
+FROM user_entitlements
+WHERE user_id = @uid
+ORDER BY
+    CASE entitlement_type
+        WHEN 'YEARLY' THEN 1
+        WHEN 'MONTHLY' THEN 2
+        WHEN 'TRIAL' THEN 3
+        ELSE 9
+        END,
+    valid_to_utc DESC;
 
--- Premium row
-UPDATE user_entitlements
-SET
-    entitlement_type = 'YEARLY',
-    status = 'ACTIVE',
-    valid_from_utc = UTC_TIMESTAMP(6),
-    valid_to_utc = UTC_TIMESTAMP(6) + INTERVAL 365 DAY,
-    source = 'GOOGLE_PLAY',
-    product_id = 'bitecal_yearly',
-    subscription_state = 'SUBSCRIPTION_STATE_ACTIVE',
-    payment_state = 'OK',
-    grace_until_utc = NULL,
-    close_reason = NULL,
-    offer_phase = 'BASE',
-    auto_renew_enabled = TRUE,
-    acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
-    latest_order_id = 'DEV-YEARLY-ACTIVE-CONFLICT-001',
-    linked_purchase_token_hash = NULL,
-    purchase_token_ciphertext = NULL,
-    last_verified_at_utc = UTC_TIMESTAMP(6),
-    last_google_verified_at_utc = UTC_TIMESTAMP(6),
-    last_rtdn_at_utc = UTC_TIMESTAMP(6),
-    revoked_at_utc = NULL,
-    updated_at_utc = UTC_TIMESTAMP(6)
-WHERE user_id = 1
-  AND purchase_token_hash = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+-- ============================================================
+-- 情境 V：同 user 同時有 Trial + Premium，但 Trial 到期日比較晚
+-- 預期：
+-- premiumStatus = PREMIUM
+-- Camera = ✅
+--
+-- 目的：
+-- 測 findActiveBestFirst 是否真的讓 YEARLY/MONTHLY 優先於 TRIAL。
+-- 如果這個測出 TRIAL，代表 Repository order by 要改。
+-- ============================================================
+
+SET @uid = 1;
+SET @token_a = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+SET @token_b = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+DELETE
+FROM user_entitlements
+WHERE user_id = @uid;
+
+-- Trial row：故意設比較晚到期
+INSERT INTO user_entitlements (id, user_id, entitlement_type, status,
+                               valid_from_utc, valid_to_utc,
+                               purchase_token_hash, purchase_token_ciphertext,
+                               last_verified_at_utc, last_google_verified_at_utc,
+                               source, product_id, subscription_state, payment_state,
+                               grace_until_utc, close_reason, offer_phase,
+                               auto_renew_enabled, acknowledgement_state, latest_order_id,
+                               linked_purchase_token_hash, last_rtdn_at_utc, revoked_at_utc,
+                               created_at_utc, updated_at_utc)
+VALUES (UUID(), @uid, 'TRIAL', 'ACTIVE',
+        UTC_TIMESTAMP(6) - INTERVAL 1 DAY,
+        UTC_TIMESTAMP(6) + INTERVAL 30 DAY,
+        @token_a, NULL,
+        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+        'GOOGLE_PLAY', 'bitecal_yearly',
+        'SUBSCRIPTION_STATE_ACTIVE', 'OK',
+        NULL, NULL, 'FREE_TRIAL',
+        TRUE, 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+        'DEV-TRIAL-ACTIVE-CONFLICT-LONGER-001',
+        NULL, UTC_TIMESTAMP(6), NULL,
+        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6));
+
+-- Premium row：故意設比較短到期，但仍然應該優先
+INSERT INTO user_entitlements (id, user_id, entitlement_type, status,
+                               valid_from_utc, valid_to_utc,
+                               purchase_token_hash, purchase_token_ciphertext,
+                               last_verified_at_utc, last_google_verified_at_utc,
+                               source, product_id, subscription_state, payment_state,
+                               grace_until_utc, close_reason, offer_phase,
+                               auto_renew_enabled, acknowledgement_state, latest_order_id,
+                               linked_purchase_token_hash, last_rtdn_at_utc, revoked_at_utc,
+                               created_at_utc, updated_at_utc)
+VALUES (UUID(), @uid, 'YEARLY', 'ACTIVE',
+        UTC_TIMESTAMP(6) - INTERVAL 1 DAY,
+        UTC_TIMESTAMP(6) + INTERVAL 3 DAY,
+        @token_b, NULL,
+        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+        'GOOGLE_PLAY', 'bitecal_yearly',
+        'SUBSCRIPTION_STATE_ACTIVE', 'OK',
+        NULL, NULL, 'BASE',
+        TRUE, 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+        'DEV-YEARLY-ACTIVE-CONFLICT-SHORTER-001',
+        NULL, UTC_TIMESTAMP(6), NULL,
+        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6));
 
 -- ============================================================
 -- 情境 W：Google Play Purchase 尚未 acknowledge

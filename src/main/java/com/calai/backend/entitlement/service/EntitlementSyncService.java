@@ -456,6 +456,7 @@ public class EntitlementSyncService {
                     null,
                     null,
                     null,
+                    isTrialEligible(userId),
                     false
             );
         }
@@ -472,6 +473,7 @@ public class EntitlementSyncService {
                     validTo,
                     validTo,
                     calcDaysLeft(now, validTo),
+                    false,
                     false
             );
         }
@@ -485,6 +487,7 @@ public class EntitlementSyncService {
                 validTo,
                 null,
                 null,
+                isTrialEligible(userId),
                 paymentIssue
         );
     }
@@ -495,6 +498,11 @@ public class EntitlementSyncService {
             String tier,
             SubscriptionVerifier.VerifiedSubscription verified
     ) {}
+
+    private boolean isTrialEligible(Long userId) {
+        return !entitlementRepo.existsAnyTrialHistory(userId);
+    }
+
 
     static boolean isPaymentIssueState(String state) {
         return "SUBSCRIPTION_STATE_IN_GRACE_PERIOD".equals(state);

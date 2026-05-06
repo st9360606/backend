@@ -208,6 +208,14 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
             Pageable pageable
     );
 
+
+    @Query("""
+        select count(e) > 0 from UserEntitlementEntity e
+        where e.userId = :userId
+          and e.entitlementType = 'TRIAL'
+    """)
+    boolean existsAnyTrialHistory(@Param("userId") Long userId);
+
     @Query("""
         select count(e) > 0 from UserEntitlementEntity e
         where e.userId = :userId
