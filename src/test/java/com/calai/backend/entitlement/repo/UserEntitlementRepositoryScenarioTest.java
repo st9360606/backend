@@ -167,6 +167,44 @@ class UserEntitlementRepositoryScenarioTest {
                 .containsExactly("ack-needed");
     }
 
+    @Test
+    void findActiveBestFirst_shouldPreferPaidSubscriptionOverLongerTrial() {
+        repository.save(entitlement(
+                "trial-longer",
+                107L,
+                "TRIAL",
+                "ACTIVE",
+                "GOOGLE_PLAY",
+                "SUBSCRIPTION_STATE_ACTIVE",
+                "OK",
+                now.plusSeconds(30 * 24 * 3600L),
+                "cipher-trial",
+                "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED"
+        ));
+
+        repository.save(entitlement(
+                "yearly-shorter",
+                107L,
+                "YEARLY",
+                "ACTIVE",
+                "GOOGLE_PLAY",
+                "SUBSCRIPTION_STATE_ACTIVE",
+                "OK",
+                now.plusSeconds(3 * 24 * 3600L),
+                "cipher-yearly",
+                "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED"
+        ));
+
+        List<UserEntitlementEntity> active = repository.findActiveBestFirst(
+                107L,
+                now,
+                PageRequest.of(0, 1)
+        );
+
+        assertThat(active).hasSize(1);
+        assertThat(active.getFirst().getEntitlementType()).isEqualTo("YEARLY");
+    }
+
     private UserEntitlementEntity entitlement(
             String id,
             Long userId,

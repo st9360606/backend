@@ -1127,35 +1127,46 @@ VALUES (UUID(), @uid, 'YEARLY', 'ACTIVE',
 -- ============================================================
 -- 情境 W：Google Play Purchase 尚未 acknowledge
 -- 預期：
--- 短期可先視為 PREMIUM，但後端要重試 acknowledge。
--- 若長期未 acknowledge，Google Play 可能退款/取消，之後會透過 sync/RTDN/reverify 關閉。
+-- 1. 短期 App 狀態 = PREMIUM
+-- 2. Camera = ✅
+-- 3. ack retry worker 可解密 purchase_token_ciphertext
+-- 4. retry 成功後 acknowledgement_state = ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED
 -- ============================================================
 
-UPDATE user_entitlements
-SET
-    entitlement_type = 'MONTHLY',
-    status = 'ACTIVE',
-    valid_from_utc = UTC_TIMESTAMP(6),
-    valid_to_utc = UTC_TIMESTAMP(6) + INTERVAL 30 DAY,
-    source = 'GOOGLE_PLAY',
-    product_id = 'bitecal_monthly',
-    subscription_state = 'SUBSCRIPTION_STATE_ACTIVE',
-    payment_state = 'OK',
-    grace_until_utc = NULL,
-    close_reason = NULL,
-    offer_phase = 'BASE',
-    auto_renew_enabled = TRUE,
-    acknowledgement_state = 'ACKNOWLEDGEMENT_STATE_PENDING',
-    latest_order_id = 'DEV-MONTHLY-ACK-PENDING-001',
-    linked_purchase_token_hash = NULL,
-    purchase_token_ciphertext = NULL,
-    last_verified_at_utc = UTC_TIMESTAMP(6),
-    last_google_verified_at_utc = UTC_TIMESTAMP(6),
-    last_rtdn_at_utc = UTC_TIMESTAMP(6),
-    revoked_at_utc = NULL,
-    updated_at_utc = UTC_TIMESTAMP(6)
-WHERE user_id = 1
-  AND purchase_token_hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+SET @uid = 1;
+
+-- 由 /internal/dev/entitlements/purchase-token/encrypt 回傳
+SET @token_hash = '貼上 purchaseTokenHash';
+SET @token_ciphertext = '貼上 purchaseTokenCiphertext';
+
+DELETE FROM user_entitlements
+WHERE user_id = @uid;
+
+INSERT INTO user_entitlements (
+    id, user_id, entitlement_type, status,
+    valid_from_utc, valid_to_utc,
+    purchase_token_hash, purchase_token_ciphertext,
+    last_verified_at_utc, last_google_verified_at_utc,
+    source, product_id, subscription_state, payment_state,
+    grace_until_utc, close_reason, offer_phase,
+    auto_renew_enabled, acknowledgement_state, latest_order_id,
+    linked_purchase_token_hash, last_rtdn_at_utc, revoked_at_utc,
+    created_at_utc, updated_at_utc
+) VALUES (
+             UUID(), @uid, 'YEARLY', 'ACTIVE',
+             UTC_TIMESTAMP(6) - INTERVAL 1 DAY,
+             UTC_TIMESTAMP(6) + INTERVAL 365 DAY,
+             @token_hash, @token_ciphertext,
+             UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+             'GOOGLE_PLAY', 'bitecal_yearly',
+             'SUBSCRIPTION_STATE_ACTIVE', 'OK',
+             NULL, NULL, 'BASE',
+             TRUE, 'ACKNOWLEDGEMENT_STATE_PENDING',
+             'DEV-YEARLY-ACK-PENDING-001',
+             NULL, UTC_TIMESTAMP(6), NULL,
+             UTC_TIMESTAMP(6) - INTERVAL 11 MINUTE,
+             UTC_TIMESTAMP(6) - INTERVAL 11 MINUTE
+         );
 
 
 

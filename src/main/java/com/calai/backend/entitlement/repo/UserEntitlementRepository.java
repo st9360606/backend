@@ -100,14 +100,14 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
           )
           and not (e.source = 'INTERNAL' and e.entitlementType = 'TRIAL')
         order by
-          e.validToUtc desc,
           case e.entitlementType
             when 'YEARLY' then 3
             when 'MONTHLY' then 2
             when 'REFERRAL_REWARD' then 2
             when 'TRIAL' then 1
             else 0
-          end desc
+          end desc,
+          e.validToUtc desc
     """)
     List<UserEntitlementEntity> findActiveBestFirst(
             @Param("userId") Long userId,

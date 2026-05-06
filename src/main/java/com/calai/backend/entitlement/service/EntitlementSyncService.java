@@ -520,6 +520,7 @@ public class EntitlementSyncService {
         if ("SUBSCRIPTION_STATE_IN_GRACE_PERIOD".equals(state)) return "GRACE";
         if ("SUBSCRIPTION_STATE_ON_HOLD".equals(state)) return "ON_HOLD";
         if ("SUBSCRIPTION_STATE_EXPIRED".equals(state)) return "EXPIRED";
+        if ("SUBSCRIPTION_STATE_REVOKED".equals(state)) return "REVOKED";
         if ("SUBSCRIPTION_STATE_PENDING".equals(state)) return "PENDING";
         if ("SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED".equals(state)) return "PENDING_PURCHASE_CANCELED";
         if ("SUBSCRIPTION_STATE_PAUSED".equals(state)) return "ON_HOLD";
