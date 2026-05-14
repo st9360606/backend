@@ -116,6 +116,55 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
     );
 
     /**
+     * Used by membership summary to calculate the final visible premium expiry.
+     *
+     * Unlike findActiveBestFirst(), this query intentionally includes future
+     * ACTIVE entitlements whose valid_from_utc is after now, because backend-only
+     * rewards may be represented as contiguous premium periods:
+     *
+     *   now -------------------- 2026-06-12
+     *                            2026-06-12 -------------------- 2026-07-12
+     *
+     * Membership summary should display the final contiguous expiry, not only the
+     * first currently active segment.
+     */
+    @Query("""
+    select e from UserEntitlementEntity e
+    where e.userId = :userId
+      and e.status = 'ACTIVE'
+      and e.validToUtc > :now
+      and (
+          e.paymentState is null
+          or e.paymentState not in (
+              'PENDING',
+              'ON_HOLD',
+              'EXPIRED',
+              'REVOKED',
+              'PENDING_PURCHASE_CANCELED',
+              'UNKNOWN',
+              'PAUSED'
+          )
+      )
+      and (
+          e.subscriptionState is null
+          or e.subscriptionState not in (
+              'SUBSCRIPTION_STATE_PENDING',
+              'SUBSCRIPTION_STATE_ON_HOLD',
+              'SUBSCRIPTION_STATE_EXPIRED',
+              'SUBSCRIPTION_STATE_REVOKED',
+              'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+              'SUBSCRIPTION_STATE_PAUSED'
+          )
+      )
+      and not (e.source = 'INTERNAL' and e.entitlementType = 'TRIAL')
+    order by e.validFromUtc asc, e.validToUtc asc
+""")
+    List<UserEntitlementEntity> findUsableActiveAndFutureEntitlements(
+            @Param("userId") Long userId,
+            @Param("now") Instant now
+    );
+
+    /**
      * Referral v1.3 commercial rule:
      * 判斷 inviter 是否「目前有有效 Google Play paid subscription」時，不能要求
      * purchaseTokenCiphertext 一定存在。若這裡漏判，paid Google Play inviter 會錯誤

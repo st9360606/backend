@@ -98,6 +98,27 @@ class ReferralClaimServiceScenarioTest {
         verify(claimRepository, never()).save(any());
     }
 
+
+    @Test
+    void claim_shouldBeIdempotentWhenSameInviteeSubmitsSamePromoCodeAgain() {
+        ReferralClaimEntity existing = new ReferralClaimEntity();
+        existing.setId(1L);
+        existing.setInviteeUserId(200L);
+        existing.setInviterUserId(101L);
+        existing.setPromoCode("SAME123");
+        existing.setStatus(ReferralClaimStatus.PENDING_SUBSCRIPTION.name());
+
+        when(referralCodeService.findInviterByPromoCode("SAME123")).thenReturn(101L);
+        when(claimRepository.findByInviteeUserId(200L)).thenReturn(Optional.of(existing));
+
+        var response = service.claim(200L, "same123");
+
+        assertThat(response.applied()).isTrue();
+        assertThat(response.alreadyApplied()).isTrue();
+        assertThat(response.claimStatus()).isEqualTo(ReferralClaimStatus.PENDING_SUBSCRIPTION.name());
+        verify(claimRepository, never()).save(any());
+    }
+
     @Test
     void claim_shouldCreatePendingSubscriptionClaimForValidNewInvitee() {
         when(referralCodeService.findInviterByPromoCode("GOOD123")).thenReturn(101L);

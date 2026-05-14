@@ -228,14 +228,14 @@ H. App 端使用者實際看到的結果
 
 
 I. Backend-only reward 後會員狀態
-| 原本 inviter 狀態                          | 是否有 active Google Play paid subscription | 發獎路線                        | Reward 後 DB                                          | Reward 後 App 顯示                 |
-| -------------------------------------- | ---------------------------------------: | --------------------------- | ---------------------------------------------------- | ------------------------------- |
-| FREE                                   |                                        ❌ | `BACKEND_ONLY`              | 新增 `REFERRAL_REWARD`，`valid_to=now+30d`              | `PREMIUM / Until now+30d`       |
-| Trial 中                                |                              ❌ 通常不是 paid | `BACKEND_ONLY`              | 新增 `REFERRAL_REWARD`，通常以 active entitlement 到期日 +30d | `PREMIUM / Until YYYY-MM-DD`    |
-| Trial 已過期                              |                                        ❌ | `BACKEND_ONLY`              | 新增 `REFERRAL_REWARD`，`valid_to=now+30d`              | `PREMIUM / Until now+30d`       |
-| Google Play 已過期                        |                                        ❌ | `BACKEND_ONLY`              | 新增 `REFERRAL_REWARD`，`valid_to=now+30d`              | `PREMIUM / Until now+30d`       |
-| 後台手動補會員中                               |                                        ❌ | `BACKEND_ONLY`              | 新增 `REFERRAL_REWARD`，`valid_to=oldExpiry+30d`        | `PREMIUM / Until oldExpiry+30d` |
-| 之前 referral reward 會員中                 |                                        ❌ | `BACKEND_ONLY`              | 新增另一筆 `REFERRAL_REWARD`，`valid_to=oldExpiry+30d`     | `PREMIUM / Until oldExpiry+30d` |
-| Google Play refund/revoke/chargeback 後 |                                        ❌ | `BACKEND_ONLY`，若仍允許拿 reward | 新增 `REFERRAL_REWARD`                                 | `PREMIUM / Until YYYY-MM-DD`    |
+| 原本 inviter 狀態                       | 是否有 active Google Play paid subscription | 發獎路線                              | Reward 後 DB                                                | Reward 後 App 顯示               |
+| -------------------------------------- | -----------------------------------------: | ----------------------------------- | ----------------------------------------------------------- | ------------------------------- |
+| FREE                                   |  ❌                                        | `BACKEND_ONLY`                      | 新增 `REFERRAL_REWARD`，`valid_to=now+30d`                   | `PREMIUM / Until now+30d`       |
+| Trial 中                                |  ❌ 通常不是 paid                           | `BACKEND_ONLY`                      | 新增 `REFERRAL_REWARD`，通常以 active entitlement 到期日 +30d  | `PREMIUM / Until YYYY-MM-DD`    |
+| Trial 已過期                             |  ❌                                       | `BACKEND_ONLY`                      | 新增 `REFERRAL_REWARD`，`valid_to=now+30d`                   | `PREMIUM / Until now+30d`       |
+| Google Play 已過期                       |  ❌                                       | `BACKEND_ONLY`                      | 新增 `REFERRAL_REWARD`，`valid_to=now+30d`                   | `PREMIUM / Until now+30d`       |
+| 後台手動補會員中                           |  ❌                                       | `BACKEND_ONLY`                      | 新增 `REFERRAL_REWARD`，`valid_to=oldExpiry+30d`             | `PREMIUM / Until oldExpiry+30d` |
+| 之前 referral reward 會員中               |  ❌                                       | `BACKEND_ONLY`                      | 新增另一筆 `REFERRAL_REWARD`，`valid_to=oldExpiry+30d`        | `PREMIUM / Until oldExpiry+30d` |
+| Google Play refund/revoke/chargeback 後  |  ❌                                       | `BACKEND_ONLY`，若仍允許拿 reward     | 新增 `REFERRAL_REWARD`                                      | `PREMIUM / Until YYYY-MM-DD`    |
 
 */

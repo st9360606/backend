@@ -3,6 +3,7 @@ package com.calai.backend.referral.service;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import com.calai.backend.referral.domain.ReferralClaimStatus;
 import com.calai.backend.referral.domain.ReferralRejectReason;
+import com.calai.backend.referral.dto.ClaimReferralResponse;
 import com.calai.backend.referral.entity.ReferralClaimEntity;
 import com.calai.backend.referral.repo.ReferralClaimRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,7 @@ public class ReferralClaimService {
     private final UserEntitlementRepository entitlementRepository;
 
     @Transactional
-    public void claim(Long inviteeUserId, String rawPromoCode) {
+    public ClaimReferralResponse claim(Long inviteeUserId, String rawPromoCode) {
         String promoCode = ReferralCodeService.normalizePromoCode(rawPromoCode);
         Long inviterUserId = referralCodeService.findInviterByPromoCode(promoCode);
         if (inviterUserId == null) {
@@ -28,7 +29,12 @@ public class ReferralClaimService {
         if (inviterUserId.equals(inviteeUserId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ReferralRejectReason.SELF_REFERRAL.name());
         }
-        if (claimRepository.findByInviteeUserId(inviteeUserId).isPresent()) {
+        ReferralClaimEntity existingClaim = claimRepository.findByInviteeUserId(inviteeUserId).orElse(null);
+        if (existingClaim != null) {
+            if (inviterUserId.equals(existingClaim.getInviterUserId())
+                    && promoCode.equalsIgnoreCase(existingClaim.getPromoCode())) {
+                return new ClaimReferralResponse(true, true, existingClaim.getStatus());
+            }
             throw new ResponseStatusException(HttpStatus.CONFLICT, ReferralRejectReason.INVITEE_ALREADY_CLAIMED.name());
         }
 
@@ -47,5 +53,6 @@ public class ReferralClaimService {
         entity.setStatus(ReferralClaimStatus.PENDING_SUBSCRIPTION.name());
         entity.setRejectReason(ReferralRejectReason.NONE.name());
         claimRepository.save(entity);
+        return new ClaimReferralResponse(true, false, entity.getStatus());
     }
 }

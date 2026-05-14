@@ -2,6 +2,7 @@ package com.calai.backend.referral.controller;
 
 import com.calai.backend.auth.security.AuthContext;
 import com.calai.backend.referral.dto.ClaimReferralRequest;
+import com.calai.backend.referral.dto.ClaimReferralResponse;
 import com.calai.backend.referral.dto.ReferralSummaryResponse;
 import com.calai.backend.referral.service.ReferralClaimService;
 import com.calai.backend.referral.service.ReferralQueryService;
@@ -25,9 +26,8 @@ public class ReferralController {
     }
 
     @PostMapping("/claim")
-    public ResponseEntity<Void> claim(@Valid @RequestBody ClaimReferralRequest request) {
+    public ResponseEntity<ClaimReferralResponse> claim(@Valid @RequestBody ClaimReferralRequest request) {
         Long userId = authContext.requireUserId();
-        referralClaimService.claim(userId, request.promoCode());
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(referralClaimService.claim(userId, request.promoCode()));
     }
 }

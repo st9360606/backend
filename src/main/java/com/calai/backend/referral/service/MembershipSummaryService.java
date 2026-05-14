@@ -31,14 +31,36 @@ public class MembershipSummaryService {
                 .findFirst()
                 .orElse(null);
 
-        Instant currentPremiumUntil = active == null ? null : active.getValidToUtc();
         String premiumStatus = resolvePremiumStatus(active, now);
+
+        Instant activeUntil = active == null ? null : active.getValidToUtc();
+
+        /*
+         * Important:
+         *
+         * activeUntil only represents the currently active entitlement segment.
+         *
+         * Example:
+         *   2026-05-13 -> 2026-06-12  currently active
+         *   2026-06-12 -> 2026-07-12  future contiguous reward
+         *
+         * If we only return activeUntil, the App shows 2026-06-12.
+         * For PREMIUM users, we should merge contiguous future premium
+         * entitlements and return the final expiry, 2026-07-12.
+         */
+        Instant currentPremiumUntil =
+                PremiumStatus.PREMIUM.name().equals(premiumStatus) && active != null
+                        ? resolveContiguousPremiumUntil(userId, active, now)
+                        : activeUntil;
+
         Instant trialEndsAt = PremiumStatus.TRIAL.name().equals(premiumStatus)
-                ? currentPremiumUntil
+                ? activeUntil
                 : null;
+
         Integer trialDaysLeft = PremiumStatus.TRIAL.name().equals(premiumStatus)
-                ? calcDaysLeft(now, currentPremiumUntil)
+                ? calcDaysLeft(now, activeUntil)
                 : null;
+
         boolean trialEligible = !entitlementRepository.existsAnyTrialHistory(userId);
 
         MembershipRewardLedgerEntity latest = rewardLedgerRepository
@@ -74,15 +96,69 @@ public class MembershipSummaryService {
                 .toList();
     }
 
+    private Instant resolveContiguousPremiumUntil(
+            Long userId,
+            UserEntitlementEntity active,
+            Instant now
+    ) {
+        Instant currentUntil = active.getValidToUtc();
+
+        if (currentUntil == null || !currentUntil.isAfter(now)) {
+            return null;
+        }
+
+        List<UserEntitlementEntity> candidates =
+                entitlementRepository.findUsableActiveAndFutureEntitlements(userId, now);
+
+        for (UserEntitlementEntity candidate : candidates) {
+            if (isTrialEntitlement(candidate)) {
+                continue;
+            }
+
+            Instant from = candidate.getValidFromUtc();
+            Instant to = candidate.getValidToUtc();
+
+            if (from == null || to == null || !to.isAfter(now)) {
+                continue;
+            }
+
+            /*
+             * Only merge overlapping or exactly contiguous entitlements.
+             *
+             * Example:
+             *   currentUntil = 2026-06-12
+             *   from         = 2026-06-12
+             *   to           = 2026-07-12
+             *
+             * This should merge.
+             */
+            boolean contiguousOrOverlapping = !from.isAfter(currentUntil);
+
+            if (contiguousOrOverlapping && to.isAfter(currentUntil)) {
+                currentUntil = to;
+            }
+        }
+
+        return currentUntil;
+    }
+
+    private boolean isTrialEntitlement(UserEntitlementEntity entitlement) {
+        return "TRIAL".equalsIgnoreCase(entitlement.getEntitlementType());
+    }
+
     private String resolvePremiumStatus(UserEntitlementEntity active, Instant now) {
-        if (active == null) return PremiumStatus.FREE.name();
+        if (active == null) {
+            return PremiumStatus.FREE.name();
+        }
 
         Instant validTo = active.getValidToUtc();
+
         if (validTo == null || !validTo.isAfter(now)) {
             return PremiumStatus.FREE.name();
         }
 
         String type = active.getEntitlementType();
+
         if ("TRIAL".equalsIgnoreCase(type)) {
             return PremiumStatus.TRIAL.name();
         }
@@ -91,8 +167,12 @@ public class MembershipSummaryService {
     }
 
     private int calcDaysLeft(Instant now, Instant end) {
-        if (end == null || !end.isAfter(now)) return 0;
+        if (end == null || !end.isAfter(now)) {
+            return 0;
+        }
+
         long seconds = Duration.between(now, end).getSeconds();
+
         return (int) Math.max(1, Math.ceil(seconds / 86_400.0));
     }
 
