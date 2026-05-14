@@ -68,6 +68,7 @@ class ReferralPendingProcessorJobScenarioTest {
 
         verify(txService).markExpired(55L, ReferralRejectReason.VERIFICATION_WINDOW_EXPIRED.name());
         verify(membershipRewardService, never()).grantReferralReward(anyLong(), anyLong());
+        verify(outcomePublisher, never()).publish(any());
     }
 
     @Test
@@ -132,6 +133,7 @@ class ReferralPendingProcessorJobScenarioTest {
         ArgumentCaptor<ReferralOutcomeEvent> eventCaptor = ArgumentCaptor.forClass(ReferralOutcomeEvent.class);
         verify(outcomePublisher).publish(eventCaptor.capture());
         assertThat(eventCaptor.getValue().outcomeType()).isEqualTo(ReferralOutcomeType.REJECTED);
+        assertThat(eventCaptor.getValue().outcomeType()).isNotEqualTo(ReferralOutcomeType.GRANTED);
         assertThat(eventCaptor.getValue().rejectReason()).isEqualTo(ReferralRejectReason.PURCHASE_PENDING.name());
     }
 
@@ -161,6 +163,27 @@ class ReferralPendingProcessorJobScenarioTest {
         assertThat(eventCaptor.getValue().outcomeType()).isEqualTo(ReferralOutcomeType.GRANTED);
         assertThat(eventCaptor.getValue().oldPremiumUntil()).isEqualTo(oldUntil);
         assertThat(eventCaptor.getValue().newPremiumUntil()).isEqualTo(newUntil);
+    }
+
+    @Test
+    void processPendingVerification_shouldNotPublishSuccessOutcomeWhenRewardGrantIsRetryableFailure()
+            throws MembershipRewardService.RewardGrantDeferredException,
+            MembershipRewardService.RewardGrantFinalException {
+        ReferralClaimEntity pending = claim(10L);
+        when(claimRepository.findStaleProcessingClaims(any(Instant.class))).thenReturn(List.of());
+        when(claimRepository.findPendingToProcess(any(Instant.class))).thenReturn(List.of(pending));
+        when(txService.claimForProcessing(anyLong(), any(Instant.class))).thenReturn(true);
+        when(txService.loadClaim(10L)).thenReturn(pending);
+        when(qualificationVerifier.verifyBeforeReward(any(), any(Instant.class)))
+                .thenReturn(ReferralRewardQualificationVerifier.VerificationResult.success());
+        when(membershipRewardService.grantReferralReward(100L, 10L))
+                .thenThrow(new MembershipRewardService.RewardGrantDeferredException("google 503"));
+
+        job.processPendingVerification();
+
+        verify(txService).markPendingAgain(10L);
+        verify(txService, never()).markSuccess(anyLong(), any(Instant.class));
+        verify(outcomePublisher, never()).publish(any());
     }
 
     private ReferralClaimEntity claim(Long id) {

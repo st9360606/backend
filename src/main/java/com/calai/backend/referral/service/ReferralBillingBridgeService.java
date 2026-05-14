@@ -5,6 +5,7 @@ import com.calai.backend.referral.domain.ReferralOutcomeType;
 import com.calai.backend.referral.domain.ReferralRejectReason;
 import com.calai.backend.referral.repo.ReferralClaimRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +20,22 @@ public class ReferralBillingBridgeService {
     private final ReferralClaimRepository claimRepository;
     private final ReferralOutcomePublisher outcomePublisher;
     private final ReferralRiskService referralRiskService;
+
+    /**
+     * Dev-only switch.
+     *
+     * Production must keep this false.
+     * It exists only to allow local/dev fake billing to exercise the full
+     * referral reward flow:
+     *
+     * dev fake purchase
+     * -> PENDING_COOLDOWN
+     * -> process pending
+     * -> SUCCESS
+     * -> REFERRAL_GRANTED email outbox
+     */
+    @Value("${app.referral.dev.allow-test-purchase-rewards:false}")
+    private boolean allowTestPurchaseRewards;
 
     @Transactional
     public void onFirstPaidSubscriptionVerified(
@@ -51,7 +68,9 @@ public class ReferralBillingBridgeService {
                 return;
             }
 
-            if (testPurchase) {
+            boolean rejectTestPurchase = testPurchase && !allowTestPurchaseRewards;
+
+            if (rejectTestPurchase) {
                 referralRiskService.assessPaidSubscription(claim, purchaseTokenHash, pending, true, subscribedAtUtc);
                 reject(claim, ReferralRejectReason.TEST_PURCHASE.name());
                 return;
@@ -73,7 +92,9 @@ public class ReferralBillingBridgeService {
             claim.setPurchaseTokenHash(purchaseTokenHash);
             claim.setSubscribedAtUtc(subscribedAtUtc);
             claim.setQualifiedAtUtc(subscribedAtUtc);
+
             Instant cooldownUntilUtc = subscribedAtUtc.plusSeconds(VERIFICATION_DAYS * 24L * 3600L);
+
             claim.setCooldownUntilUtc(cooldownUntilUtc);
             // Legacy mirror column; remove after all deployed DBs use cooldown_until_utc.
             claim.setVerificationDeadlineUtc(cooldownUntilUtc);

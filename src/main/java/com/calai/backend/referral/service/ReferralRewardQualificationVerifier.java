@@ -10,6 +10,7 @@ import com.calai.backend.referral.entity.ReferralClaimEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -48,6 +49,17 @@ public class ReferralRewardQualificationVerifier {
     private final SubscriptionVerifier subscriptionVerifier;
     private final BillingProductProperties productProps;
     private final ObjectProvider<VoidedPurchaseChecker> voidedPurchaseCheckerProvider;
+
+    /**
+     * Dev-only switch.
+     *
+     * Production must keep this false.
+     * This only allows local/dev fake billing purchases to pass referral final
+     * verification so the full referral reward + email outbox flow can be tested.
+     */
+    @Value("${app.referral.dev.allow-test-purchase-rewards:false}")
+    private boolean allowTestPurchaseRewards;
+
     /**
      * Referral v1.3 final verification:
      * 7 天冷卻期結束、實際發獎前，重新查 Google Play，避免 RTDN / voided purchase
@@ -94,7 +106,7 @@ public class ReferralRewardQualificationVerifier {
             return VerificationResult.retryLater("Google Play final verification failed: " + ex);
         }
 
-        if (verified.testPurchase()) {
+        if (verified.testPurchase() && !allowTestPurchaseRewards) {
             return VerificationResult.reject(
                     ReferralRejectReason.TEST_PURCHASE.name(),
                     "Google Play test purchases do not qualify"

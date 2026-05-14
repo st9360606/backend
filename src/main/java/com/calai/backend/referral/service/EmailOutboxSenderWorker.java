@@ -38,7 +38,9 @@ public class EmailOutboxSenderWorker {
 
     @Scheduled(fixedDelayString = "${referral.email-outbox.fixed-delay:PT1M}")
     public void sendPendingEmails() {
-        if (!emailEnabled) return;
+        if (!emailEnabled) {
+            return;
+        }
 
         var items = emailOutboxRepository.findPendingToSend(
                 maxRetries,
@@ -64,7 +66,7 @@ public class EmailOutboxSenderWorker {
             item.setSentAtUtc(Instant.now());
             emailOutboxRepository.save(item);
 
-            log.info("referral_email_outbox_sent id={} to={}", item.getId(), item.getToEmail());
+            log.info("referral_email_outbox_sent id={}", item.getId());
         } catch (Exception ex) {
             int nextRetry = item.getRetryCount() == null ? 1 : item.getRetryCount() + 1;
             item.setRetryCount(nextRetry);
@@ -106,24 +108,34 @@ public class EmailOutboxSenderWorker {
     }
 
     private String buildGrantedBody(JsonNode payload) {
-        String oldPremiumUntil = payload.path("oldPremiumUntil").asText("—");
-        String newPremiumUntil = payload.path("newPremiumUntil").asText("—");
-        String grantedAtUtc = payload.path("grantedAtUtc").asText("—");
+        String oldPremiumUntil = firstNonBlank(
+                payload.path("oldPremiumUntilLocal").asText(""),
+                payload.path("oldPremiumUntil").asText(""),
+                "No previous expiry"
+        );
+        String newPremiumUntil = firstNonBlank(
+                payload.path("newPremiumUntilLocal").asText(""),
+                payload.path("newPremiumUntil").asText("")
+        );
+        String grantedAt = firstNonBlank(
+                payload.path("grantedAtLocal").asText(""),
+                payload.path("grantedAtUtc").asText("")
+        );
         int daysAdded = payload.path("daysAdded").asInt(30);
 
         return """
-                Great news!
+            Great news!
 
-                Your referral reward has been granted.
+            Your referral reward has been granted.
 
-                Reward:
-                - Premium extended by %d days
-                - Old expiry: %s
-                - New expiry: %s
-                - Granted at: %s
+            Reward:
+            - Premium extended by %d days
+            - Old expiry: %s
+            - New expiry: %s
+            - Granted at: %s
 
-                You can view the details in BiteCal > Premium & Rewards.
-                """.formatted(daysAdded, oldPremiumUntil, newPremiumUntil, grantedAtUtc);
+            You can view the details in BiteCal > Settings > Invite friends.
+            """.formatted(daysAdded, oldPremiumUntil, newPremiumUntil, grantedAt);
     }
 
     private String buildRejectedBody(JsonNode payload) {
@@ -137,5 +149,14 @@ public class EmailOutboxSenderWorker {
 
                 You can view the details in BiteCal > Referrals.
                 """.formatted(reason);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 }

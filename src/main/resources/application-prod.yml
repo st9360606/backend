@@ -74,6 +74,9 @@ management:
       show-details: when_authorized
 
 app:
+  referral:
+    dev:
+      allow-test-purchase-rewards: false
   entitlement:
     expiry-worker:
       fixed-delay: PT10M
@@ -187,7 +190,7 @@ app:
     enabled: true
     otp-length: 4
     ttl-minutes: 10
-    sender: "st9360606@gmail.com"
+    sender: "${APP_EMAIL_SENDER:no-reply@bitecal.app}"
 
   storage:
     weight-photos-dir: uploads/weight-photos

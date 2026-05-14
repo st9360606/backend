@@ -181,3 +181,25 @@ VALUES (
        );
 
 COMMIT;
+
+
+
+
+-- 測試推薦成功發信
+UPDATE calai.referral_claims
+SET
+    qualified_at_utc = UTC_TIMESTAMP(6) - INTERVAL 10 MINUTE,
+    cooldown_until_utc = UTC_TIMESTAMP(6) - INTERVAL 1 MINUTE,
+    verification_deadline_utc = UTC_TIMESTAMP(6) - INTERVAL 1 MINUTE,
+    rewarded_at_utc = NULL,
+    refund_detected_at_utc = NULL,
+    risk_score = 0,
+    risk_decision = 'ALLOW',
+    reject_reason = 'NONE'
+WHERE id = 8
+  AND inviter_user_id = 1
+  AND invitee_user_id = 2
+  AND status = 'PENDING_COOLDOWN';
+
+-- 再執行下面這個
+# curl.exe -X POST "http://localhost:8080/internal/referrals/process-pending" -H "X-Internal-Token: dev-internal-token-change-me"
