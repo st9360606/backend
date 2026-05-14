@@ -6,6 +6,7 @@ import com.calai.backend.referral.entity.ReferralClaimEntity;
 import com.calai.backend.referral.repo.ReferralClaimRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +19,7 @@ public class ReferralPendingProcessorJob {
 
     /**
      * If a backend process crashes while a claim is PROCESSING_REWARD, the claim must be
-     * returned to PENDING_VERIFICATION so the durable Google defer ledger can be reconciled.
+     * returned to PENDING_COOLDOWN so the durable Google defer ledger can be reconciled.
      */
     private static final long STALE_PROCESSING_SECONDS = 30L * 60L;
 
@@ -28,11 +29,15 @@ public class ReferralPendingProcessorJob {
     private final ReferralRewardQualificationVerifier qualificationVerifier;
     private final ReferralOutcomePublisher outcomePublisher;
 
+    @Value("${app.referral.pending-subscription-expire-days:30}")
+    private long pendingSubscriptionExpireDays;
+
     @Scheduled(fixedDelayString = "${referral.process-pending.fixed-delay:PT10M}")
     public void processPendingVerification() {
         Instant now = Instant.now();
 
         recoverStaleProcessingClaims(now);
+        expireStalePendingSubscriptionClaims(now);
 
         var claims = claimRepository.findPendingToProcess(now);
 
@@ -67,6 +72,27 @@ public class ReferralPendingProcessorJob {
              * before attempting another defer.
              */
             txService.markPendingAgain(claim.getId());
+        }
+    }
+
+    private void expireStalePendingSubscriptionClaims(Instant now) {
+        if (pendingSubscriptionExpireDays <= 0) {
+            log.warn("referral_pending_subscription_expiration_disabled days={}", pendingSubscriptionExpireDays);
+            return;
+        }
+
+        Instant cutoff = now.minusSeconds(pendingSubscriptionExpireDays * 24L * 3600L);
+        var expiredClaims = claimRepository.findPendingSubscriptionExpired(cutoff);
+
+        for (var claim : expiredClaims) {
+            log.info(
+                    "referral_pending_subscription_expired claimId={} inviterUserId={} inviteeUserId={} createdAtUtc={}",
+                    claim.getId(),
+                    claim.getInviterUserId(),
+                    claim.getInviteeUserId(),
+                    claim.getCreatedAtUtc()
+            );
+            txService.markExpired(claim.getId(), ReferralRejectReason.VERIFICATION_WINDOW_EXPIRED.name());
         }
     }
 

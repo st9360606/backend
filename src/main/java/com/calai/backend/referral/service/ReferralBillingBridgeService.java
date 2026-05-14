@@ -73,9 +73,12 @@ public class ReferralBillingBridgeService {
             claim.setPurchaseTokenHash(purchaseTokenHash);
             claim.setSubscribedAtUtc(subscribedAtUtc);
             claim.setQualifiedAtUtc(subscribedAtUtc);
-            claim.setVerificationDeadlineUtc(subscribedAtUtc.plusSeconds(VERIFICATION_DAYS * 24L * 3600L));
+            Instant cooldownUntilUtc = subscribedAtUtc.plusSeconds(VERIFICATION_DAYS * 24L * 3600L);
+            claim.setCooldownUntilUtc(cooldownUntilUtc);
+            // Legacy mirror column; remove after all deployed DBs use cooldown_until_utc.
+            claim.setVerificationDeadlineUtc(cooldownUntilUtc);
             claim.setAutoRenewStatus(autoRenewEnabled ? "ON" : "OFF");
-            claim.setStatus(ReferralClaimStatus.PENDING_VERIFICATION.name());
+            claim.setStatus(ReferralClaimStatus.PENDING_COOLDOWN.name());
             claim.setRejectReason(ReferralRejectReason.NONE.name());
         });
     }
@@ -94,6 +97,7 @@ public class ReferralBillingBridgeService {
             claim.setSubscribedAtUtc(detectedAtUtc);
             claim.setQualifiedAtUtc(null);
             claim.setVerificationDeadlineUtc(null);
+            claim.setCooldownUntilUtc(null);
             reject(claim, rejectReason);
         });
     }

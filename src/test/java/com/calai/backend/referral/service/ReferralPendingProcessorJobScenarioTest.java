@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.List;
@@ -42,6 +43,32 @@ class ReferralPendingProcessorJobScenarioTest {
 
     @InjectMocks
     private ReferralPendingProcessorJob job;
+
+
+    @Test
+    void processPendingVerification_shouldExpirePendingSubscriptionClaimsAfterAttributionWindow()
+            throws MembershipRewardService.RewardGrantDeferredException,
+            MembershipRewardService.RewardGrantFinalException {
+        ReflectionTestUtils.setField(job, "pendingSubscriptionExpireDays", 30L);
+
+        ReferralClaimEntity expired = new ReferralClaimEntity();
+        expired.setId(55L);
+        expired.setInviterUserId(100L);
+        expired.setInviteeUserId(200L);
+        expired.setPromoCode("GOOD123");
+        expired.setStatus(ReferralClaimStatus.PENDING_SUBSCRIPTION.name());
+        expired.setRejectReason(ReferralRejectReason.NONE.name());
+        expired.setCreatedAtUtc(Instant.parse("2026-03-01T00:00:00Z"));
+
+        when(claimRepository.findStaleProcessingClaims(any(Instant.class))).thenReturn(List.of());
+        when(claimRepository.findPendingSubscriptionExpired(any(Instant.class))).thenReturn(List.of(expired));
+        when(claimRepository.findPendingToProcess(any(Instant.class))).thenReturn(List.of());
+
+        job.processPendingVerification();
+
+        verify(txService).markExpired(55L, ReferralRejectReason.VERIFICATION_WINDOW_EXPIRED.name());
+        verify(membershipRewardService, never()).grantReferralReward(anyLong(), anyLong());
+    }
 
     @Test
     void processPendingVerification_shouldRecoverStaleProcessingClaimsBeforeNormalProcessing() {
@@ -142,8 +169,9 @@ class ReferralPendingProcessorJobScenarioTest {
         claim.setInviterUserId(100L);
         claim.setInviteeUserId(200L);
         claim.setPromoCode("GOOD123");
-        claim.setStatus(ReferralClaimStatus.PENDING_VERIFICATION.name());
+        claim.setStatus(ReferralClaimStatus.PENDING_COOLDOWN.name());
         claim.setRejectReason(ReferralRejectReason.NONE.name());
+        claim.setCooldownUntilUtc(Instant.parse("2026-05-09T00:00:00Z"));
         claim.setVerificationDeadlineUtc(Instant.parse("2026-05-09T00:00:00Z"));
         return claim;
     }

@@ -92,9 +92,10 @@ class ReferralBillingBridgeServiceScenarioTest {
         );
 
         assertThat(claim.getPurchaseTokenHash()).isEqualTo("token-hash-paid");
-        assertThat(claim.getStatus()).isEqualTo(ReferralClaimStatus.PENDING_VERIFICATION.name());
+        assertThat(claim.getStatus()).isEqualTo(ReferralClaimStatus.PENDING_COOLDOWN.name());
         assertThat(claim.getRejectReason()).isEqualTo(ReferralRejectReason.NONE.name());
         assertThat(claim.getQualifiedAtUtc()).isEqualTo(subscribedAt);
+        assertThat(claim.getCooldownUntilUtc()).isEqualTo(subscribedAt.plusSeconds(7L * 24L * 3600L));
         assertThat(claim.getVerificationDeadlineUtc()).isEqualTo(subscribedAt.plusSeconds(7L * 24L * 3600L));
         assertThat(claim.getAutoRenewStatus()).isEqualTo("OFF");
         verify(outcomePublisher, never()).publish(any());

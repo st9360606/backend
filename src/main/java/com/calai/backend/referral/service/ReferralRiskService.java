@@ -4,6 +4,7 @@ import com.calai.backend.referral.entity.ReferralClaimEntity;
 import com.calai.backend.referral.entity.ReferralRiskSignalEntity;
 import com.calai.backend.referral.repo.ReferralRiskSignalRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -25,6 +26,50 @@ public class ReferralRiskService {
     }
 
     private final ReferralRiskSignalRepository riskSignalRepository;
+
+    /**
+     * Dev/ops escape hatch for pre-claim risk rejection tests.
+     * Production can keep this empty unless a real pre-claim risk engine is wired in.
+     * Format: app.referral.claim-risk.reject-user-ids=1,2,3
+     */
+    @Value("${app.referral.claim-risk.reject-user-ids:}")
+    private String claimRiskRejectUserIds;
+
+    /**
+     * Pre-claim guard used by onboarding bootstrap before the user has entered a
+     * promo code. This keeps risk-rejected users from seeing the referral-code
+     * page in the first place.
+     */
+    public boolean shouldRejectPreClaim(Long inviteeUserId) {
+        if (inviteeUserId == null) {
+            return true;
+        }
+        return isConfiguredClaimRiskRejected(inviteeUserId);
+    }
+
+    /**
+     * Full claim guard used by POST /api/v1/referrals/claim after a promo code is
+     * known. Keep this method separate from shouldRejectPreClaim() so a future
+     * real risk engine can use inviter/code signals without changing bootstrap.
+     */
+    public boolean shouldRejectClaim(Long inviteeUserId, Long inviterUserId, String promoCode) {
+        return shouldRejectPreClaim(inviteeUserId);
+    }
+
+    private boolean isConfiguredClaimRiskRejected(Long userId) {
+        if (claimRiskRejectUserIds == null || claimRiskRejectUserIds.isBlank()) {
+            return false;
+        }
+
+        String target = String.valueOf(userId);
+        String[] parts = claimRiskRejectUserIds.split(",");
+        for (String part : parts) {
+            if (target.equals(part.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public RiskResult assessPaidSubscription(
             ReferralClaimEntity claim,

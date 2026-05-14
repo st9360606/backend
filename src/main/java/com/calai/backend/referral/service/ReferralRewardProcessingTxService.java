@@ -30,7 +30,7 @@ public class ReferralRewardProcessingTxService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markPendingAgain(Long claimId) {
         ReferralClaimEntity claim = loadClaimForUpdate(claimId);
-        claim.setStatus(ReferralClaimStatus.PENDING_VERIFICATION.name());
+        claim.setStatus(ReferralClaimStatus.PENDING_COOLDOWN.name());
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -44,6 +44,13 @@ public class ReferralRewardProcessingTxService {
     public void markRejected(Long claimId, String reason) {
         ReferralClaimEntity claim = loadClaimForUpdate(claimId);
         claim.setStatus(ReferralClaimStatus.REJECTED.name());
+        claim.setRejectReason(reason);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markExpired(Long claimId, String reason) {
+        ReferralClaimEntity claim = loadClaimForUpdate(claimId);
+        claim.setStatus(ReferralClaimStatus.EXPIRED.name());
         claim.setRejectReason(reason);
     }
 

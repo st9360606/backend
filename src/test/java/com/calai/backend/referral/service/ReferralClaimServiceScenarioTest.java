@@ -1,10 +1,13 @@
 package com.calai.backend.referral.service;
 
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
+import com.calai.backend.referral.domain.PremiumStatus;
 import com.calai.backend.referral.domain.ReferralClaimStatus;
 import com.calai.backend.referral.domain.ReferralRejectReason;
+import com.calai.backend.referral.dto.MembershipSummaryResponse;
 import com.calai.backend.referral.entity.ReferralClaimEntity;
 import com.calai.backend.referral.repo.ReferralClaimRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -12,13 +15,18 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,8 +43,92 @@ class ReferralClaimServiceScenarioTest {
     @Mock
     private UserEntitlementRepository entitlementRepository;
 
+    @Mock
+    private MembershipSummaryService membershipSummaryService;
+
+    @Mock
+    private ReferralRiskService referralRiskService;
+
     @InjectMocks
     private ReferralClaimService service;
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(service, "referralEnabled", true);
+        lenient().when(membershipSummaryService.getMembershipSummary(anyLong())).thenReturn(membership(PremiumStatus.FREE.name(), false));
+        lenient().when(referralRiskService.shouldRejectClaim(anyLong(), any(), anyString())).thenReturn(false);
+    }
+
+    @Test
+    void claim_shouldRejectWhenReferralFeatureDisabled() {
+        ReflectionTestUtils.setField(service, "referralEnabled", false);
+
+        assertThatThrownBy(() -> service.claim(200L, "GOOD123"))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                    assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(ex.getReason()).isEqualTo(ReferralRejectReason.REFERRAL_DISABLED.name());
+                });
+
+        verify(referralCodeService, never()).findInviterByPromoCode(anyString());
+        verify(claimRepository, never()).save(any());
+    }
+
+    @Test
+    void claim_shouldRejectPremiumActiveUserBeforeCreatingClaim() {
+        when(referralCodeService.findInviterByPromoCode("GOOD123")).thenReturn(101L);
+        when(claimRepository.findByInviteeUserId(200L)).thenReturn(Optional.empty());
+        when(membershipSummaryService.getMembershipSummary(200L)).thenReturn(membership(PremiumStatus.PREMIUM.name(), false));
+
+        assertThatThrownBy(() -> service.claim(200L, "GOOD123"))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                    assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(ex.getReason()).isEqualTo(ReferralRejectReason.PREMIUM_ACTIVE.name());
+                });
+
+        verify(claimRepository, never()).save(any());
+    }
+
+    @Test
+    void claim_shouldRejectTrialActiveUserBeforeCreatingClaim() {
+        when(referralCodeService.findInviterByPromoCode("GOOD123")).thenReturn(101L);
+        when(claimRepository.findByInviteeUserId(200L)).thenReturn(Optional.empty());
+        when(membershipSummaryService.getMembershipSummary(200L)).thenReturn(membership(PremiumStatus.TRIAL.name(), false));
+
+        assertThatThrownBy(() -> service.claim(200L, "GOOD123"))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                    assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(ex.getReason()).isEqualTo(ReferralRejectReason.TRIAL_ACTIVE.name());
+                });
+
+    }
+
+    @Test
+    void claim_shouldRejectPaymentIssueUserBeforeCreatingClaim() {
+        when(referralCodeService.findInviterByPromoCode("GOOD123")).thenReturn(101L);
+        when(claimRepository.findByInviteeUserId(200L)).thenReturn(Optional.empty());
+        when(membershipSummaryService.getMembershipSummary(200L)).thenReturn(membership(PremiumStatus.PREMIUM.name(), true));
+
+        assertThatThrownBy(() -> service.claim(200L, "GOOD123"))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                    assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(ex.getReason()).isEqualTo(ReferralRejectReason.PAYMENT_ISSUE.name());
+                });
+
+    }
+
+    @Test
+    void claim_shouldRejectRiskRejectedUserBeforeCreatingClaim() {
+        when(referralCodeService.findInviterByPromoCode("GOOD123")).thenReturn(101L);
+        when(claimRepository.findByInviteeUserId(200L)).thenReturn(Optional.empty());
+        when(referralRiskService.shouldRejectClaim(anyLong(), any(), anyString())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.claim(200L, "GOOD123"))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                    assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(ex.getReason()).isEqualTo(ReferralRejectReason.RISK_REJECTED.name());
+                });
+
+    }
 
     @Test
     void claim_shouldRejectInvalidPromoCodeWithoutCreatingClaim() {
@@ -98,7 +190,6 @@ class ReferralClaimServiceScenarioTest {
         verify(claimRepository, never()).save(any());
     }
 
-
     @Test
     void claim_shouldBeIdempotentWhenSameInviteeSubmitsSamePromoCodeAgain() {
         ReferralClaimEntity existing = new ReferralClaimEntity();
@@ -136,5 +227,23 @@ class ReferralClaimServiceScenarioTest {
         assertThat(saved.getPromoCode()).isEqualTo("GOOD123");
         assertThat(saved.getStatus()).isEqualTo(ReferralClaimStatus.PENDING_SUBSCRIPTION.name());
         assertThat(saved.getRejectReason()).isEqualTo(ReferralRejectReason.NONE.name());
+    }
+
+    private MembershipSummaryResponse membership(String premiumStatus, boolean paymentIssue) {
+        return new MembershipSummaryResponse(
+                premiumStatus,
+                null,
+                null,
+                null,
+                true,
+                paymentIssue,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                Instant.parse("2026-05-01T00:00:00Z")
+        );
     }
 }

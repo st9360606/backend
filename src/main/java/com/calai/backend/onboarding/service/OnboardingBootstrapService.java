@@ -3,9 +3,11 @@ package com.calai.backend.onboarding.service;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import com.calai.backend.onboarding.dto.OnboardingBootstrapResponse;
 import com.calai.backend.referral.domain.PremiumStatus;
+import com.calai.backend.referral.domain.ReferralRejectReason;
 import com.calai.backend.referral.entity.ReferralClaimEntity;
 import com.calai.backend.referral.repo.ReferralClaimRepository;
 import com.calai.backend.referral.service.MembershipSummaryService;
+import com.calai.backend.referral.service.ReferralRiskService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,7 @@ public class OnboardingBootstrapService {
     private final MembershipSummaryService membershipSummaryService;
     private final UserEntitlementRepository entitlementRepository;
     private final ReferralClaimRepository referralClaimRepository;
+    private final ReferralRiskService referralRiskService;
 
     @Value("${app.referral.enabled:true}")
     private boolean referralEnabled;
@@ -46,12 +49,15 @@ public class OnboardingBootstrapService {
 
         boolean paymentRecoveryRequired = PremiumStatus.FREE.name().equals(premiumStatus) && hasPaidSubscriptionHistory;
 
+        boolean riskRejected = referralRiskService.shouldRejectPreClaim(userId);
+
         String ineligibleReason = referralIneligibleReason(
                 premiumStatus,
                 paymentIssue,
                 paymentRecoveryRequired,
                 hasPaidSubscriptionHistory,
-                hasReferralClaim
+                hasReferralClaim,
+                riskRejected
         );
         boolean referralClaimEligible = ineligibleReason == null;
 
@@ -83,16 +89,20 @@ public class OnboardingBootstrapService {
             boolean paymentIssue,
             boolean paymentRecoveryRequired,
             boolean hasPaidSubscriptionHistory,
-            boolean hasReferralClaim
+            boolean hasReferralClaim,
+            boolean riskRejected
     ) {
-        if (!referralEnabled) return "REFERRAL_DISABLED";
+        if (!referralEnabled) return ReferralRejectReason.REFERRAL_DISABLED.name();
         if (PremiumStatus.PREMIUM.name().equals(premiumStatus)) {
-            return paymentIssue ? "PAYMENT_ISSUE" : "PREMIUM_ACTIVE";
+            return paymentIssue
+                    ? ReferralRejectReason.PAYMENT_ISSUE.name()
+                    : ReferralRejectReason.PREMIUM_ACTIVE.name();
         }
-        if (PremiumStatus.TRIAL.name().equals(premiumStatus)) return "TRIAL_ACTIVE";
-        if (paymentRecoveryRequired) return "PAYMENT_RECOVERY_REQUIRED";
-        if (hasPaidSubscriptionHistory) return "HAS_PAID_HISTORY";
+        if (PremiumStatus.TRIAL.name().equals(premiumStatus)) return ReferralRejectReason.TRIAL_ACTIVE.name();
+        if (paymentRecoveryRequired) return ReferralRejectReason.PAYMENT_RECOVERY_REQUIRED.name();
+        if (hasPaidSubscriptionHistory) return ReferralRejectReason.HAS_PAID_HISTORY.name();
         if (hasReferralClaim) return "ALREADY_CLAIMED";
+        if (riskRejected) return ReferralRejectReason.RISK_REJECTED.name();
         return null;
     }
 

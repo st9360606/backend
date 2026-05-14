@@ -1,5 +1,6 @@
 package com.calai.backend.referral.service;
 
+import com.calai.backend.referral.domain.ReferralClaimStatus;
 import com.calai.backend.referral.domain.ReferralOutcomeType;
 import com.calai.backend.referral.entity.EmailOutboxEntity;
 import com.calai.backend.referral.entity.ReferralCaseSnapshotEntity;
@@ -18,6 +19,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 @RequiredArgsConstructor
 @Component
@@ -88,9 +90,9 @@ public class ReferralOutcomeConsumers {
 
     private void refreshSnapshot(Long inviterUserId) {
         long successCount = claimRepository.countByInviterUserIdAndStatus(inviterUserId, "SUCCESS");
-        long pendingCount = claimRepository.countByInviterUserIdAndStatus(inviterUserId, "PENDING_VERIFICATION");
-        long rejectedCount = claimRepository.countByInviterUserIdAndStatus(inviterUserId, "REJECTED");
-        long totalInvited = successCount + pendingCount + rejectedCount + claimRepository.countByInviterUserIdAndStatus(inviterUserId, "PENDING_SUBSCRIPTION");
+        long pendingCount = claimRepository.countByInviterUserIdAndStatusIn(inviterUserId, pendingStatuses());
+        long rejectedCount = claimRepository.countByInviterUserIdAndStatusIn(inviterUserId, rejectedStatuses());
+        long totalInvited = successCount + pendingCount + rejectedCount;
         int totalRewardedDays = membershipSummaryService.getRewardHistory(inviterUserId)
                 .stream()
                 .filter(it -> "SUCCESS".equalsIgnoreCase(it.grantStatus()) || "GRANTED".equalsIgnoreCase(it.grantStatus()))
@@ -107,6 +109,22 @@ public class ReferralOutcomeConsumers {
         snapshot.setTotalRewardedDays(totalRewardedDays);
         snapshot.setCurrentPremiumUntil(membershipSummaryService.getMembershipSummary(inviterUserId).currentPremiumUntil());
         caseSnapshotRepository.save(snapshot);
+    }
+
+    private List<String> pendingStatuses() {
+        return List.of(
+                ReferralClaimStatus.PENDING_SUBSCRIPTION.name(),
+                ReferralClaimStatus.PENDING_COOLDOWN.name(),
+                ReferralClaimStatus.PENDING_VERIFICATION.name(),
+                ReferralClaimStatus.PROCESSING_REWARD.name()
+        );
+    }
+
+    private List<String> rejectedStatuses() {
+        return List.of(
+                ReferralClaimStatus.REJECTED.name(),
+                ReferralClaimStatus.EXPIRED.name()
+        );
     }
 
     private String buildPayload(ReferralOutcomeEvent event) {
@@ -128,12 +146,13 @@ public class ReferralOutcomeConsumers {
         if (raw == null || raw.isBlank()) return "This referral did not qualify for a reward";
         return switch (raw) {
             case "REFUNDED_OR_REVOKED", "CHARGEBACK" -> "Payment was refunded or revoked";
-            case "ABUSE_RISK" -> "This referral did not meet verification requirements";
+            case "ABUSE_RISK", "RISK_REJECTED" -> "This referral did not meet verification requirements";
             case "INVITEE_ALREADY_SUBSCRIBED" -> "This referral did not qualify because the invited account had already subscribed before";
             case "PURCHASE_PENDING" -> "The subscription payment was not completed";
             case "TEST_PURCHASE" -> "Test purchases do not qualify for referral rewards";
             case "PURCHASE_NOT_VERIFIED" -> "The subscription payment could not be verified";
             case "REWARD_GRANT_FAILED" -> "We could not apply the referral reward";
+            case "VERIFICATION_WINDOW_EXPIRED" -> "The invited account did not subscribe in time";
             default -> "This referral did not qualify for a reward";
         };
     }

@@ -13,6 +13,7 @@ import java.time.Instant;
         indexes = {
                 @Index(name = "idx_referral_claims_inviter_status", columnList = "inviter_user_id,status,verification_deadline_utc"),
                 @Index(name = "idx_referral_claims_status_deadline", columnList = "status,verification_deadline_utc"),
+                @Index(name = "idx_referral_claims_status_cooldown", columnList = "status,cooldown_until_utc"),
                 @Index(name = "idx_referral_claims_status_updated", columnList = "status,updated_at_utc")
         },
         uniqueConstraints = {
@@ -45,8 +46,18 @@ public class ReferralClaimEntity {
     @Column(name = "qualified_at_utc")
     private Instant qualifiedAtUtc;
 
+    /**
+     * Legacy column name kept for backward compatibility.
+     * New code writes both verificationDeadlineUtc and cooldownUntilUtc until all DBs are migrated.
+     */
     @Column(name = "verification_deadline_utc")
     private Instant verificationDeadlineUtc;
+
+    /**
+     * Commercial name for the 7-day referral cooldown deadline.
+     */
+    @Column(name = "cooldown_until_utc")
+    private Instant cooldownUntilUtc;
 
     @Column(name = "rewarded_at_utc")
     private Instant rewardedAtUtc;
