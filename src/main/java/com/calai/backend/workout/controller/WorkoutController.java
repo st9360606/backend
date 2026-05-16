@@ -1,5 +1,7 @@
 package com.calai.backend.workout.controller;
 
+import com.calai.backend.auth.security.AuthContext;
+import com.calai.backend.entitlement.service.PremiumFeatureGateService;
 import com.calai.backend.workout.dto.*;
 import com.calai.backend.workout.service.WorkoutService;
 import org.springframework.http.HttpStatus;
@@ -14,9 +16,17 @@ import java.time.ZoneOffset;
 public class WorkoutController {
 
     private final WorkoutService workoutService;
+    private final AuthContext authContext;
+    private final PremiumFeatureGateService premiumFeatureGateService;
 
-    public WorkoutController(WorkoutService workoutService) {
+    public WorkoutController(
+            WorkoutService workoutService,
+            AuthContext authContext,
+            PremiumFeatureGateService premiumFeatureGateService
+    ) {
         this.workoutService = workoutService;
+        this.authContext = authContext;
+        this.premiumFeatureGateService = premiumFeatureGateService;
     }
 
     /**
@@ -44,6 +54,7 @@ public class WorkoutController {
     /** WS2: 自由文字估算 */
     @PostMapping("/estimate")
     public EstimateResponse estimate(@RequestBody EstimateRequest req) {
+        premiumFeatureGateService.requirePremium(authContext.requireUserId());
         return workoutService.estimate(req.text());
     }
 
@@ -53,6 +64,7 @@ public class WorkoutController {
             @RequestBody LogWorkoutRequest req,
             @RequestHeader(value = "X-Client-Timezone", required = false) String tz
     ) {
+        premiumFeatureGateService.requirePremium(authContext.requireUserId());
         return workoutService.log(req, parseZone(tz));
     }
 

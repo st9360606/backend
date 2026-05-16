@@ -18,6 +18,10 @@ public class EntitlementService {
 
     private final UserEntitlementRepository repo;
 
+    public boolean hasActiveEntitlement(Long userId, Instant nowUtc) {
+        return !repo.findActiveBestFirst(userId, nowUtc, PageRequest.of(0, 1)).isEmpty();
+    }
+
     public Tier resolveTier(Long userId, Instant nowUtc) {
         var list = repo.findActive(userId, nowUtc, PageRequest.of(0, 5));
 

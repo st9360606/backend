@@ -2,7 +2,6 @@ package com.calai.backend.entitlement.service;
 
 import com.calai.backend.entitlement.entity.UserEntitlementEntity;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
-import com.calai.backend.entitlement.service.EntitlementService;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.data.domain.Pageable;
@@ -16,6 +15,33 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 class EntitlementServiceTest {
+
+    @Test
+    void hasActiveEntitlement_shouldReturnFalseWhenRepositoryFindsNoUsableActiveRow() {
+        UserEntitlementRepository repo = Mockito.mock(UserEntitlementRepository.class);
+        EntitlementService service = new EntitlementService(repo);
+
+        when(repo.findActiveBestFirst(eq(1L), any(Instant.class), any(Pageable.class)))
+                .thenReturn(List.of());
+
+        boolean result = service.hasActiveEntitlement(1L, Instant.parse("2026-03-03T00:00:00Z"));
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    void hasActiveEntitlement_shouldReturnTrueWhenRepositoryFindsUsableActiveRow() {
+        UserEntitlementRepository repo = Mockito.mock(UserEntitlementRepository.class);
+        EntitlementService service = new EntitlementService(repo);
+        UserEntitlementEntity active = Mockito.mock(UserEntitlementEntity.class);
+
+        when(repo.findActiveBestFirst(eq(1L), any(Instant.class), any(Pageable.class)))
+                .thenReturn(List.of(active));
+
+        boolean result = service.hasActiveEntitlement(1L, Instant.parse("2026-03-03T00:00:00Z"));
+
+        assertThat(result).isTrue();
+    }
 
     @Test
     void resolveTier_should_return_none_when_no_active_entitlement() {

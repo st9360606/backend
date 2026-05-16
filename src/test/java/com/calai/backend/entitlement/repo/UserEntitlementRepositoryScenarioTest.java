@@ -205,6 +205,51 @@ class UserEntitlementRepositoryScenarioTest {
         assertThat(active.getFirst().getEntitlementType()).isEqualTo("YEARLY");
     }
 
+    @Test
+    void findActiveBestFirst_shouldExcludeRowsWithExpiredOrRevokedStatusEvenWhenValidWindowLooksActive() {
+        repository.save(entitlement(
+                "expired-status", 108L, "MONTHLY", "EXPIRED", "GOOGLE_PLAY",
+                "SUBSCRIPTION_STATE_ACTIVE", "OK", now.plusSeconds(86400),
+                "cipher-expired-status", "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED"
+        ));
+        repository.save(entitlement(
+                "revoked-status", 108L, "YEARLY", "REVOKED", "GOOGLE_PLAY",
+                "SUBSCRIPTION_STATE_ACTIVE", "OK", now.plusSeconds(86400),
+                "cipher-revoked-status", "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED"
+        ));
+
+        List<UserEntitlementEntity> active = repository.findActiveBestFirst(
+                108L,
+                now,
+                PageRequest.of(0, 10)
+        );
+
+        assertThat(active).isEmpty();
+    }
+
+    @Test
+    void findActiveBestFirst_shouldExcludeDirtyActiveRowWhenValidToIsPast() {
+        repository.save(entitlement(
+                "past-valid-to",
+                109L,
+                "MONTHLY",
+                "ACTIVE",
+                "GOOGLE_PLAY",
+                "SUBSCRIPTION_STATE_ACTIVE",
+                "OK",
+                now.minusSeconds(1),
+                "cipher-past-valid-to",
+                "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED"
+        ));
+
+        List<UserEntitlementEntity> active = repository.findActiveBestFirst(
+                109L,
+                now,
+                PageRequest.of(0, 10)
+        );
+
+        assertThat(active).isEmpty();
+    }
     private UserEntitlementEntity entitlement(
             String id,
             Long userId,
