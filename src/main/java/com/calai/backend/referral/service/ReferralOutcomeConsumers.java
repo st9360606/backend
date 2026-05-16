@@ -10,6 +10,7 @@ import com.calai.backend.referral.repo.ReferralCaseSnapshotRepository;
 import com.calai.backend.referral.repo.ReferralClaimRepository;
 import com.calai.backend.referral.repo.UserNotificationRepository;
 import com.calai.backend.users.profile.repo.UserProfileRepository;
+import com.calai.backend.users.user.entity.User;
 import com.calai.backend.users.user.repo.UserRepo;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +37,10 @@ import java.util.Map;
 public class ReferralOutcomeConsumers {
 
     private static final ZoneId DEFAULT_ZONE = ZoneOffset.UTC;
+    private static final int REFERRAL_REWARD_DAYS = 30;
+    private static final String REFERRAL_SOURCE_TYPE = "REFERRAL_CLAIM";
+    private static final String INBOX_DEEP_LINK = "bitecal://settings/inbox";
+    private static final String INBOX_REFERRAL_DEEP_LINK_PREFIX = "bitecal://settings/inbox/referral/";
 
     private static final DateTimeFormatter LOCAL_DATE_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd").withLocale(Locale.ENGLISH);
@@ -63,7 +68,7 @@ public class ReferralOutcomeConsumers {
     private void createNotification(ReferralOutcomeEvent event) {
         if (notificationRepository.existsByUserIdAndSourceTypeAndSourceRefId(
                 event.inviterUserId(),
-                "REFERRAL_CLAIM",
+                REFERRAL_SOURCE_TYPE,
                 event.claimId()
         )) {
             return;
@@ -74,22 +79,54 @@ public class ReferralOutcomeConsumers {
         UserNotificationEntity entity = new UserNotificationEntity();
         entity.setUserId(event.inviterUserId());
         entity.setType(event.outcomeType().name());
-        entity.setSourceType("REFERRAL_CLAIM");
+        entity.setSourceType(REFERRAL_SOURCE_TYPE);
         entity.setSourceRefId(event.claimId());
 
         if (event.outcomeType() == ReferralOutcomeType.GRANTED) {
-            entity.setTitle("Referral reward granted");
-            entity.setMessage("Your Premium has been extended by 30 days. New expiry date: "
-                    + formatLocalDate(event.newPremiumUntil(), userZone));
-            entity.setDeepLink("bitecal://referrals");
+            entity.setTitle(buildGrantedNotificationTitle());
+            entity.setMessage(buildGrantedNotificationMessage(event, userZone));
         } else {
-            entity.setTitle("Referral reward not granted");
-            entity.setMessage("Your referral did not qualify for a reward. Reason: "
-                    + sanitizeReason(event.rejectReason()));
-            entity.setDeepLink("bitecal://referrals");
+            entity.setTitle(buildRejectedNotificationTitle());
+            entity.setMessage(buildRejectedNotificationMessage(event));
         }
 
+        entity.setDeepLink(buildInboxReferralDeepLink(event.claimId()));
         notificationRepository.save(entity);
+    }
+
+    private String buildGrantedNotificationTitle() {
+        return "🎉 30 free Premium days unlocked";
+    }
+
+    private String buildGrantedNotificationMessage(ReferralOutcomeEvent event, ZoneId userZone) {
+        String newExpiryDate = formatLocalDate(event.newPremiumUntil(), userZone);
+
+        if (newExpiryDate.isBlank()) {
+            return "Your BiteCal Premium has been extended by 30 days.";
+        }
+
+        return "Your BiteCal Premium has been extended by 30 days.\nNew expiry: " + newExpiryDate;
+    }
+
+    private String buildRejectedNotificationTitle() {
+        return "Referral reward not granted";
+    }
+
+    private String buildRejectedNotificationMessage(ReferralOutcomeEvent event) {
+        String reason = sanitizeReason(event.rejectReason());
+
+        if (reason.isBlank()) {
+            return "This referral did not qualify for a reward.";
+        }
+
+        return "This referral did not qualify.\nReason: " + reason + ".";
+    }
+
+    private String buildInboxReferralDeepLink(Long claimId) {
+        if (claimId == null) {
+            return INBOX_DEEP_LINK;
+        }
+        return INBOX_REFERRAL_DEEP_LINK_PREFIX + claimId;
     }
 
     private void createEmailOutbox(ReferralOutcomeEvent event) {
@@ -98,7 +135,7 @@ public class ReferralOutcomeConsumers {
         }
 
         String email = userRepo.findById(event.inviterUserId())
-                .map(user -> user.getEmail())
+                .map(User::getEmail)
                 .orElse(null);
 
         if (email == null || email.isBlank()) {
@@ -192,7 +229,7 @@ public class ReferralOutcomeConsumers {
     private String buildGrantedPayload(ReferralOutcomeEvent event, ZoneId userZone) throws JsonProcessingException {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("claimId", event.claimId());
-        payload.put("daysAdded", 30);
+        payload.put("daysAdded", REFERRAL_REWARD_DAYS);
 
         // Raw UTC values: keep for audit/debug/backward compatibility.
         payload.put("oldPremiumUntil", formatInstant(event.oldPremiumUntil()));
@@ -204,11 +241,12 @@ public class ReferralOutcomeConsumers {
         payload.put("oldPremiumUntilLocal", formatLocalDateTimeOrFallback(
                 event.oldPremiumUntil(),
                 userZone,
-                "No previous expiry"
+                "No active Premium expiry"
         ));
         payload.put("newPremiumUntilLocal", formatLocalDateTime(event.newPremiumUntil(), userZone));
         payload.put("newExpiryDate", formatLocalDate(event.newPremiumUntil(), userZone));
         payload.put("grantedAtLocal", formatLocalDateTime(event.rewardedAtUtc(), userZone));
+        payload.put("notificationDeepLink", buildInboxReferralDeepLink(event.claimId()));
 
         return objectMapper.writeValueAsString(payload);
     }

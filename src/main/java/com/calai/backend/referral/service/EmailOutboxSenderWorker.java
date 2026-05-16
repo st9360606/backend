@@ -89,18 +89,27 @@ public class EmailOutboxSenderWorker {
         }
     }
 
-    private String resolveSubject(EmailOutboxEntity item) {
-        return switch (item.getTemplateType()) {
-            case "REFERRAL_GRANTED" -> "Your BiteCal referral reward was granted";
+    private String resolveSubject(EmailOutboxEntity item) throws Exception {
+        String templateType = firstNonBlank(item.getTemplateType(), "");
+
+        return switch (templateType) {
+            case "REFERRAL_GRANTED" -> buildGrantedSubject(item);
             case "REFERRAL_REJECTED" -> "Your BiteCal referral did not qualify";
             default -> "BiteCal notification";
         };
     }
 
+    private String buildGrantedSubject(EmailOutboxEntity item) throws Exception {
+        JsonNode payload = objectMapper.readTree(item.getTemplatePayloadJson());
+        int daysAdded = payload.path("daysAdded").asInt(30);
+        return "🎉 You earned %d free days of BiteCal Premium".formatted(daysAdded);
+    }
+
     private String resolveBody(EmailOutboxEntity item) throws Exception {
         JsonNode payload = objectMapper.readTree(item.getTemplatePayloadJson());
+        String templateType = firstNonBlank(item.getTemplateType(), "");
 
-        return switch (item.getTemplateType()) {
+        return switch (templateType) {
             case "REFERRAL_GRANTED" -> buildGrantedBody(payload);
             case "REFERRAL_REJECTED" -> buildRejectedBody(payload);
             default -> "You have a new BiteCal notification.";
@@ -111,31 +120,41 @@ public class EmailOutboxSenderWorker {
         String oldPremiumUntil = firstNonBlank(
                 payload.path("oldPremiumUntilLocal").asText(""),
                 payload.path("oldPremiumUntil").asText(""),
-                "No previous expiry"
+                "No active Premium expiry"
         );
         String newPremiumUntil = firstNonBlank(
                 payload.path("newPremiumUntilLocal").asText(""),
-                payload.path("newPremiumUntil").asText("")
+                payload.path("newPremiumUntil").asText(""),
+                "Not available"
         );
         String grantedAt = firstNonBlank(
                 payload.path("grantedAtLocal").asText(""),
-                payload.path("grantedAtUtc").asText("")
+                payload.path("grantedAtUtc").asText(""),
+                "Not available"
         );
         int daysAdded = payload.path("daysAdded").asInt(30);
 
         return """
-            Great news!
+                Great news! 🎁
 
-            Your referral reward has been granted.
+                Your referral reward has been granted successfully.
 
-            Reward:
-            - Premium extended by %d days
-            - Old expiry: %s
-            - New expiry: %s
-            - Granted at: %s
+                You've earned %d free days of BiteCal Premium because your invited friend completed a valid subscription.
 
-            You can view the details in BiteCal > Settings > Invite friends.
-            """.formatted(daysAdded, oldPremiumUntil, newPremiumUntil, grantedAt);
+                Reward summary:
+                - 🎁 Reward: Premium extended by %d days
+                - 📅 Previous expiry: %s
+                - 🚀 New expiry: %s
+                - ✅ Granted at: %s
+
+                You can view your referral reward details in:
+
+                BiteCal → Settings → Inbox
+
+                Thanks for sharing BiteCal with your friends. Keep inviting to earn more Premium days! 💪
+
+                The BiteCal Team
+                """.formatted(daysAdded, daysAdded, oldPremiumUntil, newPremiumUntil, grantedAt);
     }
 
     private String buildRejectedBody(JsonNode payload) {
@@ -147,7 +166,7 @@ public class EmailOutboxSenderWorker {
                 Reason:
                 %s
 
-                You can view the details in BiteCal > Referrals.
+                You can view the details in BiteCal → Settings → Inbox.
                 """.formatted(reason);
     }
 
