@@ -30,7 +30,9 @@ public class User {
     @Column(name = "email", nullable = true, unique = true, length = 320)
     private String email;
 
-    @Column private String name;
+    @Column(name = "name", length = 40)
+    private String name;
+
     @Column private String picture;
 
     // 登入來源（資料表若已經有 provider 欄位，這裡就正好對上）
