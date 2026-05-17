@@ -92,9 +92,9 @@ class ReferralOutcomeConsumersTest {
         UserNotificationEntity notification = notificationCaptor.getValue();
         assertThat(notification.getUserId()).isEqualTo(100L);
         assertThat(notification.getType()).isEqualTo("GRANTED");
-        assertThat(notification.getTitle()).isEqualTo("Referral reward granted");
-        assertThat(notification.getMessage()).isEqualTo("Your Premium has been extended by 30 days. New expiry date: 2026-05-31");
-        assertThat(notification.getDeepLink()).isEqualTo("bitecal://referrals");
+        assertThat(notification.getTitle()).isEqualTo("🎉 30 free Premium days unlocked");
+        assertThat(notification.getMessage()).isEqualTo("Your BiteCal Premium has been extended by 30 days.\nNew expiry: 2026-05-31");
+        assertThat(notification.getDeepLink()).isEqualTo("bitecal://settings/inbox/referral/10");
 
         ArgumentCaptor<EmailOutboxEntity> emailCaptor = ArgumentCaptor.forClass(EmailOutboxEntity.class);
         verify(emailOutboxRepository).save(emailCaptor.capture());

@@ -4,9 +4,12 @@ import com.calai.backend.referral.entity.UserNotificationEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface UserNotificationRepository extends JpaRepository<UserNotificationEntity, Long> {
     boolean existsByUserIdAndSourceTypeAndSourceRefId(Long userId, String sourceType, Long sourceRefId);
+
+    Optional<UserNotificationEntity> findByIdAndUserId(Long id, Long userId);
 
     List<UserNotificationEntity> findTop50ByUserIdOrderByCreatedAtUtcDesc(Long userId);
 

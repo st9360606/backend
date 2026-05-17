@@ -61,13 +61,17 @@ class EmailOutboxSenderWorkerTest {
         SimpleMailMessage message = messageCaptor.getValue();
         assertThat(message.getFrom()).isEqualTo("no-reply@bitecal.app");
         assertThat(message.getTo()).containsExactly("inviter@example.com");
-        assertThat(message.getSubject()).isEqualTo("Your BiteCal referral reward was granted");
+        assertThat(message.getSubject()).isEqualTo("🎉 You earned 30 free days of BiteCal Premium");
         assertThat(message.getText())
-                .contains("Premium extended by 30 days")
-                .contains("Old expiry: 2026-05-01 08:00 (Asia/Taipei, UTC+08:00)")
-                .contains("New expiry: 2026-05-31 08:00 (Asia/Taipei, UTC+08:00)")
-                .contains("Granted at: 2026-05-10 08:00 (Asia/Taipei, UTC+08:00)")
-                .contains("You can view the details in BiteCal > Settings > Invite friends.");
+                .contains("Great news! 🎁")
+                .contains("Your referral reward has been granted successfully.")
+                .contains("You've earned 30 free days of BiteCal Premium because your invited friend completed a valid subscription.")
+                .contains("- 🎁 Reward: Premium extended by 30 days")
+                .contains("- 📅 Previous expiry: 2026-05-01 08:00 (Asia/Taipei, UTC+08:00)")
+                .contains("- 🚀 New expiry: 2026-05-31 08:00 (Asia/Taipei, UTC+08:00)")
+                .contains("- ✅ Granted at: 2026-05-10 08:00 (Asia/Taipei, UTC+08:00)")
+                .contains("BiteCal → Settings → Inbox")
+                .contains("Thanks for sharing BiteCal with your friends. Keep inviting to earn more Premium days! 💪");
 
         verify(emailOutboxRepository).save(item);
         assertThat(item.getStatus()).isEqualTo("SENT");
@@ -117,9 +121,9 @@ class EmailOutboxSenderWorkerTest {
         verify(mailSender).send(messageCaptor.capture());
 
         assertThat(messageCaptor.getValue().getText())
-                .contains("Old expiry: 2026-05-01T00:00:00Z")
-                .contains("New expiry: 2026-05-31T00:00:00Z")
-                .contains("Granted at: 2026-05-10T00:00:00Z");
+                .contains("- 📅 Previous expiry: 2026-05-01T00:00:00Z")
+                .contains("- 🚀 New expiry: 2026-05-31T00:00:00Z")
+                .contains("- ✅ Granted at: 2026-05-10T00:00:00Z");
     }
 
     private EmailOutboxEntity pendingItem() {

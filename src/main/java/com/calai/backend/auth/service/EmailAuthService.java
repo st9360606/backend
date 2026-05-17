@@ -195,7 +195,7 @@ public class EmailAuthService {
 
             helper.setFrom(sender, APP_NAME);
             helper.setTo(to);
-            helper.setSubject("Your BiteCal AI sign-in code");
+            helper.setSubject(buildLoginCodeSubject(code));
             helper.setText(
                     buildPlainLoginCodeEmail(code),
                     buildHtmlLoginCodeEmail(code, logoExists)
@@ -211,23 +211,25 @@ public class EmailAuthService {
         }
     }
 
+    private String buildLoginCodeSubject(String code) {
+        return "Welcome to BiteCal AI — Your login code is: " + code;
+    }
+
     private String buildPlainLoginCodeEmail(String code) {
         return """
-                🔐 BiteCal AI sign-in code
+                Welcome to BiteCal AI! 👋
                 
-                Your verification code is:
+                Your login code is:
                 
                 %s
                 
-                ⏱️ This code expires in %d minutes.
+                Open BiteCal AI and enter this code to continue signing in.
                 
-                Please do not share this code with anyone.
-                BiteCal AI will never ask for your code outside the app.
+                This code expires in %d minutes ⏱️
+                Please do not share it with anyone.
                 
-                If you did not request this code, you can safely ignore this email.
-                
-                See you in the app,
-                The BiteCal AI Team ❤️
+                With ❤️,
+                The BiteCal AI Team
                 """.formatted(code, ttlMin);
     }
 
@@ -263,7 +265,7 @@ public class EmailAuthService {
                 </head>
                 <body style="margin:0;padding:0;background:#F6F7F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#18181B;">
                   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-                    Use this code to continue signing in. It expires in ${TTL} minutes ⏱️.
+                    Expires in ${TTL} minutes ⏱️. Please do not share this code.
                   </div>
                 
                   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#F6F7F9;margin:0;padding:0;">
@@ -280,7 +282,7 @@ public class EmailAuthService {
                               </div>
                 
                               <h1 style="margin:0 0 12px 0;font-size:30px;line-height:38px;font-weight:800;color:#18181B;">
-                                Your verification code
+                                Your login code
                               </h1>
                 
                               <p style="margin:0 auto 28px auto;max-width:400px;font-size:16px;line-height:25px;color:#52525B;">
