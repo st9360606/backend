@@ -77,6 +77,13 @@ public class WorkoutController {
     }
 
     /** 供 App fallback 取得目前用戶體重（kg） */
+    @GetMapping("/history/recent")
+    public WorkoutHistoryResponse recentHistory(
+            @RequestHeader(value = "X-Client-Timezone", required = false) String tz
+    ) {
+        return workoutService.recentHistory(parseZone(tz));
+    }
+
     @GetMapping("/me/weight")
     public WeightDto myWeight() {
         return new WeightDto(workoutService.currentUserWeightKg());

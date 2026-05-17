@@ -9,6 +9,8 @@ import com.calai.backend.workout.controller.WorkoutController;
 import com.calai.backend.workout.dto.EstimateResponse;
 import com.calai.backend.workout.dto.LogWorkoutResponse;
 import com.calai.backend.workout.dto.TodayWorkoutResponse;
+import com.calai.backend.workout.dto.WorkoutHistoryResponse;
+import com.calai.backend.workout.dto.WorkoutHistorySessionDto;
 import com.calai.backend.workout.dto.WorkoutSessionDto;
 import com.calai.backend.workout.service.WorkoutService;
 import com.calai.backend.workout.web.advice.WorkoutExceptionAdvice;
@@ -30,6 +32,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -161,6 +164,23 @@ class WorkoutPremiumGateApiTest {
         mvc.perform(get("/api/v1/workouts/today"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalKcalToday").value(0));
+
+        verify(entitlementService, never()).hasActiveEntitlement(eq(USER_ID), any());
+    }
+
+    @Test
+    void recentHistory_shouldNotBeBlockedForFreeUser() throws Exception {
+        when(workoutService.recentHistory(any())).thenReturn(new WorkoutHistoryResponse(
+                270,
+                List.of(new WorkoutHistorySessionDto(10L, "Running", 30, 270, LocalDate.parse("2026-05-15"), "May 15", "08:00"))
+        ));
+
+        mvc.perform(get("/api/v1/workouts/history/recent")
+                        .header("X-Client-Timezone", "Asia/Taipei"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalKcal").value(270))
+                .andExpect(jsonPath("$.sessions[0].localDate").value("2026-05-15"))
+                .andExpect(jsonPath("$.sessions[0].timeLabel").value("08:00"));
 
         verify(entitlementService, never()).hasActiveEntitlement(eq(USER_ID), any());
     }

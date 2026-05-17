@@ -35,6 +35,21 @@ public interface WorkoutSessionRepo extends JpaRepository<WorkoutSession, Long> 
     @Query("""
         select ws
         from WorkoutSession ws
+        join fetch ws.dictionary d
+        where ws.userId = :userId
+          and ws.localDate >= :startDate
+          and ws.localDate <= :endDate
+        order by ws.localDate desc, ws.startedAt desc
+        """)
+    List<WorkoutSession> findRecentUserSessionsByLocalDate(
+            @Param("userId") Long userId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
+
+    @Query("""
+        select ws
+        from WorkoutSession ws
         where ws.id = :sessionId
           and ws.userId = :userId
         """)

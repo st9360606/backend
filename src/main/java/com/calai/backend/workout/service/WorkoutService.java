@@ -72,6 +72,7 @@ public class WorkoutService {
 
     // ======== 時間標籤（24h） ========
     private static final DateTimeFormatter TIME_FMT_24 = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH);
+    private static final DateTimeFormatter HISTORY_DATE_FMT = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH);
     private static String formatTime24(ZonedDateTime zdt) { return zdt.format(TIME_FMT_24); }
 
     // === ★ 調整：體重取得邏輯，加入 clamp 與 lbs→kg 轉換 ===
@@ -113,14 +114,16 @@ public class WorkoutService {
 
     private TodayWorkoutResponse buildToday(Long uid, ZoneId zone) {
         LocalDate today = LocalDate.now(zone);
-        Instant start = today.atStartOfDay(zone).toInstant();
-        Instant end = today.plusDays(1).atStartOfDay(zone).toInstant();
 
-        var list = sessionRepo.findUserSessionsBetween(uid, start, end);
+        // Today must mean the user's persisted local calendar day, not the last 24 hours.
+        // Using startedAt UTC boundaries with a DATETIME/Instant mapping can accidentally include
+        // yesterday's local records, e.g. Asia/Taipei 2026-05-16 17:40 in the 2026-05-17 UTC window.
+        var list = sessionRepo.findRecentUserSessionsByLocalDate(uid, today, today);
         int total = list.stream().mapToInt(WorkoutSession::getKcal).sum();
 
         var dtos = list.stream().map(ws -> {
-            String tl = formatTime24(ws.getStartedAt().atZone(zone));
+            ZoneId sessionZone = resolveSessionZone(ws.getTimezone(), zone);
+            String tl = formatTime24(ws.getStartedAt().atZone(sessionZone));
             var dict = ws.getDictionary();
             // 防禦：舊資料或匯入資料若 displayNameEn 為 null，退回 canonical_key
             String name = (dict.getDisplayNameEn() != null && !dict.getDisplayNameEn().isBlank())
@@ -130,6 +133,37 @@ public class WorkoutService {
         }).toList();
 
         return new TodayWorkoutResponse(total, dtos);
+    }
+
+    private WorkoutHistoryResponse buildRecentHistory(Long uid, ZoneId zone) {
+        LocalDate today = LocalDate.now(zone);
+        LocalDate start = today.minusDays(6);
+
+        var list = sessionRepo.findRecentUserSessionsByLocalDate(uid, start, today);
+        int total = list.stream().mapToInt(WorkoutSession::getKcal).sum();
+
+        var dtos = list.stream().map(ws -> {
+            ZoneId sessionZone = resolveSessionZone(ws.getTimezone(), zone);
+            LocalDate localDate = ws.getLocalDate() != null
+                    ? ws.getLocalDate()
+                    : LocalDate.ofInstant(ws.getStartedAt(), sessionZone);
+            String tl = formatTime24(ws.getStartedAt().atZone(sessionZone));
+            var dict = ws.getDictionary();
+            String name = (dict.getDisplayNameEn() != null && !dict.getDisplayNameEn().isBlank())
+                    ? dict.getDisplayNameEn()
+                    : dict.getCanonicalKey().replace('_', ' ');
+            return new WorkoutHistorySessionDto(
+                    ws.getId(),
+                    name,
+                    ws.getMinutes(),
+                    ws.getKcal(),
+                    localDate,
+                    HISTORY_DATE_FMT.format(localDate),
+                    tl
+            );
+        }).toList();
+
+        return new WorkoutHistoryResponse(total, dtos);
     }
 
 
@@ -427,6 +461,12 @@ public class WorkoutService {
         Long uid = auth.requireUserId();
         purgeOldSessions(uid, zone);           // 內含 deleteOlderThan（寫入操作）
         return buildToday(uid, zone);          // 查詢 + 映射
+    }
+
+    @Transactional(readOnly = true)
+    public WorkoutHistoryResponse recentHistory(ZoneId zone) {
+        Long uid = auth.requireUserId();
+        return buildRecentHistory(uid, zone);
     }
 
     @Transactional
