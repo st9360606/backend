@@ -183,7 +183,8 @@ VALUES (
 COMMIT;
 
 
-
+-- 如果已經推薦成功過的要測試
+-- 刪除被推薦人的referral_claims、user_entitlements
 
 -- 測試推薦成功發信
 UPDATE calai.referral_claims

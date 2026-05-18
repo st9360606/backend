@@ -94,7 +94,7 @@ public class EmailOutboxSenderWorker {
 
         return switch (templateType) {
             case "REFERRAL_GRANTED" -> buildGrantedSubject(item);
-            case "REFERRAL_REJECTED" -> "Your BiteCal referral did not qualify";
+            case "REFERRAL_REJECTED" -> "Update on your BiteCal referral";
             default -> "BiteCal notification";
         };
     }
@@ -102,7 +102,7 @@ public class EmailOutboxSenderWorker {
     private String buildGrantedSubject(EmailOutboxEntity item) throws Exception {
         JsonNode payload = objectMapper.readTree(item.getTemplatePayloadJson());
         int daysAdded = payload.path("daysAdded").asInt(30);
-        return "🎉 You earned %d free days of BiteCal Premium".formatted(daysAdded);
+        return "You earned %d free days of BiteCal Premium 🎉".formatted(daysAdded);
     }
 
     private String resolveBody(EmailOutboxEntity item) throws Exception {
@@ -135,17 +135,17 @@ public class EmailOutboxSenderWorker {
         int daysAdded = payload.path("daysAdded").asInt(30);
 
         return """
-                Great news! 🎁
+                Great news!
 
                 Your referral reward has been granted successfully.
 
                 You've earned %d free days of BiteCal Premium because your invited friend completed a valid subscription.
 
                 Reward summary:
-                - 🎁 Reward: Premium extended by %d days
-                - 📅 Previous expiry: %s
-                - 🚀 New expiry: %s
-                - ✅ Granted at: %s
+                - Reward: Premium extended by %d days 🎁
+                - Previous expiry: %s
+                - New expiry: %s
+                - Granted at: %s
 
                 You can view your referral reward details in:
 
@@ -158,16 +158,31 @@ public class EmailOutboxSenderWorker {
     }
 
     private String buildRejectedBody(JsonNode payload) {
-        String reason = payload.path("reason").asText("This referral did not qualify for a reward");
+        String reason = firstNonBlank(
+                payload.path("reason").asText(""),
+                "This referral could not be rewarded this time"
+        );
 
         return """
-                Your referral did not qualify for a reward.
+            Hi there,
 
-                Reason:
-                %s
+            Thanks for sharing BiteCal with your friend.
 
-                You can view the details in BiteCal → Settings → Inbox.
-                """.formatted(reason);
+            We reviewed this referral, but we couldn’t apply a Premium reward this time.
+
+            Reason:
+            %s
+
+            You can still earn 30 free Premium days when an invited friend completes a valid subscription.
+
+            You can view the details in:
+
+            BiteCal → Settings → Inbox
+
+            Thanks again for helping BiteCal grow.
+
+            The BiteCal Team
+            """.formatted(reason);
     }
 
     private String firstNonBlank(String... values) {
