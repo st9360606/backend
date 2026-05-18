@@ -43,4 +43,17 @@ public class AsyncSchedulingConfig {
         ex.initialize();
         return ex;
     }
+
+    @Bean("emailOtpExecutor")
+    public TaskExecutor emailOtpExecutor() {
+        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+        ex.setCorePoolSize(2);
+        ex.setMaxPoolSize(6);
+        ex.setQueueCapacity(500);
+        ex.setThreadNamePrefix("email-otp-");
+        ex.setWaitForTasksToCompleteOnShutdown(true);
+        ex.setAwaitTerminationSeconds(10);
+        ex.initialize();
+        return ex;
+    }
 }

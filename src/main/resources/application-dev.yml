@@ -54,6 +54,7 @@ spring:
       mail.smtp.connectiontimeout: 5000   # (ms) 避免連線卡死
       mail.smtp.timeout: 5000
       mail.smtp.writetimeout: 5000
+      mail.smtp.quitwait: false
     default-encoding: UTF-8
 
 management:
