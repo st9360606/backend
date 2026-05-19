@@ -105,10 +105,10 @@ app:
       MODEL_TIER_HIGH:
         VISION:
           provider: GEMINI
-          modelId: "gemini-3.1-flash-lite-preview"
+          modelId: "gemini-3.1-flash-lite"
         TEXT:
           provider: GEMINI
-          modelId: "gemini-3.1-flash-lite-preview"
+          modelId: "gemini-3.1-flash-lite"
       MODEL_TIER_LOW:
         VISION:
           provider: GEMINI
