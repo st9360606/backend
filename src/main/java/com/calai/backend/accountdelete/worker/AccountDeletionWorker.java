@@ -81,9 +81,13 @@ public class AccountDeletionWorker {
 
         int delRequests = purgeDao.deleteByUserId("food_log_requests", userId, limit);
         int delUsage = purgeDao.deleteByUserId("usage_counters", userId, limit);
+        int delNutritionSummary = purgeDao.deleteByUserId("user_daily_nutrition_summary", userId, limit);
+        int delAiQuota = purgeDao.deleteByUserId("user_ai_quota_state", userId, limit);
+        int delNotifications = purgeDao.deleteByUserId("user_notifications", userId, limit);
+        int delEmailOutbox = purgeDao.deleteByUserId("email_outbox", userId, limit);
+        int delReferralCodes = purgeDao.deleteByUserId("user_referral_codes", userId, limit);
 
-        int delEnt = purgeDao.deleteByUserId("user_entitlements", userId, limit);
-
+        // Keep user_entitlements for minimized billing retention / RTDN / refund handling.
         int delDaily = purgeDao.deleteByUserId("user_daily_activity", userId, limit);
         int delWater = purgeDao.deleteByUserId("user_water_daily", userId, limit);
         int delFasting = purgeDao.deleteByUserId("fasting_plan", userId, limit);
@@ -137,8 +141,9 @@ public class AccountDeletionWorker {
         }
 
         log.info(
-                "account deletion progress. userId={} reqId={} del[ws={},ae={},wh={},wt={},profile={},tokens={}] foodTouched={} outstandingJobs={}",
+                "account deletion progress. userId={} reqId={} del[requests={},usage={},nutrition={},aiQuota={},notifications={},emailOutbox={},refCodes={},ws={},ae={},wh={},wt={},profile={},tokens={}] foodTouched={} outstandingJobs={}",
                 userId, req.getId(),
+                delRequests, delUsage, delNutritionSummary, delAiQuota, delNotifications, delEmailOutbox, delReferralCodes,
                 delWorkoutSession, delAliasEvent, delWeightHistory, delWeightTs, delProfile, delTokens,
                 foodTouched, outstandingJobs
         );

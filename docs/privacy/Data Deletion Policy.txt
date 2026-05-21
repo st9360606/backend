@@ -1,13 +1,17 @@
 Data Deletion Policy (Account Deletion)
-You can request deletion of your account and associated personal data directly in the app:
-Settings → Delete Account? → Delete.
+
+You can request deletion of your BiteCal account and associated personal data directly in the app:
+Settings → Delete Account → Delete.
+
+You can also contact support at:
+support@viraldevelopment.co
 
 What happens after you request deletion
 We process account deletion in two phases:
 
-1. Immediate lock & de-identification (usually within seconds): your account is locked and identifiers (such as email and profile identifiers) are removed, and you are signed out.
+1. Immediate lock & de-identification (usually within seconds): your account is locked, identifiers such as email, Google profile identifier, display name, and profile photo are removed, and you are signed out.
 
-2. Background purge (batch deletion): we delete remaining data in batches (including photos and derived nutrition results). This process may take additional time depending on queue load and retry conditions.
+2. Background purge (batch deletion): we delete remaining app data in batches, including food photos, derived nutrition results, profile data, activity summaries, water data, workout data, weight history, notifications, quota counters, referral code records, and authentication tokens. This process may take additional time depending on queue load and retry conditions.
 
 Retention schedule
 
@@ -15,10 +19,15 @@ Retention schedule
 
  ● Saved food logs: retained up to 32 days, then photos and saved nutrition history are automatically deleted.
 
+ ● Account deletion requests: retained as a deletion audit record.
+
+Billing and subscriptions
+If you purchased a subscription or started a free trial through Google Play, your subscription is managed by Google Play.
+
+Deleting your BiteCal account removes or de-identifies your app account and associated app data, but it may not automatically cancel your active Google Play subscription or free trial. Before continuing with account deletion, you can manage or cancel your subscription in Google Play:
+Google Play → Payments & subscriptions → Subscriptions
+
+For billing, refund handling, chargeback handling, fraud prevention, customer support, tax/accounting, and legal compliance, we may retain limited subscription records for a reasonable period. These retained records are minimized and are not used to recreate your deleted app account.
+
 Re-registering
-If you delete your account and later sign up again using the same email, it will be treated as a new account (new user ID).
-
-Subscriptions
-If you have an active subscription, we may automatically re-check and restore your subscription status after you sign in again.
-
-（你也可以加一行客服信箱：Support Email）
+If you delete your account and later sign up again using the same email, it will be treated as a new account with a new user ID. A Google Play subscription may still be restorable only when Google Play confirms the purchase remains valid.

@@ -1,10 +1,17 @@
 package com.calai.backend.accountdelete.controller;
 
+import com.calai.backend.accountdelete.dto.AccountDeletionPreviewResponse;
+import com.calai.backend.accountdelete.dto.AccountDeletionSubmitRequest;
+import com.calai.backend.accountdelete.dto.AccountDeletionSubmitResponse;
 import com.calai.backend.accountdelete.repo.AccountDeletionRequestRepository;
 import com.calai.backend.accountdelete.service.AccountDeletionService;
 import com.calai.backend.auth.security.AuthContext;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
@@ -17,11 +24,28 @@ public class AccountDeletionController {
     private final AccountDeletionService service;
     private final AccountDeletionRequestRepository reqRepo;
 
-    @PostMapping("/deletion-request")
-    public Map<String, Object> request() {
+    @GetMapping("/deletion-preview")
+    public AccountDeletionPreviewResponse preview() {
         Long uid = auth.requireUserId();
-        service.requestDeletion(uid);
-        return Map.of("ok", true);
+        return service.getDeletionPreview(uid);
+    }
+
+    @PostMapping("/deletion-request")
+    public AccountDeletionSubmitResponse request(
+            @RequestBody(required = false) AccountDeletionSubmitRequest body
+    ) {
+        Long uid = auth.requireUserId();
+        AccountDeletionSubmitRequest safeBody = body == null
+                ? new AccountDeletionSubmitRequest(false, false)
+                : body;
+
+        var req = service.requestDeletion(
+                uid,
+                safeBody.isSubscriptionWarningAcknowledged(),
+                safeBody.isUserRequestedGooglePlayCancel()
+        );
+
+        return new AccountDeletionSubmitResponse(true, req.getReqStatus(), req.getRequestedAtUtc());
     }
 
     @GetMapping("/deletion-request")

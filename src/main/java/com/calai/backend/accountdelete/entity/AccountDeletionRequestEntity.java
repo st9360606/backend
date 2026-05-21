@@ -33,6 +33,27 @@ public class AccountDeletionRequestEntity {
     @Column(name="completed_at_utc")
     private Instant completedAtUtc;
 
+    @Column(name = "subscription_warning_acknowledged", nullable = false)
+    private boolean subscriptionWarningAcknowledged = false;
+
+    @Column(name = "user_requested_google_play_cancel", nullable = false)
+    private boolean userRequestedGooglePlayCancel = false;
+
+    @Column(name = "has_active_google_play_subscription_at_request", nullable = false)
+    private boolean hasActiveGooglePlaySubscriptionAtRequest = false;
+
+    @Column(name = "active_entitlement_type_at_request", length = 16)
+    private String activeEntitlementTypeAtRequest;
+
+    @Column(name = "active_entitlement_source_at_request", length = 32)
+    private String activeEntitlementSourceAtRequest;
+
+    @Column(name = "active_product_id_at_request", length = 128)
+    private String activeProductIdAtRequest;
+
+    @Column(name = "active_valid_to_utc_at_request")
+    private Instant activeValidToUtcAtRequest;
+
     @Column(nullable = false)
     private int attempts = 0;
 

@@ -24,8 +24,12 @@ public class UserDataPurgeDao {
     private static final java.util.Set<String> USER_TABLE_WHITELIST = java.util.Set.of(
             "food_log_requests",
             "usage_counters",
-            "user_entitlements",
             "user_daily_activity",
+            "user_daily_nutrition_summary",
+            "user_ai_quota_state",
+            "user_notifications",
+            "email_outbox",
+            "user_referral_codes",
             "user_water_daily",
             "fasting_plan",
             "workout_session",
@@ -40,7 +44,12 @@ public class UserDataPurgeDao {
     /**
      * ✅ 直接有 user_id 的表：DELETE ... WHERE user_id=? LIMIT ?
      * 適用：
-     * - usage_counters / user_entitlements / auth_tokens / workout_session / ...
+     * - usage_counters / auth_tokens / workout_session / ...
+     *
+     * Important:
+     * - user_entitlements is intentionally not in the whitelist. Google Play billing
+     *   records are retained in minimized form so RTDN/reverify/refund/customer-support
+     *   flows can still match a deleted account's purchase token.
      * ⚠️ 注意：
      * - table 參數必須是「你程式碼寫死的白名單」表名，不要把使用者輸入帶進來（避免 SQL Injection）
      */

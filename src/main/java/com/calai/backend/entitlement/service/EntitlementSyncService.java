@@ -3,8 +3,12 @@ package com.calai.backend.entitlement.service;
 import com.calai.backend.entitlement.dto.EntitlementSyncRequest;
 import com.calai.backend.entitlement.dto.EntitlementSyncResponse;
 import com.calai.backend.entitlement.entity.UserEntitlementEntity;
+import com.calai.backend.entitlement.entity.EntitlementTransferAuditEntity;
+import com.calai.backend.entitlement.repo.EntitlementTransferAuditRepository;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import com.calai.backend.referral.service.ReferralBillingBridgeService;
+import com.calai.backend.users.user.entity.User;
+import com.calai.backend.users.user.repo.UserRepo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -29,6 +33,8 @@ public class EntitlementSyncService {
     private final ReferralBillingBridgeService referralBillingBridgeService;
     private final PurchaseAcknowledger purchaseAcknowledger;
     private final PurchaseTokenCrypto purchaseTokenCrypto;
+    private final UserRepo userRepo;
+    private final EntitlementTransferAuditRepository entitlementTransferAuditRepository;
 
     @Transactional
     public EntitlementSyncResponse sync(Long userId, EntitlementSyncRequest req) {
@@ -287,15 +293,40 @@ public class EntitlementSyncService {
         boolean hadAnyPriorGooglePlayPaidHistory =
                 entitlementRepo.existsAnyGooglePlayPaidSubscriptionHistory(userId);
 
+        boolean transferredFromDeletedUser = false;
+
         if (e != null && !userId.equals(e.getUserId())) {
-            log.warn(
-                    "purchase_token_already_bound requestedUserId={} ownerUserId={} productId={} tokenHash={}",
-                    userId,
-                    e.getUserId(),
-                    v.productId(),
-                    purchaseTokenHash
-            );
-            throw new IllegalStateException("PURCHASE_TOKEN_ALREADY_BOUND");
+            Long previousOwnerUserId = e.getUserId();
+
+            if (canTransferDeletedUserGooglePlayEntitlement(e, v)) {
+                e.setUserId(userId);
+                transferredFromDeletedUser = true;
+
+                recordEntitlementTransferAudit(
+                        purchaseTokenHash,
+                        previousOwnerUserId,
+                        userId,
+                        v,
+                        now
+                );
+
+                log.info(
+                        "purchase_token_transferred_after_account_deletion oldUserId={} newUserId={} productId={} tokenHash={}",
+                        previousOwnerUserId,
+                        userId,
+                        v.productId(),
+                        purchaseTokenHash
+                );
+            } else {
+                log.warn(
+                        "purchase_token_already_bound requestedUserId={} ownerUserId={} productId={} tokenHash={}",
+                        userId,
+                        e.getUserId(),
+                        v.productId(),
+                        purchaseTokenHash
+                );
+                throw new IllegalStateException("PURCHASE_TOKEN_ALREADY_BOUND");
+            }
         }
 
         if (e == null) {
@@ -367,7 +398,8 @@ public class EntitlementSyncService {
          * 等 trial 結束後 Google Play 真正續訂付費，freeTrial=false 才觸發 referral verification。
          */
         boolean becamePaid =
-                !v.freeTrial()
+                !transferredFromDeletedUser
+                        && !v.freeTrial()
                         && !hadAnyPriorGooglePlayPaidHistory
                         && (
                         newlyCreated
@@ -393,6 +425,55 @@ public class EntitlementSyncService {
                     "INVITEE_ALREADY_SUBSCRIBED"
             );
         }
+    }
+
+    private boolean canTransferDeletedUserGooglePlayEntitlement(
+            UserEntitlementEntity existingEntitlement,
+            SubscriptionVerifier.VerifiedSubscription verified
+    ) {
+        if (existingEntitlement == null || verified == null) {
+            return false;
+        }
+
+        if (!"GOOGLE_PLAY".equalsIgnoreCase(existingEntitlement.getSource())) {
+            return false;
+        }
+
+        if (!verified.active() || verified.expiryTimeUtc() == null || !verified.expiryTimeUtc().isAfter(Instant.now())) {
+            return false;
+        }
+
+        if (isHardBlockedState(verified.subscriptionState())) {
+            return false;
+        }
+
+        User oldOwner = userRepo.findById(existingEntitlement.getUserId()).orElse(null);
+        if (oldOwner == null || oldOwner.getStatus() == null) {
+            return false;
+        }
+
+        return "DELETING".equalsIgnoreCase(oldOwner.getStatus())
+                || "DELETED".equalsIgnoreCase(oldOwner.getStatus());
+    }
+
+    private void recordEntitlementTransferAudit(
+            String purchaseTokenHash,
+            Long oldUserId,
+            Long newUserId,
+            SubscriptionVerifier.VerifiedSubscription verified,
+            Instant transferredAtUtc
+    ) {
+        EntitlementTransferAuditEntity audit = new EntitlementTransferAuditEntity();
+        audit.setPurchaseTokenHash(purchaseTokenHash);
+        audit.setOldUserId(oldUserId);
+        audit.setNewUserId(newUserId);
+        audit.setReason("RESTORE_AFTER_ACCOUNT_DELETION");
+        audit.setProductId(verified.productId());
+        audit.setEntitlementType(verified.freeTrial() ? "TRIAL" : productProps.toTierOrNull(verified.productId()));
+        audit.setGoogleSubscriptionState(verified.subscriptionState());
+        audit.setValidToUtc(verified.expiryTimeUtc());
+        audit.setTransferredAtUtc(transferredAtUtc);
+        entitlementTransferAuditRepository.save(audit);
     }
 
     /**
