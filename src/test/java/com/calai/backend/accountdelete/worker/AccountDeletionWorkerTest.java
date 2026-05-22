@@ -81,7 +81,12 @@ public class AccountDeletionWorkerTest extends MySqlContainerBaseTest {
         foodLogRepo.saveAndFlush(f);
 
         // when: request deletion (sync phase)
-        deletionService.requestDeletion(userId);
+        // 此測試使用者沒有 active Google Play subscription，所以不需要 subscription warning ack。
+        deletionService.requestDeletion(
+                userId,
+                false,
+                false
+        );
 
         // first run: should enqueue deletion job + soft delete food log
         worker.runOnce();

@@ -1,12 +1,13 @@
 package com.calai.backend.entitlement.service;
 
 import com.calai.backend.entitlement.dto.EntitlementSyncRequest;
+import com.calai.backend.entitlement.repo.EntitlementTransferAuditRepository;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import com.calai.backend.referral.service.ReferralBillingBridgeService;
+import com.calai.backend.users.user.repo.UserRepo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
@@ -16,7 +17,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -43,6 +43,12 @@ class EntitlementSyncServiceReferralScenarioTest {
     @Mock
     private PurchaseTokenCrypto purchaseTokenCrypto;
 
+    @Mock
+    private UserRepo userRepo;
+
+    @Mock
+    private EntitlementTransferAuditRepository entitlementTransferAuditRepository;
+
     private BillingProductProperties productProps;
     private EntitlementSyncService service;
 
@@ -58,7 +64,9 @@ class EntitlementSyncServiceReferralScenarioTest {
                 productProps,
                 referralBillingBridgeService,
                 purchaseAcknowledger,
-                purchaseTokenCrypto
+                purchaseTokenCrypto,
+                userRepo,
+                entitlementTransferAuditRepository
         );
 
         when(entitlementRepo.findActiveBestFirst(any(), any(Instant.class), any(PageRequest.class)))
