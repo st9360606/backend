@@ -117,7 +117,8 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
         boolean freeTrial = "trial".equalsIgnoreCase(phase);
         boolean yearly = productId != null && productId.toLowerCase().contains("yearly");
 
-        Instant expiry = Instant.now().plusSeconds(
+        Instant purchaseInstant = resolveDevFakePurchaseInstant(parts[3]);
+        Instant expiry = purchaseInstant.plusSeconds(
                 freeTrial ? 3L * 86_400L : yearly ? 365L * 86_400L : 30L * 86_400L
         );
 
@@ -130,11 +131,24 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
                 "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
                 true,
                 freeTrial ? "FREE_TRIAL" : "BASE",
-                "DEV-FAKE-ORDER-" + System.currentTimeMillis(),
+                "DEV-FAKE-ORDER-" + parts[3],
                 null,
                 true,
                 false
         );
+    }
+
+
+    private static Instant resolveDevFakePurchaseInstant(String purchaseTimeMillis) {
+        if (purchaseTimeMillis == null || purchaseTimeMillis.isBlank()) {
+            return Instant.now();
+        }
+
+        try {
+            return Instant.ofEpochMilli(Long.parseLong(purchaseTimeMillis));
+        } catch (NumberFormatException ex) {
+            return Instant.now();
+        }
     }
 
     private static VerifiedSubscription inactive(

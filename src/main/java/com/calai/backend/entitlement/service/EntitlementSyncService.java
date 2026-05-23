@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.UUID;
+import java.util.Locale;
 
 @RequiredArgsConstructor
 @Slf4j
@@ -272,7 +273,6 @@ public class EntitlementSyncService {
             Instant rtdnEventTime,
             boolean allowReferralUpdate
     ) {
-        String entitlementTypeToStore = v.freeTrial() ? "TRIAL" : tier;
         String linkedPurchaseTokenHash = v.linkedPurchaseToken() == null || v.linkedPurchaseToken().isBlank()
                 ? null
                 : sha256Hex(v.linkedPurchaseToken());
@@ -283,6 +283,7 @@ public class EntitlementSyncService {
 
         boolean newlyCreated = false;
         String previousType = e == null ? null : e.getEntitlementType();
+        String entitlementTypeToStore = resolveEntitlementTypeToStore(previousType, tier, v);
 
         /*
          * Referral v1.3:
@@ -302,11 +303,14 @@ public class EntitlementSyncService {
                 e.setUserId(userId);
                 transferredFromDeletedUser = true;
 
+                Instant transferValidToUtc = resolveValidToUtcToStore(e, v, rawPurchaseToken, now, true);
                 recordEntitlementTransferAudit(
                         purchaseTokenHash,
                         previousOwnerUserId,
                         userId,
+                        entitlementTypeToStore,
                         v,
+                        transferValidToUtc,
                         now
                 );
 
@@ -342,7 +346,7 @@ public class EntitlementSyncService {
         e.setEntitlementType(entitlementTypeToStore);
         e.setStatus("ACTIVE");
         e.setValidFromUtc(now);
-        e.setValidToUtc(v.expiryTimeUtc());
+        e.setValidToUtc(resolveValidToUtcToStore(e, v, rawPurchaseToken, now, transferredFromDeletedUser));
         e.setLastVerifiedAtUtc(now);
         e.setLastGoogleVerifiedAtUtc(now);
         e.setPurchaseTokenCiphertext(purchaseTokenCrypto.encryptOrNull(rawPurchaseToken));
@@ -427,6 +431,23 @@ public class EntitlementSyncService {
         }
     }
 
+    private static String resolveEntitlementTypeToStore(
+            String previousType,
+            String tier,
+            SubscriptionVerifier.VerifiedSubscription verified
+    ) {
+        if (isPaidEntitlementType(previousType)) {
+            return previousType.toUpperCase(Locale.ROOT);
+        }
+
+        return verified.freeTrial() ? "TRIAL" : tier;
+    }
+
+    private static boolean isPaidEntitlementType(String entitlementType) {
+        return "MONTHLY".equalsIgnoreCase(entitlementType)
+                || "YEARLY".equalsIgnoreCase(entitlementType);
+    }
+
     private boolean canTransferDeletedUserGooglePlayEntitlement(
             UserEntitlementEntity existingEntitlement,
             SubscriptionVerifier.VerifiedSubscription verified
@@ -456,11 +477,35 @@ public class EntitlementSyncService {
                 || "DELETED".equalsIgnoreCase(oldOwner.getStatus());
     }
 
+    private static Instant resolveValidToUtcToStore(
+            UserEntitlementEntity existingEntitlement,
+            SubscriptionVerifier.VerifiedSubscription verified,
+            String rawPurchaseToken,
+            Instant now,
+            boolean preserveExistingDevFakeExpiry
+    ) {
+        if (preserveExistingDevFakeExpiry
+                && isDevFakePurchaseToken(rawPurchaseToken)
+                && existingEntitlement != null
+                && existingEntitlement.getValidToUtc() != null
+                && existingEntitlement.getValidToUtc().isAfter(now)) {
+            return existingEntitlement.getValidToUtc();
+        }
+
+        return verified.expiryTimeUtc();
+    }
+
+    private static boolean isDevFakePurchaseToken(String rawPurchaseToken) {
+        return rawPurchaseToken != null && rawPurchaseToken.startsWith("fake-dev-sub::");
+    }
+
     private void recordEntitlementTransferAudit(
             String purchaseTokenHash,
             Long oldUserId,
             Long newUserId,
+            String entitlementType,
             SubscriptionVerifier.VerifiedSubscription verified,
+            Instant validToUtc,
             Instant transferredAtUtc
     ) {
         EntitlementTransferAuditEntity audit = new EntitlementTransferAuditEntity();
@@ -469,9 +514,9 @@ public class EntitlementSyncService {
         audit.setNewUserId(newUserId);
         audit.setReason("RESTORE_AFTER_ACCOUNT_DELETION");
         audit.setProductId(verified.productId());
-        audit.setEntitlementType(verified.freeTrial() ? "TRIAL" : productProps.toTierOrNull(verified.productId()));
+        audit.setEntitlementType(entitlementType);
         audit.setGoogleSubscriptionState(verified.subscriptionState());
-        audit.setValidToUtc(verified.expiryTimeUtc());
+        audit.setValidToUtc(validToUtc);
         audit.setTransferredAtUtc(transferredAtUtc);
         entitlementTransferAuditRepository.save(audit);
     }

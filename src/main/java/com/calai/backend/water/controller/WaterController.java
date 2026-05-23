@@ -12,7 +12,7 @@ import java.time.ZoneId;
 @RequestMapping("/water")
 public class WaterController {
 
-    private static final ZoneId DEFAULT_ZONE_ID = ZoneId.of("Asia/Taipei");
+    private static final ZoneId DEFAULT_ZONE_ID = ZoneId.of("UTC");
 
     private final WaterService service;
 
@@ -23,7 +23,7 @@ public class WaterController {
     /**
      * 取得今天喝水值。
      * 依照 App header "X-Client-Timezone" 判斷使用者「今天」是哪一天。
-     * 若 header 缺失或非法，fallback 為 Asia/Taipei。
+     * 若 header 缺失或非法，fallback 為 UTC，避免不同國家使用者被硬套成台灣日期。
      */
     @GetMapping("/today")
     public ResponseEntity<WaterDto.WaterSummaryDto> today(

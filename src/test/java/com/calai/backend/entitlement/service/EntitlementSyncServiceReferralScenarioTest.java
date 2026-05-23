@@ -1,13 +1,17 @@
 package com.calai.backend.entitlement.service;
 
 import com.calai.backend.entitlement.dto.EntitlementSyncRequest;
+import com.calai.backend.entitlement.entity.EntitlementTransferAuditEntity;
+import com.calai.backend.entitlement.entity.UserEntitlementEntity;
 import com.calai.backend.entitlement.repo.EntitlementTransferAuditRepository;
 import com.calai.backend.entitlement.repo.UserEntitlementRepository;
 import com.calai.backend.referral.service.ReferralBillingBridgeService;
+import com.calai.backend.users.user.entity.User;
 import com.calai.backend.users.user.repo.UserRepo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
@@ -20,6 +24,7 @@ import java.util.Set;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -274,8 +279,8 @@ class EntitlementSyncServiceReferralScenarioTest {
                 true
         ));
 
-        com.calai.backend.entitlement.entity.UserEntitlementEntity previous =
-                new com.calai.backend.entitlement.entity.UserEntitlementEntity();
+        UserEntitlementEntity previous =
+                new UserEntitlementEntity();
         previous.setId("old-entitlement-id");
         previous.setUserId(200L);
         previous.setPurchaseTokenHash(oldHash);
@@ -305,4 +310,148 @@ class EntitlementSyncServiceReferralScenarioTest {
                 any(Instant.class)
         );
     }
+
+    @Test
+    void sync_shouldTransferDeletedOwnersActiveGooglePlayEntitlementAndKeepGoogleExpiry() throws Exception {
+        String token = "restore-token";
+        String tokenHash = EntitlementSyncService.sha256Hex(token);
+        Instant googleExpiry = Instant.parse("2027-05-21T00:00:00Z");
+
+        when(verifier.verify(token)).thenReturn(new SubscriptionVerifier.VerifiedSubscription(
+                true,
+                "yearly.product",
+                googleExpiry,
+                false,
+                "SUBSCRIPTION_STATE_ACTIVE",
+                "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+                true,
+                "BASE",
+                "order-restore",
+                null,
+                false,
+                false
+        ));
+
+        UserEntitlementEntity existing = new UserEntitlementEntity();
+        existing.setId("existing-entitlement-id");
+        existing.setUserId(100L);
+        existing.setSource("GOOGLE_PLAY");
+        existing.setEntitlementType("YEARLY");
+        existing.setStatus("ACTIVE");
+        existing.setValidFromUtc(Instant.parse("2026-05-21T00:00:00Z"));
+        existing.setValidToUtc(googleExpiry);
+        existing.setPurchaseTokenHash(tokenHash);
+        existing.setCreatedAtUtc(Instant.parse("2026-05-21T00:00:00Z"));
+        existing.setUpdatedAtUtc(Instant.parse("2026-05-21T00:00:00Z"));
+
+        User deletedOwner = new User();
+        deletedOwner.setId(100L);
+        deletedOwner.setStatus("DELETED");
+
+        when(entitlementRepo.findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(tokenHash))
+                .thenReturn(Optional.of(existing));
+        when(userRepo.findById(100L)).thenReturn(Optional.of(deletedOwner));
+        when(purchaseTokenCrypto.encryptOrNull(token)).thenReturn("cipher-restore-token");
+        when(entitlementRepo.save(any(UserEntitlementEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(purchaseAcknowledger.acknowledgeWithRetry(
+                eq("yearly.product"),
+                eq(token),
+                eq("ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED")
+        )).thenReturn(false);
+
+        service.sync(200L, new EntitlementSyncRequest(List.of(
+                new EntitlementSyncRequest.PurchaseTokenPayload("yearly.product", token)
+        )));
+
+        ArgumentCaptor<UserEntitlementEntity> entitlementCaptor = ArgumentCaptor.forClass(UserEntitlementEntity.class);
+        verify(entitlementRepo).save(entitlementCaptor.capture());
+
+        UserEntitlementEntity saved = entitlementCaptor.getValue();
+        assertThat(saved.getUserId()).isEqualTo(200L);
+        assertThat(saved.getValidToUtc()).isEqualTo(googleExpiry);
+        assertThat(saved.getEntitlementType()).isEqualTo("YEARLY");
+        assertThat(saved.getStatus()).isEqualTo("ACTIVE");
+
+        ArgumentCaptor<EntitlementTransferAuditEntity> auditCaptor = ArgumentCaptor.forClass(EntitlementTransferAuditEntity.class);
+        verify(entitlementTransferAuditRepository).save(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().getOldUserId()).isEqualTo(100L);
+        assertThat(auditCaptor.getValue().getNewUserId()).isEqualTo(200L);
+        assertThat(auditCaptor.getValue().getValidToUtc()).isEqualTo(googleExpiry);
+
+        verify(referralBillingBridgeService, never()).onFirstPaidSubscriptionVerified(
+                any(),
+                anyString(),
+                any(),
+                anyBoolean(),
+                anyBoolean(),
+                anyBoolean()
+        );
+    }
+
+
+    @Test
+    void sync_shouldKeepExistingDevFakeExpiryWhenDeletedOwnerRestoreReverifiesLater() throws Exception {
+        String token = "fake-dev-sub::yearly.product::paid::1779497595054";
+        String tokenHash = EntitlementSyncService.sha256Hex(token);
+        Instant originalExpiry = Instant.parse("2027-05-23T00:53:15.054628Z");
+        Instant driftedDevVerifierExpiry = Instant.parse("2027-05-23T03:37:52.579282Z");
+
+        when(verifier.verify(token)).thenReturn(new SubscriptionVerifier.VerifiedSubscription(
+                true,
+                "yearly.product",
+                driftedDevVerifierExpiry,
+                false,
+                "SUBSCRIPTION_STATE_ACTIVE",
+                "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+                true,
+                "BASE",
+                "DEV-FAKE-ORDER-1779507472579",
+                null,
+                true,
+                false
+        ));
+
+        UserEntitlementEntity existing = new UserEntitlementEntity();
+        existing.setId("existing-dev-fake-entitlement-id");
+        existing.setUserId(100L);
+        existing.setSource("GOOGLE_PLAY");
+        existing.setEntitlementType("YEARLY");
+        existing.setStatus("ACTIVE");
+        existing.setValidFromUtc(Instant.parse("2026-05-23T00:53:15.054084Z"));
+        existing.setValidToUtc(originalExpiry);
+        existing.setPurchaseTokenHash(tokenHash);
+        existing.setCreatedAtUtc(Instant.parse("2026-05-22T18:44:55.517418Z"));
+        existing.setUpdatedAtUtc(Instant.parse("2026-05-23T00:53:15.081685Z"));
+
+        User deletedOwner = new User();
+        deletedOwner.setId(100L);
+        deletedOwner.setStatus("DELETED");
+
+        when(entitlementRepo.findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(tokenHash))
+                .thenReturn(Optional.of(existing));
+        when(userRepo.findById(100L)).thenReturn(Optional.of(deletedOwner));
+        when(purchaseTokenCrypto.encryptOrNull(token)).thenReturn("cipher-dev-fake-token");
+        when(entitlementRepo.save(any(UserEntitlementEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(purchaseAcknowledger.acknowledgeWithRetry(
+                eq("yearly.product"),
+                eq(token),
+                eq("ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED")
+        )).thenReturn(false);
+
+        service.sync(200L, new EntitlementSyncRequest(List.of(
+                new EntitlementSyncRequest.PurchaseTokenPayload("yearly.product", token)
+        )));
+
+        ArgumentCaptor<UserEntitlementEntity> entitlementCaptor = ArgumentCaptor.forClass(UserEntitlementEntity.class);
+        verify(entitlementRepo).save(entitlementCaptor.capture());
+
+        UserEntitlementEntity saved = entitlementCaptor.getValue();
+        assertThat(saved.getUserId()).isEqualTo(200L);
+        assertThat(saved.getValidToUtc()).isEqualTo(originalExpiry);
+
+        ArgumentCaptor<EntitlementTransferAuditEntity> auditCaptor = ArgumentCaptor.forClass(EntitlementTransferAuditEntity.class);
+        verify(entitlementTransferAuditRepository).save(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().getValidToUtc()).isEqualTo(originalExpiry);
+    }
+
 }
