@@ -64,6 +64,16 @@ public class WeightController {
         return ResponseEntity.ok(list);
     }
 
+    @DeleteMapping(value = "/{logDate}")
+    public ResponseEntity<Void> deleteWeight(
+            @PathVariable("logDate") String logDateStr
+    ) {
+        Long uid = auth.requireUserId();
+        LocalDate logDate = LocalDate.parse(logDateStr);
+        svc.delete(uid, logDate);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping(value="/summary", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<SummaryDto> summary(
             @RequestParam("range") String range,
@@ -71,9 +81,9 @@ public class WeightController {
     ) {
         Long uid = auth.requireUserId();
         var zone = svc.parseZoneOrUtc(tzHeader);
-        var today = java.time.LocalDate.now(zone);
+        var today = LocalDate.now(zone);
 
-        java.time.LocalDate start = switch (range) {
+        LocalDate start = switch (range) {
             // 舊版 key（保留相容）
             case "week" -> today.minusDays(6);
             case "month" -> today.withDayOfMonth(1);
@@ -82,7 +92,7 @@ public class WeightController {
             // 新 UI key
             case "season" -> today.minusDays(89);      // 90 Days
             case "half year" -> today.minusMonths(6);  // 6 Months
-            case "all" -> java.time.LocalDate.of(1970, 1, 1); // 幾乎等於 all time
+            case "all" -> LocalDate.of(1970, 1, 1); // 幾乎等於 all time
 
             default -> today.minusDays(6);
         };

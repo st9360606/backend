@@ -14,6 +14,8 @@ import java.util.Optional;
 public interface WeightTimeseriesRepo extends JpaRepository<WeightTimeseries, Long> {
     Optional<WeightTimeseries> findByUserIdAndLogDate(Long userId, LocalDate logDate);
 
+    long deleteByUserIdAndLogDate(Long userId, LocalDate logDate);
+
     @Query("""
            select w from WeightTimeseries w 
            where w.userId = :uid and w.logDate between :start and :end
@@ -26,7 +28,7 @@ public interface WeightTimeseriesRepo extends JpaRepository<WeightTimeseries, Lo
            where w.userId = :uid
            order by w.logDate desc
            """)
-    List<WeightTimeseries> findLatest(Long uid, org.springframework.data.domain.Pageable pageable);
+    List<WeightTimeseries> findLatest(Long uid, Pageable pageable);
 
     // ★ 新增：抓「最早幾筆」體重紀錄（依日期由小到大排序）
     @Query("""
@@ -34,5 +36,5 @@ public interface WeightTimeseriesRepo extends JpaRepository<WeightTimeseries, Lo
        where w.userId = :uid
        order by w.logDate asc
        """)
-    List<WeightTimeseries> findEarliest(Long uid, org.springframework.data.domain.Pageable pageable);
+    List<WeightTimeseries> findEarliest(Long uid, Pageable pageable);
 }

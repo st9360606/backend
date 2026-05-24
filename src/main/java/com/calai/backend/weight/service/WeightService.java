@@ -23,6 +23,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 
 @Service
@@ -205,6 +206,40 @@ public class WeightService {
         return list.stream()
                 .map(this::toItem)
                 .toList();
+    }
+
+    /**
+     * 刪除使用者指定日期的體重紀錄。
+     *
+     * weight_history 是 UI 歷史卡片來源，weight_timeseries 是圖表與 current weight 來源；
+     * 因此刪除時必須兩張表一起處理，避免卡片消失但圖表/目前體重仍殘留舊資料。
+     */
+    @Transactional
+    public void delete(Long uid, LocalDate logDate) {
+        var historyOpt = history.findByUserIdAndLogDate(uid, logDate);
+        var seriesOpt = series.findByUserIdAndLogDate(uid, logDate);
+
+        if (historyOpt.isEmpty() && seriesOpt.isEmpty()) {
+            throw new NoSuchElementException("weight record not found");
+        }
+
+        String oldPhotoUrl = historyOpt
+                .map(WeightHistory::getPhotoUrl)
+                .orElse(null);
+
+        historyOpt.ifPresent(history::delete);
+        series.deleteByUserIdAndLogDate(uid, logDate);
+
+        profiles.refreshBmiFromLatestWeightIfPossible(uid);
+        profiles.refreshAutoWaterIfEnabled(uid);
+
+        if (oldPhotoUrl != null && !oldPhotoUrl.isBlank()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    images.deleteByUrlQuietly(oldPhotoUrl);
+                }
+            });
+        }
     }
 
     /**
