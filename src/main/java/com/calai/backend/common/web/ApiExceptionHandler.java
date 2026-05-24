@@ -77,6 +77,7 @@ public class ApiExceptionHandler {
         HttpStatus status = switch (code) {
             case "PROFILE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "WEIGHT_REQUIRED" -> HttpStatus.UNPROCESSABLE_ENTITY; // 422
+            case "PURCHASE_TOKEN_ALREADY_BOUND" -> HttpStatus.CONFLICT;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
 

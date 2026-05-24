@@ -351,10 +351,13 @@ public class EntitlementSyncService {
         e.setLastGoogleVerifiedAtUtc(now);
         e.setPurchaseTokenCiphertext(purchaseTokenCrypto.encryptOrNull(rawPurchaseToken));
         e.setSource("GOOGLE_PLAY");
+        String subscriptionStateToStore = resolveSubscriptionStateToStore(e, v, rawPurchaseToken, now);
+        String paymentStateToStore = paymentState(subscriptionStateToStore);
+
         e.setProductId(v.productId());
-        e.setSubscriptionState(v.subscriptionState());
-        e.setPaymentState(paymentState(v.subscriptionState()));
-        e.setGraceUntilUtc(null);
+        e.setSubscriptionState(subscriptionStateToStore);
+        e.setPaymentState(paymentStateToStore);
+        e.setGraceUntilUtc(resolveGraceUntilUtcToStore(e, subscriptionStateToStore, v, now));
         e.setCloseReason(null);
         e.setOfferPhase(v.offerPhase());
         e.setAutoRenewEnabled(v.autoRenewEnabled());
@@ -436,11 +439,15 @@ public class EntitlementSyncService {
             String tier,
             SubscriptionVerifier.VerifiedSubscription verified
     ) {
+        if (verified.freeTrial()) {
+            return "TRIAL";
+        }
+
         if (isPaidEntitlementType(previousType)) {
             return previousType.toUpperCase(Locale.ROOT);
         }
 
-        return verified.freeTrial() ? "TRIAL" : tier;
+        return tier;
     }
 
     private static boolean isPaidEntitlementType(String entitlementType) {
@@ -487,6 +494,48 @@ public class EntitlementSyncService {
         if (preserveExistingDevFakeExpiry
                 && isDevFakePurchaseToken(rawPurchaseToken)
                 && existingEntitlement != null
+                && existingEntitlement.getValidToUtc() != null
+                && existingEntitlement.getValidToUtc().isAfter(now)) {
+            return existingEntitlement.getValidToUtc();
+        }
+
+        return verified.expiryTimeUtc();
+    }
+
+    private static String resolveSubscriptionStateToStore(
+            UserEntitlementEntity existingEntitlement,
+            SubscriptionVerifier.VerifiedSubscription verified,
+            String rawPurchaseToken,
+            Instant now
+    ) {
+        if (isDevFakePurchaseToken(rawPurchaseToken)
+                && existingEntitlement != null
+                && isPaymentIssueState(existingEntitlement.getSubscriptionState())
+                && existingEntitlement.getValidToUtc() != null
+                && existingEntitlement.getValidToUtc().isAfter(now)) {
+            return existingEntitlement.getSubscriptionState();
+        }
+
+        return verified.subscriptionState();
+    }
+
+    private static Instant resolveGraceUntilUtcToStore(
+            UserEntitlementEntity existingEntitlement,
+            String subscriptionStateToStore,
+            SubscriptionVerifier.VerifiedSubscription verified,
+            Instant now
+    ) {
+        if (!isPaymentIssueState(subscriptionStateToStore)) {
+            return null;
+        }
+
+        if (existingEntitlement != null
+                && existingEntitlement.getGraceUntilUtc() != null
+                && existingEntitlement.getGraceUntilUtc().isAfter(now)) {
+            return existingEntitlement.getGraceUntilUtc();
+        }
+
+        if (existingEntitlement != null
                 && existingEntitlement.getValidToUtc() != null
                 && existingEntitlement.getValidToUtc().isAfter(now)) {
             return existingEntitlement.getValidToUtc();

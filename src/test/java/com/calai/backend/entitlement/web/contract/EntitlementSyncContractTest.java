@@ -196,6 +196,33 @@ public class EntitlementSyncContractTest extends MySqlContainerBaseTest {
         assertThat(e.getLatestOrderId()).isEqualTo("GPA.1111-2222-3333-44444");
     }
 
+    @Test
+    @WithMockUser(username = "test", roles = {"USER"})
+    void sync_should_return_409_when_purchase_token_is_bound_to_active_account() throws Exception {
+        User firstUser = createUser();
+        TestOverrideConfig.UID.set(firstUser.getId());
+
+        var body = new EntitlementSyncRequest(
+                List.of(new EntitlementSyncRequest.PurchaseTokenPayload("monthly001", "sharedActiveToken123"))
+        );
+
+        mvc.perform(post("/api/v1/entitlements/sync")
+                        .contentType(APPLICATION_JSON)
+                        .content(om.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.premiumStatus").value("PREMIUM"));
+
+        User secondUser = createUser();
+        TestOverrideConfig.UID.set(secondUser.getId());
+
+        mvc.perform(post("/api/v1/entitlements/sync")
+                        .contentType(APPLICATION_JSON)
+                        .content(om.writeValueAsString(body)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PURCHASE_TOKEN_ALREADY_BOUND"))
+                .andExpect(jsonPath("$.message").value("PURCHASE_TOKEN_ALREADY_BOUND"));
+    }
+
     private User createUser() {
         User u = new User();
         u.setEmail("entitlement-test-" + System.nanoTime() + "@example.com");
