@@ -45,6 +45,9 @@ public class UserDailyNutritionSummaryEntity {
     @Column(name = "total_sodium_mg", nullable = false)
     private Double totalSodiumMg = 0d;
 
+    @Column(name = "avg_health_score", nullable = false)
+    private Double avgHealthScore = 0d;
+
     @Column(name = "meal_count", nullable = false)
     private Integer mealCount = 0;
 

@@ -28,6 +28,10 @@ public record FoodLogWeeklyProgressResponse(
             double totalKcal,
             double proteinG,
             double carbsG,
-            double fatsG
+            double fatsG,
+            double fiberG,
+            double sugarG,
+            double sodiumMg,
+            double avgHealthScore
     ) {}
 }

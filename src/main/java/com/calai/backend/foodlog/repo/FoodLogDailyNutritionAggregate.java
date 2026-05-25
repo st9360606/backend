@@ -9,5 +9,6 @@ public interface FoodLogDailyNutritionAggregate {
     Double getTotalFiberG();
     Double getTotalSugarG();
     Double getTotalSodiumMg();
+    Double getAvgHealthScore();
     Integer getMealCount();
 }

@@ -14,6 +14,7 @@ CREATE TABLE user_daily_nutrition_summary
     total_fiber_g            DECIMAL(12,3) NOT NULL DEFAULT 0,
     total_sugar_g            DECIMAL(12,3) NOT NULL DEFAULT 0,
     total_sodium_mg          DECIMAL(12,3) NOT NULL DEFAULT 0,
+    avg_health_score         DECIMAL(4,1)  NOT NULL DEFAULT 0,
     meal_count               INT          NOT NULL DEFAULT 0,
 
     last_recomputed_at_utc   DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),

@@ -53,6 +53,7 @@ public class UserDailyNutritionSummaryService {
         entity.setTotalFiberG(safeDouble(agg.getTotalFiberG()));
         entity.setTotalSugarG(safeDouble(agg.getTotalSugarG()));
         entity.setTotalSodiumMg(safeDouble(agg.getTotalSodiumMg()));
+        entity.setAvgHealthScore(clampHealthScore(safeDouble(agg.getAvgHealthScore())));
         entity.setMealCount(safeInt(agg.getMealCount()));
         entity.setLastRecomputedAtUtc(clock.instant());
         summaryRepo.save(entity);
@@ -83,6 +84,10 @@ public class UserDailyNutritionSummaryService {
             double protein = row != null ? safeDouble(row.getTotalProteinG()) : 0d;
             double carbs = row != null ? safeDouble(row.getTotalCarbsG()) : 0d;
             double fats = row != null ? safeDouble(row.getTotalFatsG()) : 0d;
+            double fiber = row != null ? safeDouble(row.getTotalFiberG()) : 0d;
+            double sugar = row != null ? safeDouble(row.getTotalSugarG()) : 0d;
+            double sodium = row != null ? safeDouble(row.getTotalSodiumMg()) : 0d;
+            double avgHealthScore = row != null ? safeDouble(row.getAvgHealthScore()) : 0d;
             currentTotal += kcal;
             days.add(new FoodLogWeeklyProgressResponse.Day(
                     date,
@@ -90,7 +95,11 @@ public class UserDailyNutritionSummaryService {
                     round1(kcal),
                     round1(protein),
                     round1(carbs),
-                    round1(fats)
+                    round1(fats),
+                    round1(fiber),
+                    round1(sugar),
+                    round1(sodium),
+                    round1(clampHealthScore(avgHealthScore))
             ));
         }
 
@@ -164,6 +173,10 @@ public class UserDailyNutritionSummaryService {
 
     private static int safeInt(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private static double clampHealthScore(double value) {
+        return Math.max(0d, Math.min(10d, value));
     }
 
     private static double round1(double value) {

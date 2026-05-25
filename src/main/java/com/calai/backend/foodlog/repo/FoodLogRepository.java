@@ -205,6 +205,13 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntity, String> 
           COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.fiber')) AS DECIMAL(12,3)), 0)), 0) AS totalFiberG,
           COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.sugar')) AS DECIMAL(12,3)), 0)), 0) AS totalSugarG,
           COALESCE(SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.nutrients.sodium')) AS DECIMAL(12,3)), 0)), 0) AS totalSodiumMg,
+          COALESCE(AVG(
+            CASE
+              WHEN JSON_EXTRACT(effective, '$.healthScore') IS NULL THEN NULL
+              WHEN JSON_TYPE(JSON_EXTRACT(effective, '$.healthScore')) = 'NULL' THEN NULL
+              ELSE CAST(JSON_UNQUOTE(JSON_EXTRACT(effective, '$.healthScore')) AS DECIMAL(4,1))
+            END
+          ), 0) AS avgHealthScore,
           COUNT(*) AS mealCount
         FROM food_logs
         WHERE user_id = :userId
