@@ -1,6 +1,7 @@
 package com.calai.backend.workout.service;
 
 import com.calai.backend.auth.security.AuthContext;
+import com.calai.backend.foodlog.job.retention.FoodLogRetentionProperties;
 import com.calai.backend.users.profile.common.Units;
 import com.calai.backend.users.profile.entity.UserProfile;
 import com.calai.backend.users.profile.repo.UserProfileRepository;
@@ -39,6 +40,7 @@ public class WorkoutService {
     private final WorkoutAliasEventRepo aliasEventRepo;
     private final RateLimiterService rateLimiter; // ★ 新增
     private final UserDailyWorkoutSummaryService dailyWorkoutSummaryService;
+    private final FoodLogRetentionProperties retentionProperties;
     private final Clock clock;
 
     @Value("${workout.estimate.blacklistPolicy:block}")
@@ -57,7 +59,10 @@ public class WorkoutService {
             UserProfileRepository profileRepo,
             AuthContext auth,
             WorkoutAliasEventRepo aliasEventRepo,
-            RateLimiterService rateLimiter, UserDailyWorkoutSummaryService dailyWorkoutSummaryService, Clock clock // ★ 新增
+            RateLimiterService rateLimiter,
+            UserDailyWorkoutSummaryService dailyWorkoutSummaryService,
+            FoodLogRetentionProperties retentionProperties,
+            Clock clock
     ) {
         this.dictRepo = dictRepo;
         this.aliasRepo = aliasRepo;
@@ -67,6 +72,7 @@ public class WorkoutService {
         this.aliasEventRepo = aliasEventRepo;
         this.rateLimiter = rateLimiter; // ★ 新增
         this.dailyWorkoutSummaryService = dailyWorkoutSummaryService;
+        this.retentionProperties = retentionProperties;
         this.clock = clock;
     }
 
@@ -414,7 +420,7 @@ public class WorkoutService {
     }
 
     private void purgeOldSessions(Long uid, ZoneId zone) {
-        LocalDate cutoffDate = LocalDate.now(zone).minusDays(7);
+        LocalDate cutoffDate = workoutRetentionCutoffInclusive(zone);
         sessionRepo.deleteByUserIdAndLocalDateBefore(uid, cutoffDate);
     }
 
@@ -471,13 +477,18 @@ public class WorkoutService {
 
     @Transactional
     public void purgeOldSessionsPublic(Long userId, ZoneId zone) {
-        LocalDate cutoffDate = LocalDate.now(zone).minusDays(7);
+        LocalDate cutoffDate = workoutRetentionCutoffInclusive(zone);
         sessionRepo.deleteByUserIdAndLocalDateBefore(userId, cutoffDate);
     }
 
+    private LocalDate workoutRetentionCutoffInclusive(ZoneId zone) {
+        int keepDays = Math.max(1, retentionProperties.getKeepDailySummaryDays());
+        return LocalDate.now(zone).minusDays(keepDays - 1L);
+    }
+
     @Transactional
-    public WorkoutWeeklyProgressResponse weeklyProgress(ZoneId zone) {
+    public WorkoutWeeklyProgressResponse weeklyProgress(ZoneId zone, int weekOffset) {
         Long uid = auth.requireUserId();
-        return dailyWorkoutSummaryService.getWeeklyProgress(uid, zone);
+        return dailyWorkoutSummaryService.getWeeklyProgress(uid, zone, weekOffset);
     }
 }

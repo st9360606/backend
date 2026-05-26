@@ -1,5 +1,6 @@
 package com.calai.backend.workout.service;
 
+import com.calai.backend.foodlog.job.retention.FoodLogRetentionProperties;
 import com.calai.backend.users.activity.entity.UserDailyActivity;
 import com.calai.backend.users.activity.repo.UserDailyActivityRepository;
 import com.calai.backend.users.profile.entity.UserProfile;
@@ -15,10 +16,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.TextStyle;
+import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 
 @Slf4j
@@ -27,11 +30,13 @@ import java.util.*;
 public class UserDailyWorkoutSummaryService {
 
     private static final int DEFAULT_DAILY_WORKOUT_GOAL_KCAL = 450;
+    private static final int MAX_WEEK_OFFSET = 5;
 
     private final UserDailyWorkoutSummaryRepository summaryRepo;
     private final WorkoutSessionRepo workoutSessionRepo;
     private final UserDailyActivityRepository dailyActivityRepo;
     private final UserProfileRepository profileRepo;
+    private final FoodLogRetentionProperties retentionProperties;
     private final Clock clock;
 
     @Transactional
@@ -86,23 +91,26 @@ public class UserDailyWorkoutSummaryService {
     }
 
     /**
-     * 讀取前自我修復最近 8 天
-     * - today 由「目前請求時區」決定
-     * - 每一天的 workout 聚合則由 persisted localDate 決定
+     * 依 ProgressScreen 的週切換讀取 Sunday..Saturday 的 7 天資料。
+     * - weekOffset=0：本週
+     * - weekOffset=1：上週
+     * - weekOffset=2：兩週前
+     * - weekOffset=3：三週前
      */
     @Transactional
-    public WorkoutWeeklyProgressResponse getWeeklyProgress(Long userId, ZoneId zoneId) {
+    public WorkoutWeeklyProgressResponse getWeeklyProgress(Long userId, ZoneId zoneId, int weekOffset) {
+        int safeOffset = Math.max(0, Math.min(MAX_WEEK_OFFSET, weekOffset));
         LocalDate today = LocalDate.now(zoneId);
+        LocalDate currentWeekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY));
+        LocalDate start = currentWeekStart.minusWeeks(safeOffset);
+        LocalDate end = start.plusDays(6);
 
-        for (int i = 7; i >= 0; i--) {
-            recomputeDay(userId, today.minusDays(i), zoneId);
+        for (int i = 0; i < 7; i++) {
+            recomputeDay(userId, start.plusDays(i), zoneId);
         }
 
-        LocalDate start = today.minusDays(6);
-        LocalDate yesterday = today.minusDays(1);
-
         Map<LocalDate, UserDailyWorkoutSummaryEntity> rowMap = toMap(
-                summaryRepo.findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(userId, start, today)
+                summaryRepo.findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(userId, start, end)
         );
 
         List<WorkoutWeeklyProgressResponse.Day> days = new ArrayList<>(7);
@@ -127,10 +135,12 @@ public class UserDailyWorkoutSummaryService {
             ));
         }
 
-        double todayBurned = rowMap.get(today) != null ? safeDouble(rowMap.get(today).getTotalBurnedKcal()) : 0d;
-        double yesterdayBurned = rowMap.get(yesterday) != null ? safeDouble(rowMap.get(yesterday).getTotalBurnedKcal()) : 0d;
+        LocalDate displayDate = safeOffset == 0 ? today : end;
+        LocalDate compareDate = displayDate.minusDays(1);
+        double displayBurned = rowMap.get(displayDate) != null ? safeDouble(rowMap.get(displayDate).getTotalBurnedKcal()) : 0d;
+        double compareBurned = rowMap.get(compareDate) != null ? safeDouble(rowMap.get(compareDate).getTotalBurnedKcal()) : 0d;
 
-        Double deltaPercent = calculateDeltaPercent(todayBurned, yesterdayBurned);
+        Double deltaPercent = calculateDeltaPercent(displayBurned, compareBurned);
         String deltaDirection = directionOf(deltaPercent);
 
         int goalKcal = profileRepo.findByUserId(userId)
@@ -142,12 +152,12 @@ public class UserDailyWorkoutSummaryService {
 
         return new WorkoutWeeklyProgressResponse(
                 new WorkoutWeeklyProgressResponse.Summary(
-                        round1(todayBurned),
+                        round1(displayBurned),
                         goalKcal,
                         averageKcal,
                         deltaPercent != null ? round1(deltaPercent) : null,
                         deltaDirection,
-                        "YESTERDAY"
+                        safeOffset == 0 ? "YESTERDAY" : "PREVIOUS_DAY"
                 ),
                 days
         );
@@ -156,7 +166,8 @@ public class UserDailyWorkoutSummaryService {
     @Scheduled(cron = "0 25 8 * * *", zone = "UTC")
     @Transactional
     public void cleanupExpiredGlobal() {
-        LocalDate cutoff = LocalDate.now(ZoneOffset.UTC).minusDays(8);
+        int days = Math.max(1, retentionProperties.getKeepDailySummaryDays());
+        LocalDate cutoff = LocalDate.now(ZoneOffset.UTC).minusDays(days - 1L);
         int deleted = summaryRepo.deleteByLocalDateBefore(cutoff);
         if (deleted > 0) {
             log.info("Daily workout summary cleanup: cutoff={}, deletedRows={}", cutoff, deleted);

@@ -53,11 +53,12 @@ public class WaterController {
     @GetMapping("/weekly")
     public ResponseEntity<WaterDto.WaterWeeklyChartDto> weekly(
             Principal principal,
-            @RequestHeader(value = "X-Client-Timezone", required = false) String tzHeader
+            @RequestHeader(value = "X-Client-Timezone", required = false) String tzHeader,
+            @RequestParam(defaultValue = "0") int weekOffset
     ) {
         Long userId = Long.parseLong(principal.getName());
         ZoneId zone = resolveZoneIdOrDefault(tzHeader);
-        return ResponseEntity.ok(service.getRecent7Days(userId, zone));
+        return ResponseEntity.ok(service.getWeeklyChart(userId, zone, weekOffset));
     }
 
     private ZoneId resolveZoneIdOrDefault(String tzHeader) {

@@ -17,9 +17,9 @@ import java.time.ZoneOffset;
 
 // 頻率：每天台北時間 04:20 觸發一次；@Async("retentionExecutor") 讓它在自訂執行緒池非阻塞執行。
 // 掃描方式：每次抓 1000 筆使用者時區分頁處理，直到掃完。
-// 刪除條件：對每位使用者，取其個人時區的 today local date，再往回 7 天，
+// 刪除條件：對每位使用者，取其個人時區的 today local date，
+// 並套用與蛋白質/脂肪/碳水相同的 Progress daily nutrition summary retention。
 // 刪除該使用者 local_date < cutoffDate 的 workout_session。
-// 等價於：保留最近 7 個完整在地日 + 今天。
 // 時區容錯：使用者沒填或填錯時區 -> fallback UTC。
 
 @Component
@@ -30,7 +30,7 @@ public class WorkoutRetentionJob {
     private final UserProfileRepository userRepo;
     private final WorkoutService workoutService;
 
-    /** 每日 04:20（台北時間），依使用者時區計算 T-7 */
+    /** 每日 04:20（台北時間），依使用者時區計算 retention cutoff */
     @Scheduled(cron = "0 20 4 * * *", zone = "Asia/Taipei")
     @Async("retentionExecutor")
     public void run() {

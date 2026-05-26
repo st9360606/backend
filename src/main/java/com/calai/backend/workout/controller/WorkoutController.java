@@ -100,8 +100,9 @@ public class WorkoutController {
 
     @GetMapping("/progress/weekly")
     public WorkoutWeeklyProgressResponse weeklyProgress(
-            @RequestHeader(value = "X-Client-Timezone", required = false) String tz
+            @RequestHeader(value = "X-Client-Timezone", required = false) String tz,
+            @RequestParam(defaultValue = "0") int weekOffset
     ) {
-        return workoutService.weeklyProgress(parseZone(tz));
+        return workoutService.weeklyProgress(parseZone(tz), weekOffset);
     }
 }
