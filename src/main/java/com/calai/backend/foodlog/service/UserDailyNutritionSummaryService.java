@@ -22,6 +22,8 @@ import java.util.*;
 @Service
 public class UserDailyNutritionSummaryService {
 
+    private static final int MAX_WEEK_OFFSET = 5;
+
     private final UserDailyNutritionSummaryRepository summaryRepo;
     private final FoodLogRepository foodLogRepo;
     private final FoodLogRetentionProperties retentionProperties;
@@ -61,7 +63,7 @@ public class UserDailyNutritionSummaryService {
 
     @Transactional(readOnly = true)
     public FoodLogWeeklyProgressResponse getWeeklyProgress(Long userId, ZoneId zoneId, int weekOffset) {
-        int safeOffset = Math.max(0, Math.min(3, weekOffset));
+        int safeOffset = Math.max(0, Math.min(MAX_WEEK_OFFSET, weekOffset));
         LocalDate today = LocalDate.now(zoneId);
         LocalDate currentWeekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY));
         LocalDate weekStart = currentWeekStart.minusWeeks(safeOffset);
@@ -159,6 +161,8 @@ public class UserDailyNutritionSummaryService {
             case 1 -> "LAST_WEEK";
             case 2 -> "TWO_WEEKS_AGO";
             case 3 -> "THREE_WEEKS_AGO";
+            case 4 -> "FOUR_WEEKS_AGO";
+            case 5 -> "FIVE_WEEKS_AGO";
             default -> "THIS_WEEK";
         };
     }
