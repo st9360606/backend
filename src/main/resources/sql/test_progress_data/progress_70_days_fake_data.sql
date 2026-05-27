@@ -1,9 +1,9 @@
 -- ============================================================
--- BiteCal / Calai ProgressScreen random 50 fake data in last 60 days
+-- BiteCal / Calai ProgressScreen random 50 fake data in last 70 days
 -- Target: MySQL 8.x
 
 -- Purpose:
---   - Create 35 days of DEV test data.
+--   - Create 50 random DEV test data rows within the latest 70 days.
 --   - Main chart values are different every day.
 --   - Useful for checking ProgressScreen week switching:
 --     This Week / Last Week / 2 wks. ago / 3 wks. ago.
@@ -17,8 +17,8 @@
 --   - user_daily_workout_summary
 
 -- Fixed version:
---   1. Uses 50 random dates within the last 60 days, not continuous 50 days.
---   2. Forces 1 random gap in every 6-day bucket, so the 50 selected dates
+--   1. Uses 50 random dates within the last 70 days, not continuous 50 days.
+--   2. Forces 2 random gaps in every 7-day bucket, so the 50 selected dates
 --      are guaranteed to be non-continuous.
 --   3. Uses the requested nutrition ranges.
 --   4. Inserts avg_health_score because current user_daily_nutrition_summary
@@ -29,17 +29,20 @@
 --
 -- DEV only. Do NOT run this against production data.
 
-    /**
-    最近 60 天隨機 50 筆
-    avg_health_score 0-10分
-    卡路里 的範圍2200~2900
-    蛋白質的範圍50~250
-    碳水的範圍 200~400
-    脂肪的範圍50~90
-    糖的範圍30~90
-    纖維的範圍20~90
-    鈉的範圍1800~3000
-    */
+/**
+最近 70 天隨機 50 筆
+avg_health_score 0-10分
+卡路里 的範圍2200~2900
+蛋白質的範圍150~220
+碳水的範圍 200~400
+脂肪的範圍45~90
+糖的範圍40~90
+纖維的範圍20~60
+鈉的範圍1800~3000
+總喝水量 2000~3500
+總運動消耗 100~500
+總跑步數 4000~10000
+*/
 -- ============================================================
 
 SET @user_id := 1;
@@ -47,10 +50,10 @@ SET @timezone := 'Asia/Taipei';
 
 -- Use Taiwan local date without depending on MySQL timezone tables.
 SET @today := DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR);
-SET @range_start := DATE_SUB(@today, INTERVAL 59 DAY);
+SET @range_start := DATE_SUB(@today, INTERVAL 69 DAY);
 
 -- ============================================================
--- Build 60-day candidate date range.
+-- Build 70-day candidate date range.
 -- ============================================================
 
 DROP TEMPORARY TABLE IF EXISTS tmp_progress_all_days;
@@ -63,7 +66,7 @@ INSERT INTO tmp_progress_all_days (day_offset, local_date)
 WITH RECURSIVE seq(n) AS (
     SELECT 0
     UNION ALL
-    SELECT n + 1 FROM seq WHERE n < 59
+    SELECT n + 1 FROM seq WHERE n < 69
 )
 SELECT
     n AS day_offset,
@@ -71,12 +74,12 @@ SELECT
 FROM seq;
 
 -- ============================================================
--- Pick 50 deterministic-random dates from the last 60 days.
+-- Pick 50 deterministic-random dates from the last 70 days.
 --
 -- Implementation:
---   - Split 60 days into 10 buckets.
---   - Each bucket has 6 days.
---   - Randomly skip 1 day per bucket.
+--   - Split 70 days into 10 buckets.
+--   - Each bucket has 7 days.
+--   - Randomly skip 2 days per bucket.
 --   - Keep 5 days per bucket.
 --   - 10 buckets * 5 kept days = 50 selected dates.
 --
@@ -98,9 +101,9 @@ WITH ranked_days AS (
     SELECT
         day_offset,
         local_date,
-        FLOOR(day_offset / 6) AS bucket_no,
+        FLOOR(day_offset / 7) AS bucket_no,
         ROW_NUMBER() OVER (
-            PARTITION BY FLOOR(day_offset / 6)
+            PARTITION BY FLOOR(day_offset / 7)
             ORDER BY CRC32(CONCAT(@user_id, ':', local_date, ':bitecal-progress-random-50-v1'))
             ) AS bucket_rank
     FROM tmp_progress_all_days
@@ -110,7 +113,7 @@ WITH ranked_days AS (
              day_offset,
              local_date
          FROM ranked_days
-         WHERE bucket_rank > 1
+         WHERE bucket_rank > 2
      )
 SELECT
     ROW_NUMBER() OVER (ORDER BY local_date) AS rn,
@@ -129,7 +132,7 @@ SET SQL_SAFE_UPDATES = 0;
 START TRANSACTION;
 
 -- ------------------------------------------------------------
--- Clean only the 60-day test range for this user.
+-- Clean only the 70-day test range for this user.
 -- WARNING: DEV database only.
 -- ------------------------------------------------------------
 DELETE FROM user_daily_nutrition_summary
@@ -186,11 +189,11 @@ SET @walking_dictionary_id := (
 --
 -- Requested ranges:
 --   calories         : 2200 ~ 2900
---   protein          : 50   ~ 250
+--   protein          : 150  ~ 220
 --   carbs            : 200  ~ 400
---   fats             : 50   ~ 90
---   sugar            : 30   ~ 90
---   fiber            : 20   ~ 90
+--   fats             : 45   ~ 90
+--   sugar            : 40   ~ 90
+--   fiber            : 20   ~ 60
 --   sodium           : 1800 ~ 3000
 --   avg_health_score : 0    ~ 10
 -- ------------------------------------------------------------
@@ -219,20 +222,20 @@ SELECT
     -- 2200 ~ 2900
     2200 + MOD(d.rn * 37 + d.day_offset * 11, 701) AS total_kcal,
 
-    -- 50 ~ 250
-    50 + MOD(d.rn * 19 + d.day_offset * 7, 201) AS total_protein_g,
+    -- 150 ~ 220
+    150 + MOD(d.rn * 19 + d.day_offset * 7, 71) AS total_protein_g,
 
     -- 200 ~ 400
     200 + MOD(d.rn * 23 + d.day_offset * 13, 201) AS total_carbs_g,
 
-    -- 50 ~ 90
-    50 + MOD(d.rn * 7 + d.day_offset * 5, 41) AS total_fats_g,
+    -- 45 ~ 90
+    45 + MOD(d.rn * 7 + d.day_offset * 5, 46) AS total_fats_g,
 
-    -- 20 ~ 90
-    20 + MOD(d.rn * 11 + d.day_offset * 3, 71) AS total_fiber_g,
+    -- 20 ~ 60
+    20 + MOD(d.rn * 11 + d.day_offset * 3, 41) AS total_fiber_g,
 
-    -- 30 ~ 90
-    30 + MOD(d.rn * 13 + d.day_offset * 5, 61) AS total_sugar_g,
+    -- 40 ~ 90
+    40 + MOD(d.rn * 13 + d.day_offset * 5, 51) AS total_sugar_g,
 
     -- 1800 ~ 3000
     1800 + MOD(d.rn * 97 + d.day_offset * 29, 1201) AS total_sodium_mg,
@@ -263,7 +266,7 @@ ON DUPLICATE KEY UPDATE
 
 -- ------------------------------------------------------------
 -- 2) Water fake data
--- Reasonable cups range: 4 ~ 14
+-- Requested total water range: 2000 ~ 3500 ml
 -- ------------------------------------------------------------
 INSERT INTO user_water_daily (
     user_id,
@@ -277,14 +280,21 @@ SELECT
     @user_id,
     x.local_date,
     x.cups,
-    x.cups * 237 AS ml,
-    x.cups * 8 AS fl_oz,
+    x.ml AS ml,
+    x.fl_oz AS fl_oz,
     UTC_TIMESTAMP()
 FROM (
          SELECT
-             d.local_date,
-             4 + MOD(d.rn * 5 + d.day_offset * 2, 11) AS cups
-         FROM tmp_progress_50_days d
+             water_source.local_date,
+             water_source.ml,
+             ROUND(water_source.ml / 237) AS cups,
+             ROUND(water_source.ml / 29.5735) AS fl_oz
+         FROM (
+                  SELECT
+                      d.local_date,
+                      2000 + MOD(d.rn * 53 + d.day_offset * 17, 1501) AS ml
+                  FROM tmp_progress_50_days d
+              ) water_source
      ) x
 ON DUPLICATE KEY UPDATE
                      cups = VALUES(cups),
@@ -321,11 +331,12 @@ SELECT
     TIMESTAMP(d.local_date, '00:00:00') - INTERVAL 8 HOUR AS day_start_utc,
     TIMESTAMP(DATE_ADD(d.local_date, INTERVAL 1 DAY), '00:00:00') - INTERVAL 8 HOUR AS day_end_utc,
 
-    -- 3500 ~ 15000 steps
-    3500 + MOD(d.rn * 431 + d.day_offset * 113, 11501) AS steps,
+    -- 4000 ~ 10000 steps
+    4000 + MOD(d.rn * 431 + d.day_offset * 113, 6001) AS steps,
 
-    -- 100 ~ 450 active kcal
-    100 + MOD(d.rn * 17 + d.day_offset * 9, 351) AS active_kcal,
+    -- 20 ~ 80 active kcal.
+    -- Total exercise burn is controlled in workout_session + summary as 100 ~ 500 kcal.
+    20 + MOD(d.rn * 17 + d.day_offset * 9, 61) AS active_kcal,
 
     'IMPORT',
     'com.calai.bitecal.dev',
@@ -365,8 +376,12 @@ SELECT
     -- 15 ~ 75 minutes
     15 + MOD(d.rn * 7 + d.day_offset * 3, 61) AS minutes,
 
-    -- 90 ~ 520 workout kcal
-    90 + MOD(d.rn * 23 + d.day_offset * 11, 431) AS kcal,
+    -- Workout kcal is generated so that workout_kcal + active_kcal = 100 ~ 500 total burned kcal.
+    (
+        100 + MOD(d.rn * 29 + d.day_offset * 17, 401)
+        ) - (
+        20 + MOD(d.rn * 17 + d.day_offset * 9, 61)
+        ) AS kcal,
 
     -- UTC 04:00, displays as 12:00 in Asia/Taipei.
     TIMESTAMP(d.local_date, '04:00:00') AS started_at,
@@ -526,13 +541,31 @@ FROM user_daily_nutrition_summary n
               ON d.local_date = n.local_date
 WHERE n.user_id = @user_id;
 
+SELECT
+    MIN(w.ml) AS min_water_ml,
+    MAX(w.ml) AS max_water_ml,
+    MIN(a.steps) AS min_steps,
+    MAX(a.steps) AS max_steps,
+    MIN(s.total_burned_kcal) AS min_total_burned_kcal,
+    MAX(s.total_burned_kcal) AS max_total_burned_kcal
+FROM tmp_progress_50_days d
+         LEFT JOIN user_water_daily w
+                   ON w.user_id = @user_id
+                       AND w.local_date = d.local_date
+         LEFT JOIN user_daily_activity a
+                   ON a.user_id = @user_id
+                       AND a.local_date = d.local_date
+         LEFT JOIN user_daily_workout_summary s
+                   ON s.user_id = @user_id
+                       AND s.local_date = d.local_date;
+
 -- ============================================================
 -- Verification 3:
 -- Check distinct value counts for main chart fields.
 --
 -- Note:
 --   Some fields may naturally repeat because their ranges are smaller than 50.
---   Example: fats 50~90 has only 41 possible values.
+--   Example: fats 45~90 has only 46 possible values.
 -- ============================================================
 
 SELECT
