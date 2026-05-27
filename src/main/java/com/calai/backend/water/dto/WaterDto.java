@@ -20,6 +20,7 @@ public class WaterDto {
 
     public record WaterWeeklyChartDto(
             int goalMl,
+            int averageMl,
             List<WaterSummaryDto> days
     ) {}
 }

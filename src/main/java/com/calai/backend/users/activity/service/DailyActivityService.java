@@ -29,10 +29,10 @@ public class DailyActivityService {
     private final UserDailyWorkoutSummaryService dailyWorkoutSummaryService;
 
     /**
-     * ✅ Retention：保留 8 天（以 Instant/UTC 時間線計算，8*24 小時）
+     * ✅ Retention：保留 63 天（以 Instant/UTC 時間線計算，63*24 小時）
      * delete where day_end_utc < now - 8 days
      */
-    private static final Duration RETENTION = Duration.ofDays(8);
+    private static final Duration RETENTION = Duration.ofDays(63);
 
     /**
      * 估算步行消耗熱量：

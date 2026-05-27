@@ -114,7 +114,6 @@ public class UserDailyWorkoutSummaryService {
         );
 
         List<WorkoutWeeklyProgressResponse.Day> days = new ArrayList<>(7);
-        double sum7 = 0d;
 
         for (int i = 0; i < 7; i++) {
             LocalDate date = start.plusDays(i);
@@ -123,8 +122,6 @@ public class UserDailyWorkoutSummaryService {
             double total = row != null ? safeDouble(row.getTotalBurnedKcal()) : 0d;
             double workout = row != null ? safeDouble(row.getWorkoutKcal()) : 0d;
             double activity = row != null ? safeDouble(row.getActivityKcal()) : 0d;
-
-            sum7 += total;
 
             days.add(new WorkoutWeeklyProgressResponse.Day(
                     date,
@@ -148,7 +145,17 @@ public class UserDailyWorkoutSummaryService {
                 .map(v -> Math.max(0, v))
                 .orElse(DEFAULT_DAILY_WORKOUT_GOAL_KCAL);
 
-        int averageKcal = (int) Math.round(sum7 / 7d);
+        for (int i = 7; i >= 1; i--) {
+            recomputeDay(userId, displayDate.minusDays(i), zoneId);
+        }
+
+        int averageKcal = calculateAverageKcal(
+                summaryRepo.findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(
+                        userId,
+                        displayDate.minusDays(7),
+                        displayDate.minusDays(1)
+                )
+        );
 
         return new WorkoutWeeklyProgressResponse(
                 new WorkoutWeeklyProgressResponse.Summary(
@@ -172,6 +179,26 @@ public class UserDailyWorkoutSummaryService {
         if (deleted > 0) {
             log.info("Daily workout summary cleanup: cutoff={}, deletedRows={}", cutoff, deleted);
         }
+    }
+
+    private int calculateAverageKcal(List<UserDailyWorkoutSummaryEntity> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
+
+        List<UserDailyWorkoutSummaryEntity> dataRows = rows.stream()
+                .filter(row -> row != null && safeDouble(row.getTotalBurnedKcal()) > 0d)
+                .toList();
+
+        if (dataRows.isEmpty()) {
+            return 0;
+        }
+
+        double totalKcal = dataRows.stream()
+                .mapToDouble(row -> safeDouble(row.getTotalBurnedKcal()))
+                .sum();
+
+        return (int) Math.round(totalKcal / dataRows.size());
     }
 
     private Map<LocalDate, UserDailyWorkoutSummaryEntity> toMap(List<UserDailyWorkoutSummaryEntity> rows) {

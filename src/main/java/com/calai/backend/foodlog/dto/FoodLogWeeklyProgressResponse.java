@@ -19,7 +19,12 @@ public record FoodLogWeeklyProgressResponse(
             double totalCalories,
             Double deltaPercent,
             String deltaDirection,
-            String compareBasis
+            String compareBasis,
+            double average7Calories,
+            double average15Calories,
+            double average7FiberG,
+            double average7SugarG,
+            double average7SodiumMg
     ) {}
 
     public record Day(

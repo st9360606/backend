@@ -29,6 +29,7 @@ public class FoodLogController {
     private final FoodLogHistoryService historyService;
     private final FoodLogOverrideService overrideService;
     private final UserDailyNutritionSummaryService dailySummaryService;
+    private final ProgressAveragesService progressAveragesService;
 
     @PostMapping(value = "/album", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public FoodLogEnvelope album(
@@ -234,6 +235,18 @@ public class FoodLogController {
         Long uid = auth.requireUserId();
         String requestId = RequestIdFilter.getOrCreate(req);
         return historyService.listRecentPreviews(uid, lookBackHours, size, requestId);
+    }
+
+
+    @GetMapping("/progress/averages")
+    public ProgressAveragesResponse progressAverages(
+            @RequestHeader(value = "X-Client-Timezone", required = false) String clientTz
+    ) {
+        Long uid = auth.requireUserId();
+        return progressAveragesService.getAverages(
+                uid,
+                FoodLogRequestNormalizer.parseClientTzOrUtc(clientTz)
+        );
     }
 
     @GetMapping("/progress/weekly")

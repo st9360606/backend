@@ -105,6 +105,25 @@ public class UserDailyNutritionSummaryService {
             ));
         }
 
+        LocalDate average7Start = (safeOffset == 0 ? today : weekEnd).minusDays(7);
+        LocalDate averageAnchorExclusive = safeOffset == 0 ? today : weekEnd;
+        LocalDate average15Start = averageAnchorExclusive.minusDays(15);
+
+        NutritionAverage average7 = calculateNutritionAverage(
+                summaryRepo.findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(
+                        userId,
+                        average7Start,
+                        averageAnchorExclusive.minusDays(1)
+                )
+        );
+        NutritionAverage average15 = calculateNutritionAverage(
+                summaryRepo.findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(
+                        userId,
+                        average15Start,
+                        averageAnchorExclusive.minusDays(1)
+                )
+        );
+
         double previousTotal = previousRows.stream().mapToDouble(r -> safeDouble(r.getTotalKcal())).sum();
         Double deltaPercent = null;
         String deltaDirection = "NONE";
@@ -129,13 +148,18 @@ public class UserDailyNutritionSummaryService {
                         round1(currentTotal),
                         deltaPercent,
                         deltaDirection,
-                        "PREVIOUS_WEEK"
+                        "PREVIOUS_WEEK",
+                        average7.calories(),
+                        average15.calories(),
+                        average7.fiberG(),
+                        average7.sugarG(),
+                        average7.sodiumMg()
                 ),
                 days
         );
     }
 
-    //每天上午 16:20清理一次，不是超過 36 天就即時刪
+    //每天上午 16:20清理一次，不是超過 63 天就即時刪
     @Scheduled(cron = "0 20 8 * * *", zone = "UTC")
     @Transactional
     public void cleanupExpiredGlobal() {
@@ -145,6 +169,49 @@ public class UserDailyNutritionSummaryService {
         if (deleted > 0) {
             log.info("Daily nutrition summary cleanup: cutoff={}, deletedRows={}", cutoff, deleted);
         }
+    }
+
+    private static NutritionAverage calculateNutritionAverage(List<UserDailyNutritionSummaryEntity> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return NutritionAverage.ZERO;
+        }
+
+        int dataDays = 0;
+        double totalCalories = 0d;
+        double totalFiberG = 0d;
+        double totalSugarG = 0d;
+        double totalSodiumMg = 0d;
+
+        for (UserDailyNutritionSummaryEntity row : rows) {
+            if (row == null || safeInt(row.getMealCount()) <= 0) {
+                continue;
+            }
+            dataDays++;
+            totalCalories += safeDouble(row.getTotalKcal());
+            totalFiberG += safeDouble(row.getTotalFiberG());
+            totalSugarG += safeDouble(row.getTotalSugarG());
+            totalSodiumMg += safeDouble(row.getTotalSodiumMg());
+        }
+
+        if (dataDays <= 0) {
+            return NutritionAverage.ZERO;
+        }
+
+        return new NutritionAverage(
+                round1(totalCalories / dataDays),
+                round1(totalFiberG / dataDays),
+                round1(totalSugarG / dataDays),
+                round1(totalSodiumMg / dataDays)
+        );
+    }
+
+    private record NutritionAverage(
+            double calories,
+            double fiberG,
+            double sugarG,
+            double sodiumMg
+    ) {
+        private static final NutritionAverage ZERO = new NutritionAverage(0d, 0d, 0d, 0d);
     }
 
     private static Map<LocalDate, UserDailyNutritionSummaryEntity> toMap(List<UserDailyNutritionSummaryEntity> rows) {

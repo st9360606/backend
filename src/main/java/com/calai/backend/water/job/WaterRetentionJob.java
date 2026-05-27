@@ -11,7 +11,7 @@ import java.time.ZoneId;
 
 /**
  * 全庫清理：保留天數與蛋白質/脂肪/碳水的 Progress daily nutrition summary 一致。
- * 預設 keepDailySummaryDays=36 時，保留 T-35..T，共 36 天。
+ * 預設 keepDailySummaryDays=63 時，保留 T-62..T，共 63 天。
  */
 @Component
 public class WaterRetentionJob {

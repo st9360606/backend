@@ -41,7 +41,7 @@ public class WaterService {
      *
      * 保留規則：
      * - 與蛋白質/脂肪/碳水使用的 Progress daily nutrition summary retention 一致
-     * - 預設 keepDailySummaryDays=36 時，保留 T-35..T，共 36 天
+     * - 預設 keepDailySummaryDays=63 時，保留 T-62..T，共 63 天
      */
     @Transactional
     public WaterDto.WaterSummaryDto getToday(Long userId, ZoneId zoneId) {
@@ -72,7 +72,7 @@ public class WaterService {
      *
      * 保留規則：
      * - 與蛋白質/脂肪/碳水使用的 Progress daily nutrition summary retention 一致
-     * - 預設 keepDailySummaryDays=36 時，保留 T-35..T，共 36 天
+     * - 預設 keepDailySummaryDays=63 時，保留 T-62..T，共 63 天
      */
     @Transactional
     public WaterDto.WaterSummaryDto adjustToday(Long userId, ZoneId zoneId, int cupsDelta) {
@@ -106,8 +106,8 @@ public class WaterService {
      * 單用戶清理（以使用者時區計算 today）
      *
      * keepPreviousDays = 36 時：
-     * - 保留 T-35..T，含今天，共 36 天
-     * - 刪除 < T-35
+     * - 保留 T-62..T，含今天，共 63 天
+     * - 刪除 < T-62
      */
     @Transactional
     void cleanupOldForUser(Long userId, ZoneId zoneId, int keepPreviousDays) {
@@ -136,6 +136,15 @@ public class WaterService {
                 endDate
         );
 
+        LocalDate averageAnchorExclusive = safeOffset == 0 ? today : endDate;
+        int averageMl = calculateAverageMl(
+                repo.findByUserIdAndLocalDateBetweenOrderByLocalDateAsc(
+                        userId,
+                        averageAnchorExclusive.minusDays(7),
+                        averageAnchorExclusive.minusDays(1)
+                )
+        );
+
         Map<LocalDate, UserWaterDaily> rowMap = rows.stream()
                 .collect(Collectors.toMap(UserWaterDaily::getLocalDate, Function.identity()));
 
@@ -158,6 +167,26 @@ public class WaterService {
                 })
                 .toList();
 
-        return new WaterDto.WaterWeeklyChartDto(goalMl, days);
+        return new WaterDto.WaterWeeklyChartDto(goalMl, averageMl, days);
+    }
+
+    private int calculateAverageMl(List<UserWaterDaily> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
+
+        List<UserWaterDaily> dataRows = rows.stream()
+                .filter(row -> row != null && row.getMl() > 0)
+                .toList();
+
+        if (dataRows.isEmpty()) {
+            return 0;
+        }
+
+        double totalMl = dataRows.stream()
+                .mapToInt(UserWaterDaily::getMl)
+                .sum();
+
+        return (int) Math.round(totalMl / dataRows.size());
     }
 }

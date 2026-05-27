@@ -27,8 +27,8 @@ public class FoodLogRetentionProperties {
     /** DELETED tombstone 保留 10 天 */
     private Duration keepDeletedTombstone = Duration.ofDays(10);
 
-    /** Progress daily summary 保留天數（預設 36 天） */
-    private int keepDailySummaryDays = 36;
+    /** Progress daily summary 保留天數（預設 63 天） */
+    private int keepDailySummaryDays = 63;
 
     /** 每次掃描處理幾筆（避免單次太久） */
     private int batchSize = 200;
