@@ -63,8 +63,8 @@ ON DUPLICATE KEY UPDATE weight_kg  = VALUES(weight_kg),
 UPDATE user_profiles
 SET goal_weight_kg  = 68.0,
     goal_weight_lbs = 149.9,
-    weight_kg       = 74.2,
-    weight_lbs      = 163.6,
+    weight_kg       = 81.7,
+    weight_lbs      = 180.1,
     unit_preference = 'KG',
     timezone        = 'Asia/Taipei',
     updated_at      = CURRENT_TIMESTAMP
