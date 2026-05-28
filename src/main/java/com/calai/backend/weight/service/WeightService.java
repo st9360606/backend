@@ -347,6 +347,32 @@ public class WeightService {
         );
     }
 
+    public SummaryDto summaryForRange(Long uid, String range, LocalDate today) {
+        var latestList = series.findLatest(uid, PageRequest.of(0, 1));
+        LocalDate latestDate = latestList.isEmpty() ? today : latestList.get(0).getLogDate();
+        String key = range == null ? "" : range;
+
+        LocalDate start = switch (key) {
+            case "30d" -> latestDate.minusDays(29);
+            case "60d" -> latestDate.minusDays(59);
+            case "90d" -> latestDate.minusDays(89);
+            case "all" -> LocalDate.of(1970, 1, 1);
+            case "week" -> today.minusDays(6);
+            case "month" -> today.withDayOfMonth(1);
+            case "year" -> today.minusDays(364);
+            case "season" -> today.minusDays(89);
+            case "half year" -> today.minusMonths(6);
+            default -> latestDate.minusDays(29);
+        };
+
+        LocalDate end = switch (key) {
+            case "week", "month", "year", "season", "half year" -> today;
+            default -> latestDate;
+        };
+
+        return summary(uid, start, end);
+    }
+
     /**
      * 取得「用來算進度」的起點：
      * 1) 優先使用全期間起點（timeseries 第一筆）

@@ -82,21 +82,6 @@ public class WeightController {
         Long uid = auth.requireUserId();
         var zone = svc.parseZoneOrUtc(tzHeader);
         var today = LocalDate.now(zone);
-
-        LocalDate start = switch (range) {
-            // 舊版 key（保留相容）
-            case "week" -> today.minusDays(6);
-            case "month" -> today.withDayOfMonth(1);
-            case "year" -> today.minusDays(364);
-
-            // 新 UI key
-            case "season" -> today.minusDays(89);      // 90 Days
-            case "half year" -> today.minusMonths(6);  // 6 Months
-            case "all" -> LocalDate.of(1970, 1, 1); // 幾乎等於 all time
-
-            default -> today.minusDays(6);
-        };
-
-        return ResponseEntity.ok(svc.summary(uid, start, today));
+        return ResponseEntity.ok(svc.summaryForRange(uid, range, today));
     }
 }
