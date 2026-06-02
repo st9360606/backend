@@ -12,14 +12,14 @@ public class ClientTimeZoneResolver {
 
     public String resolveFromCurrentRequest() {
         ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attrs == null) return ZoneId.systemDefault().getId();
+        if (attrs == null) return ZoneId.of("UTC").getId();
         HttpServletRequest req = attrs.getRequest();
         String[] keys = {"X-Client-Timezone", "X-Client-TZ", "Time-Zone", "X-Timezone"};
         for (String k : keys) {
             String v = req.getHeader(k);
             if (v != null && !v.isBlank()) return v.trim();
         }
-        return ZoneId.systemDefault().getId();
+        return ZoneId.of("UTC").getId();
     }
 }
 

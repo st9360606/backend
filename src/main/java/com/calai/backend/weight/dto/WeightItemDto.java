@@ -7,5 +7,6 @@ public record WeightItemDto(
         LocalDate logDate,
         BigDecimal weightKg,
         BigDecimal weightLbs,   // ★ 原本 Integer → BigDecimal
-        String photoUrl
+        String photoUrl,
+        String updatedAtUtc
 ) {}

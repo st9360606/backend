@@ -21,7 +21,9 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -106,6 +108,7 @@ public class WeightService {
 
         LocalDate today = LocalDate.now(zone);
         String tzId = zone.getId();
+        OffsetDateTime nowUtc = OffsetDateTime.now(ZoneOffset.UTC);
 
         // 4) history upsert（當天那一筆，如已有同日紀錄就覆寫）
         WeightHistory h = history.findByUserIdAndLogDate(uid, today)
@@ -115,6 +118,7 @@ public class WeightService {
         h.setTimezone(tzId);
         h.setWeightKg(kg);
         h.setWeightLbs(lbs);
+        h.setUpdatedAt(nowUtc);
         // baseline 不會有照片
         history.save(h);
 
@@ -176,6 +180,7 @@ public class WeightService {
         if (photoUrlIfAny != null) {
             h.setPhotoUrl(photoUrlIfAny);  // 有新照片就覆寫
         }
+        h.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         history.save(h);
 
         // timeseries upsert
@@ -442,7 +447,8 @@ public class WeightService {
                 w.getLogDate(),
                 w.getWeightKg(),
                 w.getWeightLbs(),    // ★ 直接用 DB 欄位
-                w.getPhotoUrl()
+                w.getPhotoUrl(),
+                toUtcString(w.getUpdatedAt())
         );
     }
 
@@ -451,8 +457,15 @@ public class WeightService {
                 w.getLogDate(),
                 w.getWeightKg(),
                 w.getWeightLbs(),    // ★ 直接用 DB 欄位
-                null
+                null,
+                toUtcString(w.getCreatedAt())
         );
+    }
+
+    private String toUtcString(OffsetDateTime value) {
+        return value == null
+                ? null
+                : value.withOffsetSameInstant(ZoneOffset.UTC).toInstant().toString();
     }
 
     private Integer toLbsInt(BigDecimal kg) {

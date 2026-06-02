@@ -1,6 +1,7 @@
 package com.calai.backend.config;
 
 import com.calai.backend.auth.security.AccessTokenFilter;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,30 +31,49 @@ public class SecurityConfig {
                 .logout(l -> l.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(reg -> reg
-                                // ✅ 公開讀取：體重照片 (只放行 GET)
-                                .requestMatchers(HttpMethod.GET, "/static/weight-photos/**").permitAll()
-                                .requestMatchers("/auth/**").permitAll()
+                        // 錯誤處理與 async error dispatch 不應再被 AuthorizationFilter 擋住。
+                        .dispatcherTypeMatchers(
+                                DispatcherType.ERROR,
+                                DispatcherType.ASYNC,
+                                DispatcherType.FORWARD
+                        ).permitAll()
+                        .requestMatchers("/error").permitAll()
 
-                                // internal API 不走 App Bearer token，改由 X-Internal-Token 保護。
-                                // 注意：每支 /internal/** controller 都必須呼叫 InternalApiGuard。
-                                .requestMatchers("/internal/**").permitAll()
-                                .anyRequest().authenticated()
+                        // CORS preflight 不需要 Bearer token。
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // 公開讀取：體重照片，只放行 GET。
+                        .requestMatchers(HttpMethod.GET, "/static/weight-photos/**").permitAll()
+
+                        // Auth API 公開。
+                        .requestMatchers("/auth/**").permitAll()
+
+                        // internal API 不走 App Bearer token，改由 X-Internal-Token 保護。
+                        .requestMatchers("/internal/**").permitAll()
+
+                        .anyRequest().authenticated()
                 )
-                // 把我們的 Bearer 過濾器掛進 Security 鏈
-                .addFilterBefore(accessTokenFilter, UsernamePasswordAuthenticationFilter.class)
-                // ✅ 統一 401/403 回 JSON，杜絕 0-byte body
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((req, res, e) -> {
+                            if (res.isCommitted()) {
+                                return;
+                            }
+
                             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                            res.setContentType("application/json");
+                            res.setContentType("application/json;charset=UTF-8");
                             res.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Bearer token required\"}");
                         })
                         .accessDeniedHandler((req, res, e) -> {
+                            if (res.isCommitted()) {
+                                return;
+                            }
+
                             res.setStatus(HttpServletResponse.SC_FORBIDDEN);
-                            res.setContentType("application/json");
+                            res.setContentType("application/json;charset=UTF-8");
                             res.getWriter().write("{\"code\":\"FORBIDDEN\",\"message\":\"Access denied\"}");
                         })
-                );
+                )
+                .addFilterBefore(accessTokenFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

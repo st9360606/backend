@@ -34,7 +34,7 @@ public class FastingPlanService {
         var start = LocalTime.parse(req.startTime(), HM);
         var end = start.plusHours(plan.eatingHours);
         var tz = (req.timeZone() == null || req.timeZone().isBlank())
-                ? ZoneId.systemDefault().getId()
+                ? ZoneId.of("UTC").getId()
                 : req.timeZone();
 
         var e = repo.findByUserId(userId).orElseGet(FastingPlanEntity::new);
@@ -53,7 +53,7 @@ public class FastingPlanService {
     public FastingPlanDto ensureDefaultIfMissing(Long userId, String timeZone) {
         return find(userId).orElseGet(() ->
                 upsert(userId, new UpsertFastingPlanReq("16:8", "09:00", false,
-                        (timeZone == null || timeZone.isBlank()) ? ZoneId.systemDefault().getId() : timeZone))
+                        (timeZone == null || timeZone.isBlank()) ? ZoneId.of("UTC").getId() : timeZone))
         );
     }
 
