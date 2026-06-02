@@ -41,6 +41,7 @@ CREATE TABLE food_logs
 
     created_at_utc         DATETIME(6)                                         NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at_utc         DATETIME(6)                                         NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    saved_at_utc           DATETIME(6)                                         NULL,
 
     PRIMARY KEY (id),
 
@@ -49,7 +50,9 @@ CREATE TABLE food_logs
     INDEX idx_food_logs_user_status_date (user_id, status, captured_local_date, captured_at_utc),
 
     -- ✅ 2) 去重命中：user + sha + status + created_at_utc（limit 1）
-    INDEX idx_food_logs_user_sha_status_created (user_id, image_sha256, status, created_at_utc)
+    INDEX idx_food_logs_user_sha_status_created (user_id, image_sha256, status, created_at_utc),
+
+    INDEX idx_food_logs_user_status_saved_at (user_id, status, saved_at_utc)
 
     -- ✅ 可選：如果你確定 users(id) 存在且想強約束
     -- ,CONSTRAINT fk_food_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

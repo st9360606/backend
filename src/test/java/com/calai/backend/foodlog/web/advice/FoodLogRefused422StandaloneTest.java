@@ -7,6 +7,7 @@ import com.calai.backend.foodlog.service.FoodLogDeleteService;
 import com.calai.backend.foodlog.service.FoodLogHistoryService;
 import com.calai.backend.foodlog.service.FoodLogOverrideService;
 import com.calai.backend.foodlog.service.FoodLogService;
+import com.calai.backend.foodlog.service.ProgressAveragesService;
 import com.calai.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.calai.backend.foodlog.web.error.ModelRefusedException;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ class FoodLogRefused422StandaloneTest {
         FoodLogHistoryService historyService = mock(FoodLogHistoryService.class);
         FoodLogOverrideService overrideService = mock(FoodLogOverrideService.class);
         UserDailyNutritionSummaryService dailySummaryService = mock(UserDailyNutritionSummaryService.class);
+        ProgressAveragesService progressAveragesService = mock(ProgressAveragesService.class);
 
         // 2) 建 controller
         FoodLogController controller = new FoodLogController(
@@ -40,7 +42,8 @@ class FoodLogRefused422StandaloneTest {
                 deleteService,
                 historyService,
                 overrideService,
-                dailySummaryService
+                dailySummaryService,
+                progressAveragesService
         );
 
         // 3) standalone MockMvc + 掛上 Advice

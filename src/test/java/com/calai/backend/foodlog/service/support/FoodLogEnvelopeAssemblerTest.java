@@ -81,4 +81,24 @@ class FoodLogEnvelopeAssemblerTest {
         assertEquals("PROVIDER_RATE_LIMITED", out.error().errorCode());
         assertEquals(20, out.error().retryAfterSec());
     }
+
+    @Test
+    void should_include_created_at_utc_in_envelope() {
+        FoodLogEntity e = new FoodLogEntity();
+        e.setId("log-3");
+        e.setMethod("PHOTO");
+        e.setProvider("GEMINI");
+        e.setStatus(FoodLogStatus.DRAFT);
+        e.setDegradeLevel("DG-0");
+        e.setCreatedAtUtc(Instant.parse("2026-03-21T07:30:00Z"));
+        e.setUpdatedAtUtc(Instant.parse("2026-03-21T07:45:00Z"));
+        e.setSavedAtUtc(Instant.parse("2026-03-21T07:50:00Z"));
+
+        FoodLogEnvelope out = assembler.assemble(e, null, "req-3");
+
+        assertNotNull(out);
+        assertEquals("2026-03-21T07:30:00Z", out.createdAtUtc());
+        assertEquals("2026-03-21T07:45:00Z", out.updatedAtUtc());
+        assertEquals("2026-03-21T07:50:00Z", out.savedAtUtc());
+    }
 }

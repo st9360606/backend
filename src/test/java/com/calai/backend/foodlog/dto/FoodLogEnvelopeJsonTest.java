@@ -22,7 +22,9 @@ class FoodLogEnvelopeJsonTest {
                 1, // portionMultiplier
 
                 // NEW: time fields
+                "2026-04-04T02:12:00Z", // createdAtUtc
                 "2026-04-04T02:42:00Z", // updatedAtUtc
+                "2026-04-04T02:50:00Z", // savedAtUtc
                 "2026-04-04T02:14:00Z", // serverReceivedAtUtc
                 "2026-04-04T02:10:00Z", // capturedAtUtc
                 "2026-04-04",           // capturedLocalDate
@@ -82,7 +84,9 @@ class FoodLogEnvelopeJsonTest {
         assertThat(json).contains("\"_reasoning\"");
 
         // NEW: time fields 驗收
+        assertThat(json).contains("\"createdAtUtc\"");
         assertThat(json).contains("\"updatedAtUtc\"");
+        assertThat(json).contains("\"savedAtUtc\"");
         assertThat(json).contains("\"serverReceivedAtUtc\"");
         assertThat(json).contains("\"capturedAtUtc\"");
         assertThat(json).contains("\"capturedLocalDate\"");

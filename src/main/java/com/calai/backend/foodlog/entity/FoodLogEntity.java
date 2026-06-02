@@ -111,6 +111,9 @@ public class FoodLogEntity {
     @Column(name = "updated_at_utc", nullable = false)
     private Instant updatedAtUtc;
 
+    @Column(name = "saved_at_utc")
+    private Instant savedAtUtc;
+
     @PrePersist
     void prePersist() {
         if (id == null || id.isBlank()) id = UUID.randomUUID().toString();

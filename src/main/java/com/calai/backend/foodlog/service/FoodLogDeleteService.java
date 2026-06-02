@@ -63,7 +63,9 @@ public class FoodLogDeleteService {
                 null, // tierUsed
                 false, // fromCache
                 null, // portionMultiplier
+                null, // createdAtUtc
                 null, // updatedAtUtc
+                null, // savedAtUtc
                 null, // serverReceivedAtUtc
                 null, // capturedAtUtc
                 null, // capturedLocalDate

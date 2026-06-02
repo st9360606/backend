@@ -62,6 +62,7 @@ public class FoodLogHistoryService {
         }
 
         log.setStatus(FoodLogStatus.SAVED);
+        log.setSavedAtUtc(clock.instant());
         logRepo.save(log);
         return foodLogService.getOne(userId, foodLogId, requestId);
     }
@@ -104,6 +105,7 @@ public class FoodLogHistoryService {
         }
 
         log.setStatus(FoodLogStatus.DRAFT);
+        log.setSavedAtUtc(null);
         logRepo.save(log);
         return foodLogService.getOne(userId, foodLogId, requestId);
     }
@@ -175,7 +177,7 @@ public class FoodLogHistoryService {
 
         Instant fromUtc = Instant.now(clock).minus(Duration.ofDays(lookBackDays));
 
-        List<FoodLogEntity> rows = logRepo.findSavedRecentByServerReceivedAtUtc(
+        List<FoodLogEntity> rows = logRepo.findSavedRecentBySavedAtUtc(
                 userId,
                 fromUtc,
                 size
@@ -308,7 +310,9 @@ public class FoodLogHistoryService {
         return new FoodLogListResponse.Item(
                 e.getId(),
                 e.getStatus().name(),
+                e.getCreatedAtUtc() == null ? null : e.getCreatedAtUtc().toString(),
                 e.getUpdatedAtUtc() == null ? null : e.getUpdatedAtUtc().toString(),
+                e.getSavedAtUtc() == null ? null : e.getSavedAtUtc().toString(),
                 e.getCapturedLocalDate() == null ? null : e.getCapturedLocalDate().toString(),
                 e.getCapturedAtUtc() == null ? null : e.getCapturedAtUtc().toString(),
                 e.getServerReceivedAtUtc() == null ? null : e.getServerReceivedAtUtc().toString(),
