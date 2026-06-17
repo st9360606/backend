@@ -54,7 +54,7 @@ public class UserProfileService {
     private static final int MAX_WATER_GOAL_ML = 20000;
 
     private static final int DEFAULT_DAILY_WORKOUT_GOAL_KCAL = 450;
-    private static final int MAX_DAILY_WORKOUT_GOAL_KCAL = 5000;
+    private static final int MAX_DAILY_WORKOUT_GOAL_KCAL = 20000;
 
     // ✅ constructor 增加 WeightHistoryRepo
     public UserProfileService(
@@ -299,7 +299,7 @@ public class UserProfileService {
         }
 
         if (r.dailyWorkoutGoalKcal() != null) {
-            int v = clampInt(r.dailyWorkoutGoalKcal(), MAX_DAILY_WORKOUT_GOAL_KCAL); // 0..5000
+            int v = clampInt(r.dailyWorkoutGoalKcal(), MAX_DAILY_WORKOUT_GOAL_KCAL); // 0..20000
             p.setDailyWorkoutGoalKcal(v);
         }
 

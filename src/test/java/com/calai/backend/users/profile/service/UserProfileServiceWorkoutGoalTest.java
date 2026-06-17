@@ -83,6 +83,6 @@ class UserProfileServiceWorkoutGoalTest {
 
         var dto = svc.upsert(uid, req, null, false);
 
-        assertThat(dto.dailyWorkoutGoalKcal()).isEqualTo(5000);
+        assertThat(dto.dailyWorkoutGoalKcal()).isEqualTo(20000);
     }
 }
