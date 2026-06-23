@@ -20,9 +20,9 @@ spring:
         await-termination-period: 30s
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true
-    username: root
-    password: root
+    url: "${DB_URL}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
   jpa:
     hibernate:
       ddl-auto: none             # 無自動建表；請用 Flyway/Liquibase
@@ -35,15 +35,15 @@ spring:
           time_zone: UTC
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: "${REDIS_HOST}"
+      port: "${REDIS_PORT:6379}"
       timeout: 2s
       client-type: lettuce
 
   mail:
     host: smtp.gmail.com
     port: 587
-    test-connection: true
+    test-connection: false
     username: "${SMTP_USERNAME}"
     password: "${SMTP_PASSWORD}"
     properties:
@@ -128,14 +128,14 @@ app:
     rate:
       free-per-minute: 6
       paid-per-minute: 20
-      redis-prefix: "bitecal-prod"
+      redis-prefix: "caloshape-prod"
     inflight:
       max: 2
-      redis-prefix: "bitecal-prod"
+      redis-prefix: "caloshape-prod"
       lease-ttl: "PT5M"
   actuator:
-    user: "${APP_ACTUATOR_USER:actuator}"
-    pass: "${APP_ACTUATOR_PASS:change-me}"
+    user: "${APP_ACTUATOR_USER}"
+    pass: "${APP_ACTUATOR_PASS}"
   foodlog:
     provider: "GEMINI"
   provider:
@@ -158,21 +158,23 @@ app:
   google:
     play:
       enabled: true
-      package-name: "com.calai.bitecal"
-      service-account-json-path: "${GOOGLE_PLAY_BITE_CAL_SA_JSON_PATH:}"  # prod 必須設定
+      package-name: "com.caloshape.app"
+      service-account-json-path: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH}"  # prod 必須設定
       dev-fake-tokens-enabled: false  # Prod must be false
-      purchase-token-encryption-key: "${GOOGLE_PLAY_PURCHASE_TOKEN_AES_KEY:}" # prod 必須設定
-    web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
+      purchase-token-encryption-key: "${GOOGLE_PLAY_PURCHASE_TOKEN_AES_KEY}" # prod 必須設定
+    web-client-id: "${GOOGLE_WEB_CLIENT_ID_PROD}"
   billing:
     products:
-      monthly: [ "bitecal_monthly" ]
-      yearly: [ "bitecal_yearly" ]
+      monthly: [ "caloshape_monthly" ]
+      yearly: [ "caloshape_yearly" ]
   openfoodfacts:
-    redis-prefix: "bitecal-prod"
+    redis-prefix: "caloshape-prod"
     base-url: "https://world.openfoodfacts.org"
+    basic-auth-user: ""
+    basic-auth-pass: ""
     connect-timeout: "PT5S"
     read-timeout: "PT12S"
-    user-agent: "BitCal_AI/1.0 (contact: dev@bitcalai.example)"
+    user-agent: "CaloShape/1.0 (contact: support@caloshape.com)"
     global-read-limit-per-min: 90   # 建議 < 100，留 buffer（OFF 100 req/min）
     lock-ttl: "PT30S"
     circuit-ttl: "PT5M" # 429/403 時熔斷 5 分鐘（你可改 3m/10m）
@@ -180,23 +182,22 @@ app:
       positive-ttl: "P30D"          # found: 7–30天（你可調）
       negative-ttl: "PT12H"         # not found: 6–24小時（你可調）
       purge-delay: "PT1H"
-    name-search:
-
-
 
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000
+  security:
+    allow-origins: "${APP_SECURITY_ALLOW_ORIGINS:https://caloshape.com,https://www.caloshape.com,https://caloshape.app}"
   email:
     enabled: true
     otp-length: 4
     ttl-minutes: 10
-    sender: "${APP_EMAIL_SENDER:no-reply@bitecal.app}"
+    sender: "${APP_EMAIL_SENDER:no-reply@caloshape.com}"
 
   storage:
-    weight-photos-dir: uploads/weight-photos
+    weight-photos-dir: "${WEIGHT_PHOTOS_DIR:uploads/weight-photos}"
     local:
-      base-dir: ./data # TODO 要排程刪除
+      base-dir: "${APP_STORAGE_BASE_DIR:/var/lib/caloshape/data}" # TODO 要排程刪除
       tmp-cleaner:
         enabled: true
         tmp-subdir: "blobs/tmp"   # 相對於每個 user-* 目錄，例如 ./data/user-1/blobs/tmp
@@ -238,7 +239,9 @@ app:
       base-retry-delay: "PT10S"
 
   internal:
-    api-token: ${INTERNAL_API_TOKEN}   #powershell -NoProfile -Command "[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))"
+    # Generate example:
+    # powershell -NoProfile -Command "[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))"
+    api-token: "${INTERNAL_API_TOKEN}"
 
 referral:
   email-outbox:
@@ -267,8 +270,8 @@ alias:
 logging:
   level:
     org.springframework.scheduling: INFO
-    com.calai.backend.workout.job: INFO
-    com.calai.backend.foodlog.task: INFO
+    com.caloshape.backend.workout.job: INFO
+    com.caloshape.backend.foodlog.task: INFO
 
 workout:
   estimate:

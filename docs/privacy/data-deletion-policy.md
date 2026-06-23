@@ -21,7 +21,7 @@
 ## 4) Google Play 訂閱與免費試用
 如果使用者透過 Google Play 購買訂閱或啟用免費試用，該訂閱由 Google Play 管理。
 
-刪除 BiteCal 帳號會刪除或去識別化 App 帳號與相關 App 資料，但不一定會自動取消仍有效的 Google Play 訂閱或免費試用。使用者刪除帳號前，應先到 Google Play 管理或取消訂閱：
+刪除 CaloShape 帳號會刪除或去識別化 App 帳號與相關 App 資料，但不一定會自動取消仍有效的 Google Play 訂閱或免費試用。使用者刪除帳號前，應先到 Google Play 管理或取消訂閱：
 
 `Google Play → Payments & subscriptions → Subscriptions`
 

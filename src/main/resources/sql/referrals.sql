@@ -211,8 +211,8 @@ F. Crash / 重試 / 冪等
 G. 通知 / Email / CS Trace
 | 編號  | 情境               | Notification                    | Email Outbox        | Snapshot / CS Trace | 備註                                    |
 | --- | ---------------- | ------------------------------- | ------------------- | ------------------- | ------------------------------------- |
-| G-1 | 成功發獎             | ✅ `Referral reward granted`     | ✅ 若 inviter 有 email | ✅ 更新                | deep link=`bitecal://premium-rewards` |
-| G-2 | 失敗終態             | ✅ `Referral reward not granted` | ✅ 若 inviter 有 email | ✅ 更新                | deep link=`bitecal://referrals`       |
+| G-1 | 成功發獎             | ✅ `Referral reward granted`     | ✅ 若 inviter 有 email | ✅ 更新                | deep link=`caloshape://premium-rewards` |
+| G-2 | 失敗終態             | ✅ `Referral reward not granted` | ✅ 若 inviter 有 email | ✅ 更新                | deep link=`caloshape://referrals`       |
 | G-3 | inviter 沒有 email | ✅ 仍建立 notification              | ❌ 不建立 email outbox  | ✅ 更新                | 不影響 reward                            |
 | G-4 | 同一 claim 事件重複觸發  | 不重複                             | 不重複                 | ✅                   | notification/email 有 dedupe           |
 

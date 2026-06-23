@@ -5,7 +5,7 @@ It applies to the entire backend project unless a more specific `AGENTS.md` exis
 
 ## Project Snapshot
 
-- Product: BiteCal / Calai backend.
+- Product: CaloShape / CaloShape backend.
 - Runtime: Java 21.
 - Framework: Spring Boot 3.5.x, Spring MVC, Spring Security, Spring Data JPA, Validation, Actuator.
 - Build tool: Maven Wrapper (`mvnw`, `mvnw.cmd`).
@@ -17,7 +17,7 @@ It applies to the entire backend project unless a more specific `AGENTS.md` exis
     - Gemini provider for food recognition / nutrition-label parsing.
     - OpenFoodFacts for barcode lookup.
     - SMTP mail for login code / notifications.
-- Main package root: `com.calai.backend`.
+- Main package root: `com.caloshape.backend`.
 
 ## High-Level Modules
 

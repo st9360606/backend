@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: BiteCal Profile API
+  title: CaloShape Profile API
   version: 1.0.0
 servers:
   - url: https://api.example.com

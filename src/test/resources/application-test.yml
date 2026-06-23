@@ -8,7 +8,7 @@ spring:
       enabled: false   # ✅ 測試不要啟動 @Scheduled（你 log 裡的 cleanup job 就會消失）
 
   datasource:
-    url: jdbc:h2:mem:calai;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
+    url: jdbc:h2:mem:caloshape;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
     driver-class-name: org.h2.Driver
     username: sa
     password: ""

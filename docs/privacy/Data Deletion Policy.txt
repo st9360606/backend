@@ -1,6 +1,6 @@
 Data Deletion Policy (Account Deletion)
 
-You can request deletion of your BiteCal account and associated personal data directly in the app:
+You can request deletion of your CaloShape account and associated personal data directly in the app:
 Settings → Delete Account → Delete.
 
 You can also contact support at:
@@ -24,7 +24,7 @@ Retention schedule
 Billing and subscriptions
 If you purchased a subscription or started a free trial through Google Play, your subscription is managed by Google Play.
 
-Deleting your BiteCal account removes or de-identifies your app account and associated app data, but it may not automatically cancel your active Google Play subscription or free trial. Before continuing with account deletion, you can manage or cancel your subscription in Google Play:
+Deleting your CaloShape account removes or de-identifies your app account and associated app data, but it may not automatically cancel your active Google Play subscription or free trial. Before continuing with account deletion, you can manage or cancel your subscription in Google Play:
 Google Play → Payments & subscriptions → Subscriptions
 
 For billing, refund handling, chargeback handling, fraud prevention, customer support, tax/accounting, and legal compliance, we may retain limited subscription records for a reasonable period. These retained records are minimized and are not used to recreate your deleted app account.

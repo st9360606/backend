@@ -20,7 +20,7 @@ spring:
         await-termination-period: 30s
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3307/calai?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true
+    url: jdbc:mysql://127.0.0.1:3307/caloshape?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&createDatabaseIfNotExist=true
     username: root
     password: root
   jpa:
@@ -120,10 +120,10 @@ app:
     rate:
       free-per-minute: 6
       paid-per-minute: 20
-      redis-prefix: "bitecal-dev"
+      redis-prefix: "caloshape-dev"
     inflight:
       max: 2
-      redis-prefix: "bitecal-dev"
+      redis-prefix: "caloshape-dev"
       lease-ttl: "PT5M"
   actuator:
     user: "${APP_ACTUATOR_USER:actuator}"
@@ -150,23 +150,23 @@ app:
   google:
     play:
       enabled: true
-      package-name: "com.calai.bitecal"
-      service-account-json-path: "${GOOGLE_PLAY_BITE_CAL_SA_JSON_PATH:}"  # dev 可用
+      package-name: "com.caloshape.app"
+      service-account-json-path: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH:}"  # dev 可用
       dev-fake-tokens-enabled: true  # prod 不可用
       purchase-token-encryption-key: "${GOOGLE_PLAY_PURCHASE_TOKEN_AES_KEY:}"
-    web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV:575775859979-nuhb6lmchca4sn5719193uke61eda7pq.apps.googleusercontent.com}"
+    web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV}"
   billing:
     products:
-      monthly: [ "bitecal_monthly" ]
-      yearly: [ "bitecal_yearly" ]
+      monthly: [ "caloshape_monthly" ]
+      yearly: [ "caloshape_yearly" ]
   openfoodfacts:
-    redis-prefix: "bitecal-dev"     # ✅ 建議每個環境不同
+    redis-prefix: "caloshape-dev"     # ✅ 建議每個環境不同
     base-url: "https://world.openfoodfacts.org"
     basic-auth-user: ""
     basic-auth-pass: ""
     connect-timeout: "PT5S"
     read-timeout: "PT12S"
-    user-agent: "BitCal_AI/1.0 (contact: dev@bitcalai.example)"
+    user-agent: "CaloShape/1.0 (contact: support@caloshape.com)"
     global-read-limit-per-min: 90   # 建議 < 100，留 buffer（OFF 100 req/min）
     lock-ttl: "PT30S"
     circuit-ttl: "PT5M" # 429/403 時熔斷 5 分鐘（你可改 3m/10m）
@@ -174,9 +174,6 @@ app:
       positive-ttl: "P30D"          # found: 7–30天（你可調）
       negative-ttl: "PT12H"         # not found: 6–24小時（你可調）
       purge-delay: "PT1H"
-    name-search:
-
-
 
   auth:
     access-ttl-sec: 900
@@ -188,8 +185,8 @@ app:
     otp-length: 4
     ttl-minutes: 10
     # 若使用 Gmail SMTP，from 最好等於 username；否則容易被覆寫或遭拒收
-    sender: "${APP_EMAIL_SENDER:no-reply@bitecal.app}"
-    # 若要用自家網域 no-reply@bitecal.app，建議改用 SendGrid/SES 並設定 SPF/DKIM/DMARC
+    sender: "${APP_EMAIL_SENDER:${SMTP_USERNAME}}"
+    # 若要用自家網域 no-reply@caloshape.app，建議改用 SendGrid/SES 並設定 SPF/DKIM/DMARC
   storage:
     weight-photos-dir: uploads/weight-photos
     local:
@@ -265,8 +262,8 @@ alias:
 logging:
   level:
     org.springframework.scheduling: INFO
-    com.calai.backend.workout.job: INFO
-    com.calai.backend.foodlog.task: INFO
+    com.caloshape.backend.workout.job: INFO
+    com.caloshape.backend.foodlog.task: INFO
 
 workout:
   estimate:
