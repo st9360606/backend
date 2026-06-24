@@ -39,6 +39,8 @@ spring:
       port: "${REDIS_PORT:6379}"
       timeout: 2s
       client-type: lettuce
+      repositories:
+        enabled: false
 
   mail:
     host: smtp.gmail.com
