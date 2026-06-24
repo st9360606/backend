@@ -1,6 +1,4 @@
 -- === food_log_tasks（承接 PENDING）===
-DROP TABLE IF EXISTS food_log_tasks;
-
 CREATE TABLE food_log_tasks
 (
     id                 CHAR(36)                                                   NOT NULL,

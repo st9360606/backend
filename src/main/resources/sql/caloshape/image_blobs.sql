@@ -1,4 +1,3 @@
-DROP TABLE IF EXISTS image_blobs;
 CREATE TABLE IF NOT EXISTS image_blobs
 (
     id              BIGINT      NOT NULL AUTO_INCREMENT,

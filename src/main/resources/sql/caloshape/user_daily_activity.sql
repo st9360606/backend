@@ -1,5 +1,3 @@
-DROP TABLE IF EXISTS user_daily_activity;
-
 CREATE TABLE user_daily_activity
 (
     id                  BIGINT PRIMARY KEY AUTO_INCREMENT,

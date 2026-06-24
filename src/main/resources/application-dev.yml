@@ -151,7 +151,7 @@ app:
     play:
       enabled: true
       package-name: "com.caloshape.app"
-      service-account-json-path: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH:}"  # dev 可用
+      service-account-json-path: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH:C:/Users/User/Projects/calai/keys/caloshape-play-sa.json}"  # dev 可用
       dev-fake-tokens-enabled: true  # prod 不可用
       purchase-token-encryption-key: "${GOOGLE_PLAY_PURCHASE_TOKEN_AES_KEY:}"
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV}"

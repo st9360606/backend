@@ -1,4 +1,3 @@
-DROP TABLE IF EXISTS food_log_requests;
 CREATE TABLE IF NOT EXISTS food_log_requests
 (
     id              BIGINT       NOT NULL AUTO_INCREMENT,

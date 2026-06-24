@@ -1,5 +1,4 @@
 -- === usage_counters（配額：server_now + user_tz 的 local_date）===
-DROP TABLE IF EXISTS usage_counters;
 CREATE TABLE IF NOT EXISTS usage_counters
 (
     id             BIGINT      NOT NULL AUTO_INCREMENT,

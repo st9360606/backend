@@ -1,5 +1,4 @@
 -- === food_log_overrides（回溯覆寫）===
-DROP TABLE IF EXISTS food_log_overrides;
 CREATE TABLE IF NOT EXISTS food_log_overrides
 (
     id             CHAR(36)    NOT NULL,
