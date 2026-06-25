@@ -40,6 +40,8 @@ spring:
     redis:
       host: localhost
       port: 6379
+      repositories:
+        enabled: false
 
 server:
   port: 0
@@ -68,6 +70,22 @@ app:
 
   foodlog:
     provider: "STUB"       # ✅ 測試預設 STUB，避免被 GEMINI 汙染
+
+  openfoodfacts:
+    redis-prefix: "caloshape-test"
+    base-url: "https://world.openfoodfacts.org"
+    basic-auth-user: ""
+    basic-auth-pass: ""
+    connect-timeout: "PT1S"
+    read-timeout: "PT1S"
+    user-agent: "CaloShape-Test/1.0 (contact: test@example.com)"
+    global-read-limit-per-min: 90
+    lock-ttl: "PT30S"
+    circuit-ttl: "PT5M"
+    cache:
+      positive-ttl: "P1D"
+      negative-ttl: "PT1H"
+      purge-delay: "PT1H"
 
   provider:
     gemini:

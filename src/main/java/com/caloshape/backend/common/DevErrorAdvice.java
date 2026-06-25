@@ -6,7 +6,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
-@Profile({"dev","test"})
+@Profile("dev")
 @RestControllerAdvice
 public class DevErrorAdvice {
 

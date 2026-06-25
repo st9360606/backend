@@ -1,8 +1,8 @@
 package com.caloshape.backend.referral.controller;
 
+import com.caloshape.backend.auth.repo.AuthTokenRepo;
 import com.caloshape.backend.auth.security.AuthContext;
 import com.caloshape.backend.common.web.ApiExceptionHandler;
-import com.caloshape.backend.referral.controller.NotificationController;
 import com.caloshape.backend.referral.dto.NotificationItemDto;
 import com.caloshape.backend.referral.dto.NotificationMarkReadResponseDto;
 import com.caloshape.backend.referral.service.NotificationInboxService;
@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -27,6 +28,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+@ActiveProfiles("test")
 @WebMvcTest(NotificationController.class)
 @Import(ApiExceptionHandler.class)
 class NotificationControllerWebMvcTest {
@@ -38,6 +40,9 @@ class NotificationControllerWebMvcTest {
 
     @MockitoBean
     private AuthContext authContext;
+
+    @MockitoBean
+    private AuthTokenRepo authTokenRepo;
 
     @MockitoBean
     private NotificationInboxService notificationInboxService;
@@ -68,6 +73,7 @@ class NotificationControllerWebMvcTest {
     void list_withoutLogin_shouldReturn401() throws Exception {
         mvc.perform(get("/api/v1/notifications"))
                 .andExpect(status().isUnauthorized());
+
         verify(notificationInboxService, never()).getMyNotifications(USER_ID);
     }
 
@@ -100,6 +106,7 @@ class NotificationControllerWebMvcTest {
     void markRead_withoutLogin_shouldReturn401() throws Exception {
         mvc.perform(patch("/api/v1/notifications/{notificationId}/read", 10L).with(csrf()))
                 .andExpect(status().isUnauthorized());
+
         verify(notificationInboxService, never()).markRead(USER_ID, 10L);
     }
 }

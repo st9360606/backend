@@ -6,6 +6,7 @@ import com.caloshape.backend.common.web.RequestIdFilter;
 import com.caloshape.backend.foodlog.controller.FoodLogController;
 import com.caloshape.backend.foodlog.controller.FoodLogImageController;
 import com.caloshape.backend.foodlog.service.FoodLogService;
+import com.caloshape.backend.foodlog.service.ProgressAveragesService;
 import com.caloshape.backend.foodlog.service.UserDailyNutritionSummaryService;
 import com.caloshape.backend.foodlog.service.image.ImageOpenResult;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,7 @@ class FoodLogExceptionAdviceTest {
     @MockitoBean com.caloshape.backend.foodlog.service.FoodLogOverrideService overrideService;
     @MockitoBean com.caloshape.backend.foodlog.service.FoodLogHistoryService historyService;
     @MockitoBean UserDailyNutritionSummaryService dailySummaryService;
+    @MockitoBean ProgressAveragesService progressAveragesService;
 
     @Test
     void upload_unsupported_format_should_400_with_requestId() throws Exception {
