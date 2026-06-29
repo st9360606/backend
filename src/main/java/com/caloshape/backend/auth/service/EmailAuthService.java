@@ -8,6 +8,7 @@ import com.caloshape.backend.auth.email.EmailLoginCode;
 import com.caloshape.backend.auth.email.EmailLoginCodeRequestedEvent;
 import com.caloshape.backend.auth.entity.AuthProvider;
 import com.caloshape.backend.auth.repo.EmailLoginCodeRepository;
+import com.caloshape.backend.entitlement.service.PlayReviewEntitlementService;
 import com.caloshape.backend.fasting.service.FastingPlanService;
 import com.caloshape.backend.fasting.support.ClientTimeZoneResolver;
 import com.caloshape.backend.users.user.entity.User;
@@ -36,6 +37,8 @@ public class EmailAuthService {
     private final FastingPlanService fastingPlans;
     private final ClientTimeZoneResolver tzResolver;
     private final ApplicationEventPublisher events;
+    private final PlayReviewAccessService playReviewAccess;
+    private final PlayReviewEntitlementService playReviewEntitlements;
 
     public EmailAuthService(
             EmailLoginCodeRepository codes,
@@ -43,7 +46,9 @@ public class EmailAuthService {
             TokenService tokens,
             FastingPlanService fastingPlans,
             ClientTimeZoneResolver tzResolver,
-            ApplicationEventPublisher events
+            ApplicationEventPublisher events,
+            PlayReviewAccessService playReviewAccess,
+            PlayReviewEntitlementService playReviewEntitlements
     ) {
         this.codes = codes;
         this.users = users;
@@ -51,6 +56,8 @@ public class EmailAuthService {
         this.fastingPlans = fastingPlans;
         this.tzResolver = tzResolver;
         this.events = events;
+        this.playReviewAccess = playReviewAccess;
+        this.playReviewEntitlements = playReviewEntitlements;
     }
 
     @Value("${app.email.enabled:true}")
@@ -77,7 +84,7 @@ public class EmailAuthService {
 
         codes.consumeAllActive(email, PURPOSE_LOGIN, now);
 
-        final String code = genCode(otpLen);
+        final String code = playReviewAccess.fixedCodeFor(email).orElseGet(() -> genCode(otpLen));
         final String hash = sha256(code);
 
         var ent = new EmailLoginCode();
@@ -91,7 +98,9 @@ public class EmailAuthService {
         ent.setUserAgent(ua);
         codes.save(ent);
 
-        events.publishEvent(new EmailLoginCodeRequestedEvent(email, code, ttlMin));
+        if (!playReviewAccess.isReviewEmail(email)) {
+            events.publishEvent(new EmailLoginCodeRequestedEvent(email, code, ttlMin));
+        }
 
         return new StartResponse(true);
     }
@@ -125,6 +134,10 @@ public class EmailAuthService {
         user.setProvider(AuthProvider.EMAIL);
         user.setLastLoginAt(now);
         user = users.save(user);
+
+        if (playReviewAccess.isReviewEmail(email)) {
+            playReviewEntitlements.ensureActive(user.getId(), now, playReviewAccess.entitlementValidity());
+        }
 
         // ✅ 不要在登入時預先建立 user_profiles
         //    否則前端 existsOnServer() 會把新帳號誤判成舊帳號，直接導去 HOME。

@@ -15,6 +15,12 @@ public interface UserEntitlementRepository extends JpaRepository<UserEntitlement
 
     Optional<UserEntitlementEntity> findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(String purchaseTokenHash);
 
+    Optional<UserEntitlementEntity> findTopByUserIdAndSourceAndProductIdOrderByValidToUtcDesc(
+            Long userId,
+            String source,
+            String productId
+    );
+
     Optional<UserEntitlementEntity> findTopByLinkedPurchaseTokenHashOrderByUpdatedAtUtcDesc(
             String linkedPurchaseTokenHash
     );

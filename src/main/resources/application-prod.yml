@@ -188,6 +188,11 @@ app:
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000
+    play-review:
+      enabled: "${PLAY_REVIEW_ENABLED:false}"
+      email: "${PLAY_REVIEW_EMAIL:}"
+      code: "${PLAY_REVIEW_CODE:}"
+      entitlement-validity: "${PLAY_REVIEW_ENTITLEMENT_VALIDITY:P3650D}"
   security:
     allow-origins: "${APP_SECURITY_ALLOW_ORIGINS:https://caloshape.com,https://www.caloshape.com,https://caloshape.app}"
   email:
