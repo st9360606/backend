@@ -1,5 +1,5 @@
 -- ============================================================
--- BiteCal / Calai DEV ONLY SQL
+-- caloshape DEV ONLY SQL
 -- Safe Update Mode fixed version
 --
 -- 用途：
@@ -49,7 +49,7 @@ SET @target_user_id := 1;
 -- );
 
 SET @target_email := (
-    SELECT email
+    SELECT CONVERT(email USING utf8mb4) COLLATE utf8mb4_0900_ai_ci
     FROM users
     WHERE id = @target_user_id
     LIMIT 1
