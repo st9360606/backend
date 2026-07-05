@@ -9,8 +9,10 @@ import com.caloshape.backend.workout.dto.WorkoutWeeklyProgressResponse;
 import com.caloshape.backend.workout.entity.UserDailyWorkoutSummaryEntity;
 import com.caloshape.backend.workout.repo.UserDailyWorkoutSummaryRepository;
 import com.caloshape.backend.workout.repo.WorkoutSessionRepo;
+import com.caloshape.backend.weight.repo.WeightTimeseriesRepo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,11 +33,13 @@ public class UserDailyWorkoutSummaryService {
 
     private static final int DEFAULT_DAILY_WORKOUT_GOAL_KCAL = 450;
     private static final int MAX_WEEK_OFFSET = 5;
+    private static final double STEP_KCAL_COEFFICIENT = 0.0005d;
 
     private final UserDailyWorkoutSummaryRepository summaryRepo;
     private final WorkoutSessionRepo workoutSessionRepo;
     private final UserDailyActivityRepository dailyActivityRepo;
     private final UserProfileRepository profileRepo;
+    private final WeightTimeseriesRepo weightTimeseriesRepo;
     private final FoodLogRetentionProperties retentionProperties;
     private final Clock clock;
 
@@ -140,10 +144,18 @@ public class UserDailyWorkoutSummaryService {
         Double deltaPercent = calculateDeltaPercent(displayBurned, compareBurned);
         String deltaDirection = directionOf(deltaPercent);
 
-        int goalKcal = profileRepo.findByUserId(userId)
-                .map(UserProfile::getDailyWorkoutGoalKcal)
-                .map(v -> Math.max(0, v))
-                .orElse(DEFAULT_DAILY_WORKOUT_GOAL_KCAL);
+        UserProfile profile = profileRepo.findByUserId(userId).orElse(null);
+        Double latestWeightKg = weightTimeseriesRepo.findLatest(userId, PageRequest.of(0, 1))
+                .stream()
+                .findFirst()
+                .map(weight -> weight.getWeightKg() == null ? null : weight.getWeightKg().doubleValue())
+                .orElse(null);
+
+        int goalKcal = calculateTotalActivityGoalKcal(
+                profile != null ? profile.getDailyWorkoutGoalKcal() : null,
+                profile != null ? profile.getDailyStepGoal() : null,
+                latestWeightKg
+        );
 
         for (int i = 7; i >= 1; i--) {
             recomputeDay(userId, displayDate.minusDays(i), zoneId);
@@ -199,6 +211,24 @@ public class UserDailyWorkoutSummaryService {
                 .sum();
 
         return (int) Math.round(totalKcal / dataRows.size());
+    }
+
+    static int calculateTotalActivityGoalKcal(
+            Integer workoutGoalKcal,
+            Integer stepGoal,
+            Double weightKg
+    ) {
+        int safeWorkoutGoal = workoutGoalKcal == null
+                ? DEFAULT_DAILY_WORKOUT_GOAL_KCAL
+                : Math.max(0, workoutGoalKcal);
+
+        if (stepGoal == null || stepGoal <= 0 || weightKg == null || weightKg <= 0d) {
+            return safeWorkoutGoal;
+        }
+
+        long stepGoalKcal = Math.round(weightKg * stepGoal * STEP_KCAL_COEFFICIENT);
+        long totalGoalKcal = safeWorkoutGoal + Math.max(0L, stepGoalKcal);
+        return (int) Math.min(Integer.MAX_VALUE, totalGoalKcal);
     }
 
     private Map<LocalDate, UserDailyWorkoutSummaryEntity> toMap(List<UserDailyWorkoutSummaryEntity> rows) {
