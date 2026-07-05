@@ -32,6 +32,8 @@ class WorkoutServiceEstimateIT {
 
     @Autowired private JdbcTemplate jdbc;
 
+    private Long userId;
+
     @BeforeEach
     void setUp() {
         Integer other = jdbc.queryForObject(
@@ -47,6 +49,7 @@ class WorkoutServiceEstimateIT {
         user = userRepo.save(user); // 在同一個 @Transactional 內，仍是 managed
 
         Long uid = user.getId();
+        userId = uid;
 
         // ✅ AuthContext 期待 principal 是 userId
         var auth = new UsernamePasswordAuthenticationToken(
@@ -95,6 +98,58 @@ class WorkoutServiceEstimateIT {
     }
 
     @Test
+    void hi_45_minutes_running_should_remove_duration_from_activity_name() {
+        Long runningId = dictionaryId("running");
+        setLocaleAndAlias("hi", "दौड़ना", runningId);
+
+        EstimateResponse r = svc.estimate("45 मिनट दौड़ना");
+
+        assertEquals("ok", r.status());
+        assertEquals(runningId, r.activityId());
+        assertEquals("दौड़ना", r.activityDisplay());
+        assertEquals(45, r.minutes());
+    }
+
+    @Test
+    void ar_running_for_45_minutes_should_remove_duration_connector() {
+        Long runningId = dictionaryId("running");
+        setLocaleAndAlias("ar", "الجري", runningId);
+
+        EstimateResponse r = svc.estimate("الجري لمدة 45 دقيقة");
+
+        assertEquals("ok", r.status());
+        assertEquals(runningId, r.activityId());
+        assertEquals("الجري", r.activityDisplay());
+        assertEquals(45, r.minutes());
+    }
+
+    @Test
+    void en_us_profile_should_use_en_alias() {
+        Long runningId = dictionaryId("running");
+        setLocaleAndAlias("en-US", "en", "cardio stride", runningId);
+
+        EstimateResponse r = svc.estimate("cardio stride 45 minutes");
+
+        assertEquals("ok", r.status());
+        assertEquals(runningId, r.activityId());
+        assertEquals("cardio stride", r.activityDisplay());
+        assertEquals(45, r.minutes());
+    }
+
+    @Test
+    void es_mx_profile_should_use_es_alias() {
+        Long runningId = dictionaryId("running");
+        setLocaleAndAlias("es-MX", "es", "carrera tranquila", runningId);
+
+        EstimateResponse r = svc.estimate("carrera tranquila 45 minutos");
+
+        assertEquals("ok", r.status());
+        assertEquals(runningId, r.activityId());
+        assertEquals("carrera tranquila", r.activityDisplay());
+        assertEquals(45, r.minutes());
+    }
+
+    @Test
     void unknown_low_confidence_go_other_exercise() {
         Long otherId = jdbc.queryForObject(
                 "select id from workout_dictionary where canonical_key = 'other_exercise'",
@@ -106,5 +161,40 @@ class WorkoutServiceEstimateIT {
         assertEquals("ok", r.status());
         assertEquals(20, r.minutes());
         assertEquals(otherId, r.activityId()); // ✅ 低信心應走 other_exercise
+    }
+
+    private Long dictionaryId(String canonicalKey) {
+        Long id = jdbc.queryForObject(
+                "select id from workout_dictionary where canonical_key = ?",
+                Long.class,
+                canonicalKey
+        );
+        assertNotNull(id);
+        return id;
+    }
+
+    private void setLocaleAndAlias(String locale, String phrase, Long dictionaryId) {
+        setLocaleAndAlias(locale, locale, phrase, dictionaryId);
+    }
+
+    private void setLocaleAndAlias(
+            String profileLocale,
+            String aliasLocale,
+            String phrase,
+            Long dictionaryId
+    ) {
+        UserProfile profile = profileRepo.findByUserId(userId).orElseThrow();
+        profile.setLocale(profileLocale);
+        profileRepo.saveAndFlush(profile);
+
+        jdbc.update(
+                """
+                insert into workout_alias (dictionary_id, lang_tag, phrase_lower, status)
+                values (?, ?, ?, 'APPROVED')
+                """,
+                dictionaryId,
+                aliasLocale,
+                phrase
+        );
     }
 }

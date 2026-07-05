@@ -220,7 +220,7 @@ VALUES
 (5, 'zh-TW', '健行', 'APPROVED'),
 (5, 'zh-CN', '徒步', 'APPROVED'),
 (5, 'it', 'escursionismo', 'APPROVED'),
-(5, 'nl', 'wandelen', 'APPROVED'),
+(5, 'nl', 'hiken', 'APPROVED'),
 (5, 'sv', 'vandring', 'APPROVED'),
 (5, 'da', 'vandretur', 'APPROVED'),
 (5, 'nb', 'fottur', 'APPROVED'),
@@ -13666,6 +13666,17 @@ VALUES
 (400, 'cs', 'přetahování lanem', 'APPROVED'),
 (400, 'hi', 'रस्साकशी', 'APPROVED'),
 (400, 'pa', 'ਰਸਾਕਸ਼ੀ', 'APPROVED'),
-(400, 'jv', 'tarik tambang', 'APPROVED');
+(400, 'jv', 'tarik tambang', 'APPROVED'),
+
+-- App locale coverage backfill.
+(27, 'fr', 'montée d’escaliers', 'APPROVED'),
+(40, 'fr', 'vélo d’appartement modéré', 'APPROVED'),
+(41, 'fr', 'vélo d’appartement intense', 'APPROVED'),
+(37, 'he', 'טאי צ׳י', 'APPROVED'),
+(1, 'nl', 'wandelen', 'APPROVED'),
+(7, 'th', 'การฝึกความแข็งแรง', 'APPROVED') AS new
+ON DUPLICATE KEY UPDATE
+    dictionary_id = new.dictionary_id,
+    status = new.status;
 
 

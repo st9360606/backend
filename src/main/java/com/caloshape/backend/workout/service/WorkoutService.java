@@ -113,6 +113,37 @@ public class WorkoutService {
                 .orElse("en");
     }
 
+    // Alias rows use a controlled set of language tags rather than every Android region tag.
+    static String normalizeAliasLocaleTag(String rawTag) {
+        String normalized = rawTag == null
+                ? ""
+                : rawTag.trim().replace('_', '-');
+        if (normalized.isBlank()) {
+            return "en";
+        }
+
+        Locale locale = Locale.forLanguageTag(normalized);
+        String language = locale.getLanguage().toLowerCase(Locale.ROOT);
+        String region = locale.getCountry().toUpperCase(Locale.ROOT);
+        if (language.isBlank() || "und".equals(language)) {
+            return "en";
+        }
+
+        return switch (language) {
+            case "en" -> "en";
+            case "es" -> "es";
+            case "id", "in" -> "id";
+            case "he", "iw" -> "he";
+            case "pt" -> "PT".equals(region) ? "pt-PT" : "pt-BR";
+            case "zh" -> switch (region) {
+                case "CN", "SG" -> "zh-CN";
+                case "TW" -> "zh-TW";
+                default -> "zh-HK";
+            };
+            default -> language;
+        };
+    }
+
     private int calcKcal(double met, double userKg, int minutes) {
         double burned = met * userKg * (minutes / 60.0);
         return (int) Math.round(burned);
@@ -178,7 +209,7 @@ public class WorkoutService {
     public EstimateResponse estimate(String textRaw) {
         Long uid = auth.requireUserId();
         double userKg = userWeightKgOrThrow(uid);
-        String localeTag = userLocaleOrDefault(uid);
+        String localeTag = normalizeAliasLocaleTag(userLocaleOrDefault(uid));
 
         // 1) 時長解析
         Integer minutes = DurationParser.parseMinutes(textRaw);
@@ -277,6 +308,7 @@ public class WorkoutService {
                 + "минуты|минута|минут|мин|"
                 + "دقائق|دقيقة|"
                 + "דקות|"
+                + "मिनट|"
                 + "phut|นาที|menit|minit|"
                 + "分鐘|分钟|分|분"
                 + ")";
@@ -288,6 +320,9 @@ public class WorkoutService {
         // 去掉「數字 + 分鐘/小時」
         s = s.replaceAll("(\\d{1,4})\\s*" + MIN_UNITS_NORM, " ");
         s = s.replaceAll("(\\d{1,3})\\s*" + HR_UNITS_NORM, " ");
+
+        // Arabic duration connector: "الجري لمدة 45 دقيقة" should normalize to "الجري".
+        s = s.replaceAll("(?<!\\S)لمدة(?!\\S)", " ");
 
         // 補刀：若先前錯配殘留「鐘/钟」，一併清理
         s = s.replaceAll("(?<![a-zA-Z])[鐘钟](?![a-zA-Z])", " ");
