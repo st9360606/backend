@@ -3,4 +3,5 @@ values
     ('other_exercise', 'other_exercise', 'other_exercise', 4.0, current_timestamp),
     ('running', 'Running', 'run', 9.0, current_timestamp),
     ('jogging', 'Jogging', 'jogging', 7.3, current_timestamp),
-    ('cycling', 'Cycling', 'bike', 8.0, current_timestamp);
+    ('cycling', 'Cycling', 'bike', 8.0, current_timestamp),
+    ('yoga', 'Yoga', 'yoga', 3.0, current_timestamp);

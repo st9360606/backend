@@ -13,7 +13,6 @@ import com.caloshape.backend.workout.entity.WorkoutSession;
 import com.caloshape.backend.workout.match.AliasMatcher;
 import com.caloshape.backend.workout.nlp.Blacklist;
 import com.caloshape.backend.workout.nlp.DurationParser;
-import com.caloshape.backend.workout.nlp.Heuristics;
 import com.caloshape.backend.workout.nlp.TextNorm;
 import com.caloshape.backend.workout.repo.WorkoutAliasEventRepo;
 import com.caloshape.backend.workout.repo.WorkoutAliasRepo;
@@ -29,9 +28,15 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Service
 public class WorkoutService {
+    private static final Pattern WORKOUT_EXAMPLE_PREFIX = Pattern.compile(
+            "^(?:example|例|beispiel|exemple|esempio|voorbeeld|exempel|esimerkki|przykład|przyklad|예|ejemplo|范例|範例|exemplo|ví dụ|vi du|ตัวอย่าง|contoh|उदाहरण|דוגמה|דוגמא|örnek|ornek|مثال)\\s+",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS
+    );
+
     private final WorkoutDictionaryRepo dictRepo;
     private final WorkoutAliasRepo aliasRepo;
     private final WorkoutSessionRepo sessionRepo;
@@ -277,12 +282,11 @@ public class WorkoutService {
             return new EstimateResponse("ok", cand.dict().getId(), phraseLower, minutes, kcal);
         }
 
-        // 6) 低信心 → Generic 強度詞
-        double met = pickGenericMet(norm);
+        // 6) Low-confidence inputs should not calculate calories. Keep an audit
+        // event so common misses can be promoted to aliases later.
         WorkoutDictionary generic = ensureGeneric();
-        int kcal = calcKcal(met, userKg, minutes);
         saveEvent(uid, localeTag, norm, generic, 0.0, true);
-        return new EstimateResponse("ok", generic.getId(), phraseLower, minutes, kcal);
+        return new EstimateResponse("not_found", null, null, null, null);
     }
 
     // ===== Helpers =====
@@ -290,9 +294,17 @@ public class WorkoutService {
     // 放在 com.caloshape.backend.workout.service.WorkoutService 內，直接覆蓋同名方法
     private String extractActivityText(String textRaw) {
         String s = textRaw;
+        String durationLeftBoundary = "(?<![A-Za-z0-9])";
+        String durationRightBoundary = "(?![A-Za-z0-9])";
+
         // 展開 1:30 / 1h30
-        s = s.replaceAll("(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})", "$1 h $2 min");
-        s = s.replaceAll("(\\d{1,3})\\s*h\\s*(\\d{1,2})", "$1 h $2 min");
+        s = s.replaceAll(durationLeftBoundary + "(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})" + durationRightBoundary, "$1 h $2 min");
+        s = s.replaceAll(
+                durationLeftBoundary
+                        + "(\\d{1,3})\\s*(?:h|hr|hrs|hour|hours)\\s*(\\d{1,2})\\s*(?:minutes|minute|mins|min|m)?"
+                        + durationRightBoundary,
+                "$1 h $2 min"
+        );
 
         // 正規化
         s = TextNorm.normalize(s);
@@ -300,6 +312,8 @@ public class WorkoutService {
         // 關鍵：長詞在前，避免只吃掉「分」而殘留「鐘/钟」
         String MIN_UNITS_NORM =
                 "(?:"
+                + "分钟|分鐘|分|"
+                + "minuti|minuuttia|phút|"
                 + "minutos|minuto|minuta|"
                 + "minutes|minute|mins|min|"
                 // 其他語系（維持你原本的清單，但把短的放後面）
@@ -318,8 +332,8 @@ public class WorkoutService {
                         +  "gio|ชั่วโมง|jam|小时|小時|時間|시간)";
 
         // 去掉「數字 + 分鐘/小時」
-        s = s.replaceAll("(\\d{1,4})\\s*" + MIN_UNITS_NORM, " ");
-        s = s.replaceAll("(\\d{1,3})\\s*" + HR_UNITS_NORM, " ");
+        s = s.replaceAll(durationLeftBoundary + "(\\d{1,4})\\s*" + MIN_UNITS_NORM + durationRightBoundary, " ");
+        s = s.replaceAll(durationLeftBoundary + "(\\d{1,3})\\s*" + HR_UNITS_NORM + durationRightBoundary, " ");
 
         // Arabic duration connector: "الجري لمدة 45 دقيقة" should normalize to "الجري".
         s = s.replaceAll("(?<!\\S)لمدة(?!\\S)", " ");
@@ -327,6 +341,9 @@ public class WorkoutService {
         // 補刀：若先前錯配殘留「鐘/钟」，一併清理
         s = s.replaceAll("(?<![a-zA-Z])[鐘钟](?![a-zA-Z])", " ");
 
+        s = s.replaceAll("\\s+", " ").trim();
+        s = WORKOUT_EXAMPLE_PREFIX.matcher(s).replaceFirst("");
+        s = s.replaceFirst("^(?:de|di)\\s+", "");
         s = s.replaceAll("\\s+", " ").trim();
         return s.isBlank() ? "workout" : s;
     }
@@ -368,15 +385,6 @@ public class WorkoutService {
                 aliasRepo.save(a);
             });
         }
-    }
-
-    private double pickGenericMet(String norm) {
-        if (Heuristics.CAT_RUN.stream().anyMatch(norm::contains))   return 7.0;
-        if (Heuristics.CAT_CYCLE.stream().anyMatch(norm::contains)) return 6.0;
-        if (Heuristics.CAT_SWIM.stream().anyMatch(norm::contains))  return 7.5;
-        if (Heuristics.INTENSITY_HARD.stream().anyMatch(norm::contains))  return 7.0;
-        if (Heuristics.INTENSITY_LIGHT.stream().anyMatch(norm::contains)) return 3.5;
-        return 5.0;
     }
 
     private WorkoutDictionary ensureGeneric() {

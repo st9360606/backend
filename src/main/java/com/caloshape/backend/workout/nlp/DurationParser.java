@@ -9,10 +9,13 @@ import java.util.regex.Pattern;
 public final class DurationParser {
     private DurationParser() {}
 
+    private static final String DURATION_LEFT_BOUNDARY = "(?<![A-Za-z0-9])";
+    private static final String DURATION_RIGHT_BOUNDARY = "(?![A-Za-z0-9])";
+
     /* ========= 正規化後的單位 ========= */
     // 長字優先：分鐘/分钟 放在「分」之前；補上「印地文：मिनट」
     private static final String MIN_UNITS_NORM =
-            "(?:min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
+            "(?:分钟|分鐘|分|minuti|minuuttia|phút|min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
                     +  "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|मिनट|phut|นาที|menit|minit|"
                     +  "phut|phút|"
                     +  "分鐘|分钟|分|분)";
@@ -22,10 +25,12 @@ public final class DurationParser {
                     + "gio|giờ|"
                     + "ชั่วโมง|jam|小时|小時|鐘頭|鐘|時間|시간)";
 
-    private static final Pattern P_MIN = Pattern.compile("(\\d{1,4})\\s*" + MIN_UNITS_NORM,
+    private static final Pattern P_MIN = Pattern.compile(
+            DURATION_LEFT_BOUNDARY + "(\\d{1,4})\\s*" + MIN_UNITS_NORM + DURATION_RIGHT_BOUNDARY,
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 
-    private static final Pattern P_HR = Pattern.compile("(\\d{1,3})\\s*" + HR_UNITS_NORM,
+    private static final Pattern P_HR = Pattern.compile(
+            DURATION_LEFT_BOUNDARY + "(\\d{1,3})\\s*" + HR_UNITS_NORM + DURATION_RIGHT_BOUNDARY,
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 
     /* ========= 半小時（獨立詞）========= */
@@ -53,10 +58,10 @@ public final class DurationParser {
 
     // ========= 複合句型 =========
     private static final Pattern P_EN_X_AND_HALF_HOURS =
-            Pattern.compile("(\\d{1,3})\\s*and\\s*a\\s*half\\s*(?:h|hr|hrs|hour|hours)",
+            Pattern.compile(DURATION_LEFT_BOUNDARY + "(\\d{1,3})\\s*and\\s*a\\s*half\\s*(?:h|hr|hrs|hour|hours)" + DURATION_RIGHT_BOUNDARY,
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
     private static final Pattern P_EN_X_HOUR_AND_HALF =
-            Pattern.compile("(\\d{1,3})\\s*(?:h|hr|hrs|hour|hours)\\s*and\\s*a\\s*half",
+            Pattern.compile(DURATION_LEFT_BOUNDARY + "(\\d{1,3})\\s*(?:h|hr|hrs|hour|hours)\\s*and\\s*a\\s*half",
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
     private static final Pattern P_ZH_X_HALF_HOURS =
             Pattern.compile("(\\d{1,3})\\s*(?:個|个)?\\s*半\\s*(?:小時|小时|鐘頭|鐘|時間)",
@@ -69,12 +74,14 @@ public final class DurationParser {
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 
     // ========= 冒號 & 小數小時 =========
-    private static final Pattern P_COLON = Pattern.compile("(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})");
+    private static final Pattern P_COLON = Pattern.compile(
+            DURATION_LEFT_BOUNDARY + "(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})" + DURATION_RIGHT_BOUNDARY
+    );
     private static final String HR_UNITS_RAW =
             "(?:h|hr|hrs|hour|hours|hora|horas|ore|uur|std|stunden|godz|saat|час|часы|ساعة|ساعات|שעה|"
                     +  "giờ|gio|ชั่วโมง|jam|小时|小時|時間|시간)";
     private static final Pattern P_HR_DECIMAL =
-            Pattern.compile("(\\d{1,3})\\s*[\\.,]\\s*(\\d{1,3})\\s*" + HR_UNITS_RAW,
+            Pattern.compile(DURATION_LEFT_BOUNDARY + "(\\d{1,3})\\s*[\\.,]\\s*(\\d{1,3})\\s*" + HR_UNITS_RAW + DURATION_RIGHT_BOUNDARY,
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
 
     // 泰文半小時（raw）避免 normalize 影響
@@ -87,8 +94,13 @@ public final class DurationParser {
 
         String pre = cropAfterFirstExtraIfColon(text);
         String s = pre
-                .replaceAll("(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})", "$1 h $2 min")
-                .replaceAll("(\\d{1,3})\\s*h\\s*(\\d{1,2})", "$1 h $2 min");
+                .replaceAll(DURATION_LEFT_BOUNDARY + "(\\d{1,3})\\s*[:：]\\s*(\\d{1,2})" + DURATION_RIGHT_BOUNDARY, "$1 h $2 min")
+                .replaceAll(
+                        DURATION_LEFT_BOUNDARY
+                                + "(\\d{1,3})\\s*(?:h|hr|hrs|hour|hours)\\s*(\\d{1,2})\\s*(?:minutes|minute|mins|min|m)?"
+                                + DURATION_RIGHT_BOUNDARY,
+                        "$1 h $2 min"
+                );
         s = expandFractionalHours(s);
 
         final boolean thaiHalfRaw = P_THAI_HALF_RAW.matcher(pre).find();
