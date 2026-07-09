@@ -215,7 +215,7 @@ app:
         delete-empty-dirs: true
       sha256-orphan-cleaner:
         enabled: true               # ✅ 先開著，但搭配 dry-run
-        dry-run: "${APP_STORAGE_LOCAL_SHA256_ORPHAN_CLEANER_DRY_RUN:true}"  # ✅ 先觀察 log，確認安全後改 false 為會定期刪除沒用的照片
+        dry-run: "${APP_STORAGE_LOCAL_SHA256_ORPHAN_CLEANER_DRY_RUN:false}"  # ✅ 先觀察 log，確認安全後改 false 為會定期刪除沒用的照片
         sha256-subdir: "blobs/sha256"
         min-age: "PT1H"             # 檔案至少 1 小時以上才檢查（保守）
         fixed-delay: "PT6H"         # 每 6 小時跑一次
