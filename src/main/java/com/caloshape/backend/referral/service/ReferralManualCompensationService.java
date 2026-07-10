@@ -1,10 +1,12 @@
 package com.caloshape.backend.referral.service;
 
+import com.caloshape.backend.referral.domain.ReferralClaimStatus;
 import com.caloshape.backend.referral.domain.ReferralOutcomeType;
 import com.caloshape.backend.referral.entity.ReferralClaimEntity;
 import com.caloshape.backend.referral.repo.ReferralClaimRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 
@@ -22,9 +24,9 @@ public class ReferralManualCompensationService {
 
     private final ReferralClaimRepository claimRepository;
     private final MembershipRewardService membershipRewardService;
-    private final ReferralRewardProcessingTxService txService;
     private final ReferralOutcomePublisher outcomePublisher;
 
+    @Transactional
     public ManualCompensationResult compensateAfterGoogleDeferFinalFailure(Long claimId) {
         ReferralClaimEntity claim = claimRepository.findById(claimId)
                 .orElseThrow(() -> new IllegalArgumentException("REFERRAL_CLAIM_NOT_FOUND"));
@@ -35,7 +37,9 @@ public class ReferralManualCompensationService {
                         claim.getId()
                 );
 
-        txService.markSuccess(claim.getId(), grant.grantedAtUtc());
+        claim.setStatus(ReferralClaimStatus.SUCCESS.name());
+        claim.setRewardedAtUtc(grant.grantedAtUtc());
+        claim.setRejectReason("NONE");
 
         outcomePublisher.publish(new ReferralOutcomeEvent(
                 claim.getId(),
