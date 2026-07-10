@@ -27,6 +27,7 @@ import static org.mockito.Mockito.when;
 class MembershipRewardServiceTest {
 
     private static final String SOURCE_TYPE_REFERRAL_SUCCESS = "REFERRAL_SUCCESS";
+    private static final String SOURCE_TYPE_REFERRAL_MANUAL_COMPENSATION = "REFERRAL_MANUAL_COMPENSATION";
     private static final String GRANT_STATUS_SUCCESS = "SUCCESS";
     private static final String CHANNEL_GOOGLE_PLAY_DEFER = "GOOGLE_PLAY_DEFER";
     private static final String CHANNEL_BACKEND_ONLY = "BACKEND_ONLY";
@@ -280,6 +281,77 @@ class MembershipRewardServiceTest {
         assertThat(ledger.getGooglePurchaseTokenHash()).isEqualTo("token-hash");
         assertThat(ledger.getGoogleDeferStatus()).isEqualTo("FAILED_FINAL");
         assertThat(ledger.getErrorCode()).isEqualTo("GOOGLE_PURCHASE_TOKEN_NOT_DECRYPTABLE");
+    }
+
+    @Test
+    void grantManualBackendCompensationAfterGoogleDeferFinalFailure_createsManualRewardLedger() {
+        Fixture fx = new Fixture();
+        long claimId = 99L;
+
+        when(fx.ledgerRepo.findTopBySourceTypeAndSourceRefIdAndGrantStatusOrderByGrantedAtUtcDesc(
+                SOURCE_TYPE_REFERRAL_MANUAL_COMPENSATION,
+                claimId,
+                GRANT_STATUS_SUCCESS
+        )).thenReturn(Optional.empty());
+
+        when(fx.ledgerRepo.findTopBySourceTypeAndSourceRefIdAndGrantStatusOrderByGrantedAtUtcDesc(
+                SOURCE_TYPE_REFERRAL_SUCCESS,
+                claimId,
+                GRANT_STATUS_SUCCESS
+        )).thenReturn(Optional.empty());
+
+        MembershipRewardLedgerEntity finalFailure = new MembershipRewardLedgerEntity();
+        finalFailure.setGrantStatus("FAILED_FINAL");
+        finalFailure.setRewardChannel(CHANNEL_GOOGLE_PLAY_DEFER);
+
+        when(fx.ledgerRepo.findTopBySourceTypeAndSourceRefIdAndRewardChannelOrderByGrantedAtUtcDesc(
+                SOURCE_TYPE_REFERRAL_SUCCESS,
+                claimId,
+                CHANNEL_GOOGLE_PLAY_DEFER
+        )).thenReturn(Optional.of(finalFailure));
+
+        when(fx.ledgerRepo.findTopBySourceTypeAndSourceRefIdOrderByAttemptNoDesc(
+                SOURCE_TYPE_REFERRAL_MANUAL_COMPENSATION,
+                claimId
+        )).thenReturn(Optional.empty());
+
+        UserEntitlementEntity active = new UserEntitlementEntity();
+        active.setUserId(10L);
+        active.setEntitlementType("YEARLY");
+        active.setStatus("ACTIVE");
+        active.setValidFromUtc(Instant.parse("2026-04-01T00:00:00Z"));
+        active.setValidToUtc(Instant.parse("2026-05-01T00:00:00Z"));
+        active.setSource("GOOGLE_PLAY");
+
+        when(fx.entitlementRepo.findActiveBestFirst(
+                eq(10L),
+                any(Instant.class),
+                eq(PageRequest.of(0, 1))
+        )).thenReturn(List.of(active));
+
+        MembershipRewardService.RewardGrantResult result =
+                fx.service.grantManualBackendCompensationAfterGoogleDeferFinalFailure(10L, claimId);
+
+        assertThat(result.oldPremiumUntil()).isEqualTo(Instant.parse("2026-05-01T00:00:00Z"));
+        assertThat(result.newPremiumUntil()).isAfter(result.oldPremiumUntil());
+
+        ArgumentCaptor<UserEntitlementEntity> entitlementCaptor =
+                ArgumentCaptor.forClass(UserEntitlementEntity.class);
+        verify(fx.entitlementRepo).save(entitlementCaptor.capture());
+        assertThat(entitlementCaptor.getValue().getEntitlementType()).isEqualTo("REFERRAL_REWARD");
+        assertThat(entitlementCaptor.getValue().getSource()).isEqualTo("REFERRAL_REWARD");
+
+        ArgumentCaptor<MembershipRewardLedgerEntity> ledgerCaptor =
+                ArgumentCaptor.forClass(MembershipRewardLedgerEntity.class);
+        verify(fx.ledgerRepo).save(ledgerCaptor.capture());
+
+        MembershipRewardLedgerEntity ledger = ledgerCaptor.getValue();
+        assertThat(ledger.getSourceType()).isEqualTo(SOURCE_TYPE_REFERRAL_MANUAL_COMPENSATION);
+        assertThat(ledger.getSourceRefId()).isEqualTo(claimId);
+        assertThat(ledger.getGrantStatus()).isEqualTo(GRANT_STATUS_SUCCESS);
+        assertThat(ledger.getRewardChannel()).isEqualTo(CHANNEL_BACKEND_ONLY);
+        assertThat(ledger.getGoogleDeferStatus()).isEqualTo("NOT_REQUIRED");
+        assertThat(ledger.getDaysAdded()).isEqualTo(30);
     }
 
     @SuppressWarnings("unchecked")

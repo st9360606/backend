@@ -9,6 +9,12 @@ import java.util.Optional;
 public interface UserNotificationRepository extends JpaRepository<UserNotificationEntity, Long> {
     boolean existsByUserIdAndSourceTypeAndSourceRefId(Long userId, String sourceType, Long sourceRefId);
 
+    Optional<UserNotificationEntity> findByUserIdAndSourceTypeAndSourceRefId(
+            Long userId,
+            String sourceType,
+            Long sourceRefId
+    );
+
     Optional<UserNotificationEntity> findByIdAndUserId(Long id, Long userId);
 
     List<UserNotificationEntity> findTop50ByUserIdOrderByCreatedAtUtcDesc(Long userId);

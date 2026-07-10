@@ -52,6 +52,7 @@ public class MembershipRewardService {
     private static final int DAYS_ADDED = 30;
 
     private static final String SOURCE_TYPE_REFERRAL_SUCCESS = "REFERRAL_SUCCESS";
+    private static final String SOURCE_TYPE_REFERRAL_MANUAL_COMPENSATION = "REFERRAL_MANUAL_COMPENSATION";
 
     private static final String GRANT_STATUS_SUCCESS = "SUCCESS";
     private static final String GRANT_STATUS_FAILED_RETRYABLE = "FAILED_RETRYABLE";
@@ -109,7 +110,68 @@ public class MembershipRewardService {
             return grantGooglePlayDeferredReward(inviterUserId, claimId, googlePaid, now);
         }
 
-        return grantBackendOnlyReferralReward(inviterUserId, claimId, now);
+        return grantBackendOnlyReferralReward(
+                inviterUserId,
+                claimId,
+                now,
+                SOURCE_TYPE_REFERRAL_SUCCESS
+        );
+    }
+
+    public RewardGrantResult grantManualBackendCompensationAfterGoogleDeferFinalFailure(
+            Long inviterUserId,
+            Long claimId
+    ) {
+        MembershipRewardLedgerEntity existingManualSuccess = rewardLedgerRepository
+                .findTopBySourceTypeAndSourceRefIdAndGrantStatusOrderByGrantedAtUtcDesc(
+                        SOURCE_TYPE_REFERRAL_MANUAL_COMPENSATION,
+                        claimId,
+                        GRANT_STATUS_SUCCESS
+                )
+                .orElse(null);
+
+        if (existingManualSuccess != null) {
+            return new RewardGrantResult(
+                    existingManualSuccess.getOldPremiumUntil(),
+                    existingManualSuccess.getNewPremiumUntil(),
+                    existingManualSuccess.getGrantedAtUtc()
+            );
+        }
+
+        MembershipRewardLedgerEntity existingAutomaticSuccess = rewardLedgerRepository
+                .findTopBySourceTypeAndSourceRefIdAndGrantStatusOrderByGrantedAtUtcDesc(
+                        SOURCE_TYPE_REFERRAL_SUCCESS,
+                        claimId,
+                        GRANT_STATUS_SUCCESS
+                )
+                .orElse(null);
+
+        if (existingAutomaticSuccess != null) {
+            return new RewardGrantResult(
+                    existingAutomaticSuccess.getOldPremiumUntil(),
+                    existingAutomaticSuccess.getNewPremiumUntil(),
+                    existingAutomaticSuccess.getGrantedAtUtc()
+            );
+        }
+
+        MembershipRewardLedgerEntity latestGoogleAttempt = rewardLedgerRepository
+                .findTopBySourceTypeAndSourceRefIdAndRewardChannelOrderByGrantedAtUtcDesc(
+                        SOURCE_TYPE_REFERRAL_SUCCESS,
+                        claimId,
+                        CHANNEL_GOOGLE_PLAY_DEFER
+                )
+                .orElseThrow(() -> new IllegalArgumentException("GOOGLE_DEFER_FINAL_FAILURE_REQUIRED"));
+
+        if (!GRANT_STATUS_FAILED_FINAL.equals(latestGoogleAttempt.getGrantStatus())) {
+            throw new IllegalArgumentException("GOOGLE_DEFER_FINAL_FAILURE_REQUIRED");
+        }
+
+        return grantBackendOnlyReferralReward(
+                inviterUserId,
+                claimId,
+                Instant.now(),
+                SOURCE_TYPE_REFERRAL_MANUAL_COMPENSATION
+        );
     }
 
     private RewardGrantResult grantGooglePlayDeferredReward(
@@ -124,6 +186,7 @@ public class MembershipRewardService {
             saveAttemptLedger(
                     inviterUserId,
                     claimId,
+                    SOURCE_TYPE_REFERRAL_SUCCESS,
                     googlePaid.getValidToUtc(),
                     null,
                     googlePaid.getPurchaseTokenHash(),
@@ -147,6 +210,7 @@ public class MembershipRewardService {
             saveAttemptLedger(
                     inviterUserId,
                     claimId,
+                    SOURCE_TYPE_REFERRAL_SUCCESS,
                     googlePaid.getValidToUtc(),
                     null,
                     googlePaid.getPurchaseTokenHash(),
@@ -262,7 +326,8 @@ public class MembershipRewardService {
     private RewardGrantResult grantBackendOnlyReferralReward(
             Long inviterUserId,
             Long claimId,
-            Instant now
+            Instant now,
+            String sourceType
     ) {
         List<UserEntitlementEntity> active = entitlementRepository.findActiveBestFirst(
                 inviterUserId,
@@ -289,6 +354,7 @@ public class MembershipRewardService {
         saveAttemptLedger(
                 inviterUserId,
                 claimId,
+                sourceType,
                 oldPremiumUntil,
                 newPremiumUntil,
                 null,
@@ -377,6 +443,7 @@ public class MembershipRewardService {
         saveAttemptLedger(
                 inviterUserId,
                 claimId,
+                SOURCE_TYPE_REFERRAL_SUCCESS,
                 googlePaid.getValidToUtc(),
                 null,
                 googlePaid.getPurchaseTokenHash(),
@@ -519,6 +586,7 @@ public class MembershipRewardService {
     private MembershipRewardLedgerEntity saveAttemptLedger(
             Long inviterUserId,
             Long claimId,
+            String sourceType,
             Instant oldPremiumUntil,
             Instant newPremiumUntil,
             String googlePurchaseTokenHash,
@@ -535,9 +603,9 @@ public class MembershipRewardService {
     ) {
         MembershipRewardLedgerEntity ledger = new MembershipRewardLedgerEntity();
         ledger.setUserId(inviterUserId);
-        ledger.setSourceType(SOURCE_TYPE_REFERRAL_SUCCESS);
+        ledger.setSourceType(sourceType);
         ledger.setSourceRefId(claimId);
-        ledger.setAttemptNo(nextAttemptNo(claimId));
+        ledger.setAttemptNo(nextAttemptNo(sourceType, claimId));
         ledger.setTraceId(UUID.randomUUID().toString());
         ledger.setGrantStatus(grantStatus);
         ledger.setRewardChannel(rewardChannel);
@@ -556,10 +624,10 @@ public class MembershipRewardService {
         return rewardLedgerRepository.save(ledger);
     }
 
-    private Integer nextAttemptNo(Long claimId) {
+    private Integer nextAttemptNo(String sourceType, Long claimId) {
         return rewardLedgerRepository
                 .findTopBySourceTypeAndSourceRefIdOrderByAttemptNoDesc(
-                        SOURCE_TYPE_REFERRAL_SUCCESS,
+                        sourceType,
                         claimId
                 )
                 .map(it -> it.getAttemptNo() == null ? 1 : it.getAttemptNo() + 1)

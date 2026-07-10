@@ -8,6 +8,7 @@ import com.caloshape.backend.referral.repo.ReferralCaseSnapshotRepository;
 import com.caloshape.backend.referral.repo.ReferralClaimRepository;
 import com.caloshape.backend.referral.repo.ReferralRiskSignalRepository;
 import com.caloshape.backend.referral.repo.UserNotificationRepository;
+import com.caloshape.backend.referral.service.ReferralManualCompensationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +27,7 @@ public class InternalReferralCsController {
     private final ReferralRiskSignalRepository riskSignalRepository;
     private final UserNotificationRepository notificationRepository;
     private final EmailOutboxRepository emailOutboxRepository;
+    private final ReferralManualCompensationService manualCompensationService;
 
     @GetMapping("/inviter/{userId}")
     public Map<String, Object> getInviterReferralCase(
@@ -73,6 +75,28 @@ public class InternalReferralCsController {
                 claim.getInviterUserId(),
                 ":" + claimId
         ));
+        return body;
+    }
+
+    @PostMapping("/claim/{claimId}/manual-compensation")
+    public Map<String, Object> compensateClaimAfterGoogleDeferFailure(
+            @RequestHeader(value = "X-Internal-Token", required = false) String internalToken,
+            @PathVariable Long claimId
+    ) {
+        internalApiGuard.requireValidToken(internalToken);
+
+        ReferralManualCompensationService.ManualCompensationResult result =
+                manualCompensationService.compensateAfterGoogleDeferFinalFailure(claimId);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("claimId", result.claimId());
+        body.put("inviterUserId", result.inviterUserId());
+        body.put("grantStatus", "SUCCESS");
+        body.put("rewardChannel", "BACKEND_ONLY");
+        body.put("sourceType", "REFERRAL_MANUAL_COMPENSATION");
+        body.put("oldPremiumUntil", result.oldPremiumUntil());
+        body.put("newPremiumUntil", result.newPremiumUntil());
+        body.put("grantedAtUtc", result.grantedAtUtc());
         return body;
     }
 }

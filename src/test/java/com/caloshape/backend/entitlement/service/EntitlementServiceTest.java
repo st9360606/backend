@@ -100,4 +100,22 @@ class EntitlementServiceTest {
 
         assertThat(result).isEqualTo(EntitlementService.Tier.MONTHLY);
     }
+
+    @Test
+    void resolveTier_shouldTreatReferralRewardAsPaidTier() {
+        UserEntitlementRepository repo = Mockito.mock(UserEntitlementRepository.class);
+        EntitlementService service = new EntitlementService(repo);
+
+        UserEntitlementEntity reward = Mockito.mock(UserEntitlementEntity.class);
+        when(reward.getId()).thenReturn(String.valueOf(50L));
+        when(reward.getEntitlementType()).thenReturn("REFERRAL_REWARD");
+
+        when(repo.findActive(eq(1L), any(Instant.class), any(Pageable.class)))
+                .thenReturn(List.of(reward));
+
+        EntitlementService.Tier result =
+                service.resolveTier(1L, Instant.parse("2026-03-03T00:00:00Z"));
+
+        assertThat(result).isEqualTo(EntitlementService.Tier.MONTHLY);
+    }
 }

@@ -74,6 +74,8 @@ class ReferralOutcomeConsumersTest {
 
         when(membershipSummaryService.getRewardHistory(100L)).thenReturn(List.of());
         when(membershipSummaryService.getMembershipSummary(100L)).thenReturn(summary());
+        when(notificationRepository.findByUserIdAndSourceTypeAndSourceRefId(any(), any(), any()))
+                .thenReturn(Optional.empty());
     }
 
     @Test
@@ -187,6 +189,34 @@ class ReferralOutcomeConsumersTest {
 
         verify(notificationRepository).save(any(UserNotificationEntity.class));
         verify(emailOutboxRepository, never()).save(any());
+    }
+
+    @Test
+    void onOutcome_shouldRewriteRejectedNotificationWhenManualCompensationGrantsReward() {
+        UserNotificationEntity rejected = new UserNotificationEntity();
+        rejected.setUserId(100L);
+        rejected.setType("REJECTED");
+        rejected.setTitle("Referral reward not granted");
+        rejected.setMessage("This referral did not qualify.");
+        rejected.setSourceType("REFERRAL_CLAIM");
+        rejected.setSourceRefId(10L);
+        rejected.setRead(true);
+
+        when(notificationRepository.findByUserIdAndSourceTypeAndSourceRefId(
+                100L,
+                "REFERRAL_CLAIM",
+                10L
+        )).thenReturn(Optional.of(rejected));
+        when(userProfileRepository.findByUserId(100L)).thenReturn(Optional.of(profile("Asia/Taipei")));
+        when(userRepo.findById(100L)).thenReturn(Optional.of(user("inviter@example.com")));
+
+        consumers.onOutcome(grantedEvent());
+
+        assertThat(rejected.getType()).isEqualTo("GRANTED");
+        assertThat(rejected.getTitle()).contains("30 free Premium days unlocked");
+        assertThat(rejected.getMessage()).isEqualTo("Your CaloShape Premium has been extended by 30 days.\nNew expiry: 2026-05-31");
+        assertThat(rejected.isRead()).isFalse();
+        verify(notificationRepository).save(rejected);
     }
 
     private ReferralOutcomeEvent grantedEvent() {

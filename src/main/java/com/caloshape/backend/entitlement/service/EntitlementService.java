@@ -68,7 +68,7 @@ public class EntitlementService {
         String v = raw.trim().toUpperCase(Locale.ROOT);
         return switch (v) {
             case "TRIAL" -> Tier.TRIAL;
-            case "MONTHLY" -> Tier.MONTHLY;
+            case "MONTHLY", "REFERRAL_REWARD" -> Tier.MONTHLY;
             case "YEARLY" -> Tier.YEARLY;
             default -> Tier.NONE;
         };

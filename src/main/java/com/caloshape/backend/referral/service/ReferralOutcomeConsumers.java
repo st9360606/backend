@@ -66,11 +66,23 @@ public class ReferralOutcomeConsumers {
     }
 
     private void createNotification(ReferralOutcomeEvent event) {
-        if (notificationRepository.existsByUserIdAndSourceTypeAndSourceRefId(
+        var existing = notificationRepository.findByUserIdAndSourceTypeAndSourceRefId(
                 event.inviterUserId(),
                 REFERRAL_SOURCE_TYPE,
                 event.claimId()
-        )) {
+        );
+
+        if (existing.isPresent()) {
+            if (event.outcomeType() == ReferralOutcomeType.GRANTED
+                    && !ReferralOutcomeType.GRANTED.name().equals(existing.get().getType())) {
+                ZoneId userZone = resolveUserZone(event.inviterUserId());
+                UserNotificationEntity entity = existing.get();
+                entity.setType(ReferralOutcomeType.GRANTED.name());
+                entity.setTitle(buildGrantedNotificationTitle());
+                entity.setMessage(buildGrantedNotificationMessage(event, userZone));
+                entity.setRead(false);
+                notificationRepository.save(entity);
+            }
             return;
         }
 
