@@ -1,3 +1,11 @@
 package com.caloshape.backend.auth.dto;
 
-public record StartRequest(String email) {}
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+
+public record StartRequest(
+        @NotBlank
+        @Email
+        String email
+) {
+}

@@ -16,6 +16,9 @@ public class GooglePlayVerifierProperties {
     /** service account json 檔路徑 */
     private String serviceAccountJsonPath;
 
+    /** Base64-encoded service-account JSON for sealed cloud environment variables. */
+    private String serviceAccountJsonBase64;
+
     /**
      * 只允許 dev 環境使用。
      *

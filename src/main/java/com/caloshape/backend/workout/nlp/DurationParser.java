@@ -15,7 +15,7 @@ public final class DurationParser {
     /* ========= 正規化後的單位 ========= */
     // 長字優先：分鐘/分钟 放在「分」之前；補上「印地文：मिनट」
     private static final String MIN_UNITS_NORM =
-            "(?:分钟|分鐘|分|minuti|minuuttia|phút|min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
+            "(?:分钟|分鐘|分|minuti|minuuttia|phút|minutter|min|mins|minute|minutes|minuto|minutos|minuta|minuty|minut|minuten|minuut|minuter|"
                     +  "dakika|мин|минута|минуты|минут|دقيقة|دقائق|דקות|मिनट|phut|นาที|menit|minit|"
                     +  "phut|phút|"
                     +  "分鐘|分钟|分|분)";

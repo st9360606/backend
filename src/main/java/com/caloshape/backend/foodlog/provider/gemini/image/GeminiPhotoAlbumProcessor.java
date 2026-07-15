@@ -108,7 +108,8 @@ public class GeminiPhotoAlbumProcessor implements GeminiModeProcessor {
                 effective = GeminiPhotoAlbumJsonSupport.normalizeToEffective(parsed);
                 GeminiPhotoAlbumJsonSupport.finalizeEffective(effective);
             } catch (Exception ex) {
-                log.warn("photo_album_normalize_failed foodLogId={} msg={}", entity.getId(), ex.getMessage());
+                log.warn("photo_album_normalize_failed foodLogId={} errorType={}",
+                        entity.getId(), ex.getClass().getSimpleName());
                 return okAndReturn(modelId, entity, t0, result.tok(), fallbackUnknownFood());
             }
 

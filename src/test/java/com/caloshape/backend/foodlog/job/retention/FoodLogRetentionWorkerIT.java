@@ -65,6 +65,7 @@ public class FoodLogRetentionWorkerIT extends MySqlContainerBaseTest {
         // 圖片 refs（Retention 會 enqueue deletion job）
         e.setImageSha256("a".repeat(64));
         e.setImageObjectKey("user-1/blobs/sha256/" + e.getImageSha256() + ".jpg");
+        String originalImageObjectKey = e.getImageObjectKey();
         e.setImageContentType("image/jpeg");
         e.setImageSizeBytes(123L);
 
@@ -92,12 +93,13 @@ public class FoodLogRetentionWorkerIT extends MySqlContainerBaseTest {
         assertThat(after.getDeletedBy()).isEqualTo("RETENTION");
         assertThat(after.getDeletedAtUtc()).isNotNull();
         assertThat(after.getEffective()).isNull();
+        assertThat(after.getImageObjectKey()).isNull();
 
         // 並且 enqueue deletion job（QUEUED）
         DeletionJobEntity job = deletionJobRepo.findByFoodLogId(foodLogId).orElseThrow();
         assertThat(job.getJobStatus()).isEqualTo(DeletionJobEntity.JobStatus.QUEUED);
         assertThat(job.getUserId()).isEqualTo(userId);
         assertThat(job.getSha256()).isEqualTo("a".repeat(64));
-        assertThat(job.getImageObjectKey()).isEqualTo(after.getImageObjectKey());
+        assertThat(job.getImageObjectKey()).isEqualTo(originalImageObjectKey);
     }
 }

@@ -1,16 +1,15 @@
 package com.caloshape.backend.referral.service;
 
+import com.caloshape.backend.entitlement.service.GooglePlayCredentialsLoader;
 import com.caloshape.backend.entitlement.service.GooglePlayVerifierProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.api.services.androidpublisher.AndroidPublisherScopes;
 import com.google.auth.oauth2.GoogleCredentials;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
-import java.io.FileInputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -18,7 +17,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.List;
 
 @RequiredArgsConstructor
 @Slf4j
@@ -32,6 +30,7 @@ public class GooglePlayVoidedPurchaseChecker implements VoidedPurchaseChecker {
     private static final long DEFAULT_LOOKBACK_SECONDS = 8L * 24L * 3600L;
 
     private final GooglePlayVerifierProperties props;
+    private final GooglePlayCredentialsLoader credentialsLoader;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
@@ -141,18 +140,7 @@ public class GooglePlayVoidedPurchaseChecker implements VoidedPurchaseChecker {
     }
 
     private String accessToken() throws Exception {
-        GoogleCredentials credentials;
-
-        if (props.getServiceAccountJsonPath() != null
-                && !props.getServiceAccountJsonPath().isBlank()) {
-            try (FileInputStream in = new FileInputStream(props.getServiceAccountJsonPath())) {
-                credentials = GoogleCredentials.fromStream(in);
-            }
-        } else {
-            credentials = GoogleCredentials.getApplicationDefault();
-        }
-
-        credentials = credentials.createScoped(List.of(AndroidPublisherScopes.ANDROIDPUBLISHER));
+        GoogleCredentials credentials = credentialsLoader.loadScoped();
         credentials.refreshIfExpired();
 
         return credentials.getAccessToken().getTokenValue();

@@ -44,7 +44,7 @@ import java.util.UUID;
 public class UserEntitlementEntity {
 
     @Id
-    @Column(length = 36, nullable = false)
+    @Column(length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String id;
 
     @Column(name = "user_id", nullable = false)
@@ -62,7 +62,7 @@ public class UserEntitlementEntity {
     @Column(name = "valid_to_utc", nullable = false)
     private Instant validToUtc;
 
-    @Column(name = "purchase_token_hash", length = 64)
+    @Column(name = "purchase_token_hash", length = 64, columnDefinition = "CHAR(64)")
     private String purchaseTokenHash;
 
     /**
@@ -113,7 +113,7 @@ public class UserEntitlementEntity {
     @Column(name = "latest_order_id", length = 128)
     private String latestOrderId;
 
-    @Column(name = "linked_purchase_token_hash", length = 64)
+    @Column(name = "linked_purchase_token_hash", length = 64, columnDefinition = "CHAR(64)")
     private String linkedPurchaseTokenHash;
 
     @Column(name = "last_rtdn_at_utc")

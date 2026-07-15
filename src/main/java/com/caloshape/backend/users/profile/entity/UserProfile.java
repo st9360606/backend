@@ -26,12 +26,12 @@ public class UserProfile implements Persistable<Long> {
     @Column(name = "gender") private String gender;
     @Column(name = "age") private Integer age;
 
-    @Column(name = "height_cm") private Double heightCm;
+    @Column(name = "height_cm", columnDefinition = "DECIMAL(5,2)") private Double heightCm;
     @Column(name = "height_feet") private Short heightFeet;
     @Column(name = "height_inches") private Short heightInches;
 
-    @Column(name = "weight_kg") private Double weightKg;
-    @Column(name = "weight_lbs") private Double weightLbs;
+    @Column(name = "weight_kg", columnDefinition = "DECIMAL(5,2)") private Double weightKg;
+    @Column(name = "weight_lbs", columnDefinition = "DECIMAL(5,2)") private Double weightLbs;
 
     @Column(name = "exercise_level") private String exerciseLevel;
     @Column(name = "goal") private String goal;
@@ -39,13 +39,13 @@ public class UserProfile implements Persistable<Long> {
     @Column(name = "daily_step_goal", nullable = false)
     private Integer dailyStepGoal = 10000;
 
-    @Column(name = "goal_weight_kg") private Double goalWeightKg;
-    @Column(name = "goal_weight_lbs") private Double goalWeightLbs;
+    @Column(name = "goal_weight_kg", columnDefinition = "DECIMAL(5,2)") private Double goalWeightKg;
+    @Column(name = "goal_weight_lbs", columnDefinition = "DECIMAL(5,2)") private Double goalWeightLbs;
 
     @Column(name = "unit_preference", nullable = false)
     private String unitPreference = "KG";
 
-    @Column(name = "workouts_per_week")
+    @Column(name = "workouts_per_week", columnDefinition = "TINYINT")
     private Integer workoutsPerWeek;
 
     @Column(name = "daily_workout_goal_kcal", nullable = false)
@@ -79,7 +79,7 @@ public class UserProfile implements Persistable<Long> {
     @Column(name = "water_mode", nullable = false)
     private WaterMode waterMode = WaterMode.AUTO;
 
-    @Column(name = "bmi", nullable = false)
+    @Column(name = "bmi", nullable = false, columnDefinition = "DECIMAL(5,2)")
     private Double bmi = 0.0;
 
     @Column(name = "bmi_class", nullable = false)

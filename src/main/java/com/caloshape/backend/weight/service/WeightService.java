@@ -11,6 +11,8 @@ import com.caloshape.backend.weight.entity.WeightTimeseries;
 import com.caloshape.backend.weight.repo.WeightHistoryRepo;
 import com.caloshape.backend.weight.repo.WeightTimeseriesRepo;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.core.io.Resource;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -18,6 +20,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -26,6 +29,8 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.Set;
 
 
 @Service
@@ -447,7 +452,7 @@ public class WeightService {
                 w.getLogDate(),
                 w.getWeightKg(),
                 w.getWeightLbs(),    // ★ 直接用 DB 欄位
-                w.getPhotoUrl(),
+                images.protectedUrlFromStoredUrl(w.getPhotoUrl()),
                 toUtcString(w.getUpdatedAt())
         );
     }
@@ -488,9 +493,8 @@ public class WeightService {
         // 先把新圖存到磁碟（避免先刪舊造成資料遺失）
         String newUrl = null;
         if (photo != null && !photo.isEmpty()) {
-            validatePhoto(photo);
-            String ext = detectExt(photo);
-            newUrl = images.save(uid, logDate, photo, ext);
+            DetectedPhoto detected = detectPhoto(photo);
+            newUrl = images.save(logDate, detected.bytes(), detected.extension());
         }
 
         final String newUrlFinal = newUrl;
@@ -536,33 +540,73 @@ public class WeightService {
         }
     }
 
-    private void validatePhoto(MultipartFile photo) {
+    public Optional<OwnedWeightPhoto> findOwnedPhoto(Long uid, String filename) {
+        String storedUrl = LocalImageStorage.PUBLIC_PREFIX + filename;
+        if (!history.existsByUserIdAndPhotoUrl(uid, storedUrl)) {
+            return Optional.empty();
+        }
+
+        return images.findResource(filename).map(resource -> {
+            try {
+                return new OwnedWeightPhoto(
+                        resource,
+                        MediaType.parseMediaType(images.contentTypeForFilename(filename)),
+                        resource.contentLength()
+                );
+            } catch (IOException ex) {
+                throw new IllegalStateException("WEIGHT_PHOTO_READ_FAILED", ex);
+            }
+        });
+    }
+
+    private DetectedPhoto detectPhoto(MultipartFile photo) throws IOException {
         if (photo.getSize() > 3 * 1024 * 1024L) {
             throw new IllegalArgumentException("photo too large");
         }
-        String type = (photo.getContentType() == null) ? "" : photo.getContentType();
-        boolean okType = type.equals("image/jpeg")
-                || type.equals("image/jpg")
-                || type.equals("image/png")
-                || type.equals("image/heic")
-                || type.equals("image/heif")
-                || type.equals("application/octet-stream");
-        if (!okType) throw new IllegalArgumentException("unsupported photo contentType=" + type);
+        byte[] bytes = photo.getBytes();
+        if (bytes.length == 0) {
+            throw new IllegalArgumentException("empty photo");
+        }
+        if (isJpeg(bytes)) return new DetectedPhoto(bytes, "jpg");
+        if (isPng(bytes)) return new DetectedPhoto(bytes, "png");
+        if (isWebp(bytes)) return new DetectedPhoto(bytes, "webp");
+        if (isHeif(bytes)) return new DetectedPhoto(bytes, "heic");
+        throw new IllegalArgumentException("unsupported photo bytes");
     }
 
-    private String detectExt(MultipartFile photo) {
-        String type = (photo.getContentType() == null) ? "" : photo.getContentType();
-
-        if (type.equals("image/png")) return "png";
-        if (type.equals("image/heic")) return "heic";
-        if (type.equals("image/heif")) return "heif";
-
-        // jpeg / jpg / octet-stream → 以檔名推斷，推不到就 jpg
-        String fn = photo.getOriginalFilename() == null ? "" : photo.getOriginalFilename().toLowerCase();
-        if (fn.endsWith(".png")) return "png";
-        if (fn.endsWith(".heic")) return "heic";
-        if (fn.endsWith(".heif")) return "heif";
-        return "jpg";
+    private static boolean isJpeg(byte[] bytes) {
+        return bytes.length >= 3
+                && (bytes[0] & 0xff) == 0xff
+                && (bytes[1] & 0xff) == 0xd8
+                && (bytes[2] & 0xff) == 0xff;
     }
+
+    private static boolean isPng(byte[] bytes) {
+        byte[] signature = {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+        if (bytes.length < signature.length) return false;
+        for (int i = 0; i < signature.length; i++) {
+            if (bytes[i] != signature[i]) return false;
+        }
+        return true;
+    }
+
+    private static boolean isWebp(byte[] bytes) {
+        return bytes.length >= 12
+                && "RIFF".equals(new String(bytes, 0, 4, StandardCharsets.US_ASCII))
+                && "WEBP".equals(new String(bytes, 8, 4, StandardCharsets.US_ASCII));
+    }
+
+    private static boolean isHeif(byte[] bytes) {
+        if (bytes.length < 12 || !"ftyp".equals(new String(bytes, 4, 4, StandardCharsets.US_ASCII))) {
+            return false;
+        }
+        String brand = new String(bytes, 8, 4, StandardCharsets.US_ASCII);
+        return Set.of("heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1")
+                .contains(brand);
+    }
+
+    private record DetectedPhoto(byte[] bytes, String extension) {}
+
+    public record OwnedWeightPhoto(Resource resource, MediaType mediaType, long contentLength) {}
 
 }

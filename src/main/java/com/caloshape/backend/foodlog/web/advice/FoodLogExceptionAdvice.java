@@ -10,6 +10,8 @@ import com.caloshape.backend.foodlog.model.ProviderRefuseReason;
 import com.caloshape.backend.foodlog.web.error.CooldownActiveException;
 import com.caloshape.backend.foodlog.web.error.*;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
@@ -28,6 +30,8 @@ import java.util.List;
 })
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class FoodLogExceptionAdvice {
+
+    private static final Logger log = LoggerFactory.getLogger(FoodLogExceptionAdvice.class);
 
     @ExceptionHandler(FoodLogAppException.class)
     public ResponseEntity<FoodLogErrorResponse> handleFoodLogApp(
@@ -98,6 +102,9 @@ public class FoodLogExceptionAdvice {
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
 
+        if (status.is5xxServerError()) {
+            return internalError(e, req);
+        }
         return ResponseEntity.status(status).body(err(code, e, req));
     }
 
@@ -200,7 +207,7 @@ public class FoodLogExceptionAdvice {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<FoodLogErrorResponse> handleUnknown(Exception e, HttpServletRequest req) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(err("INTERNAL_ERROR", e, req));
+        return internalError(e, req);
     }
 
     // ===== helpers =====
@@ -229,5 +236,27 @@ public class FoodLogExceptionAdvice {
         String m = t.getMessage();
         if (m == null || m.isBlank()) return code;
         return m;
+    }
+
+    private ResponseEntity<FoodLogErrorResponse> internalError(
+            Exception e,
+            HttpServletRequest req
+    ) {
+        String requestId = rid(req);
+        log.error(
+                "Unhandled food-log request failure method={} path={} exceptionType={}",
+                req.getMethod(),
+                req.getRequestURI(),
+                e.getClass().getName()
+        );
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                new FoodLogErrorResponse(
+                        "INTERNAL_ERROR",
+                        "Unexpected error",
+                        requestId,
+                        null,
+                        null
+                )
+        );
     }
 }

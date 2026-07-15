@@ -24,28 +24,28 @@ public class UserDailyNutritionSummaryEntity {
     @Column(nullable = false, length = 64)
     private String timezone = "UTC";
 
-    @Column(name = "total_kcal", nullable = false)
+    @Column(name = "total_kcal", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalKcal = 0d;
 
-    @Column(name = "total_protein_g", nullable = false)
+    @Column(name = "total_protein_g", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalProteinG = 0d;
 
-    @Column(name = "total_carbs_g", nullable = false)
+    @Column(name = "total_carbs_g", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalCarbsG = 0d;
 
-    @Column(name = "total_fats_g", nullable = false)
+    @Column(name = "total_fats_g", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalFatsG = 0d;
 
-    @Column(name = "total_fiber_g", nullable = false)
+    @Column(name = "total_fiber_g", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalFiberG = 0d;
 
-    @Column(name = "total_sugar_g", nullable = false)
+    @Column(name = "total_sugar_g", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalSugarG = 0d;
 
-    @Column(name = "total_sodium_mg", nullable = false)
+    @Column(name = "total_sodium_mg", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalSodiumMg = 0d;
 
-    @Column(name = "avg_health_score", nullable = false)
+    @Column(name = "avg_health_score", nullable = false, columnDefinition = "DECIMAL(4,1)")
     private Double avgHealthScore = 0d;
 
     @Column(name = "meal_count", nullable = false)

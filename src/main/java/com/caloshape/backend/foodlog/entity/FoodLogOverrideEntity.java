@@ -19,10 +19,10 @@ import java.util.UUID;
 public class FoodLogOverrideEntity {
 
     @Id
-    @Column(length = 36, nullable = false)
+    @Column(length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String id;
 
-    @Column(name = "food_log_id", length = 36, nullable = false)
+    @Column(name = "food_log_id", length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String foodLogId;
 
     @Column(name = "field_key", length = 32, nullable = false)

@@ -12,6 +12,8 @@ public interface WeightHistoryRepo extends JpaRepository<WeightHistory, Long> {
 
     Optional<WeightHistory> findByUserIdAndLogDate(Long userId, LocalDate logDate);
 
+    boolean existsByUserIdAndPhotoUrl(Long userId, String photoUrl);
+
     // ✅ 保留：給 ensureBaselineFromProfile / history7Latest 用
     @Query("""
            select w from WeightHistory w 

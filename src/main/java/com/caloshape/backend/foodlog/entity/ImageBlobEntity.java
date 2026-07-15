@@ -23,7 +23,7 @@ public class ImageBlobEntity {
     @Column(name="user_id", nullable=false)
     private Long userId;
 
-    @Column(length = 64, nullable=false)
+    @Column(length = 64, nullable=false, columnDefinition = "CHAR(64)")
     private String sha256;
 
     @Column(name="object_key", columnDefinition = "TEXT", nullable=false)

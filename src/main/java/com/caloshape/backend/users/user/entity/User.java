@@ -46,7 +46,7 @@ public class User {
     @Column(name = "deleted_at_utc")
     private Instant deletedAtUtc;
 
-    @Column(name = "deleted_email_hash", length = 64)
+    @Column(name = "deleted_email_hash", length = 64, columnDefinition = "CHAR(64)")
     private String deletedEmailHash;
 
     @CreationTimestamp

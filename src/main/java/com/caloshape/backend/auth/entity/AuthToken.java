@@ -15,7 +15,7 @@ public class AuthToken {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 64)
+    @Column(nullable = false, unique = true, length = 64, columnDefinition = "CHAR(64)")
     private String token;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -39,9 +39,16 @@ public class AuthToken {
     @Column(nullable = false)
     private boolean revoked = false;
 
+    @Column(name = "replaced_by", length = 64, columnDefinition = "CHAR(64)")
     private String replacedBy;
+
+    @Column(name = "device_id", length = 128)
     private String deviceId;
+
+    @Column(name = "client_ip", length = 64)
     private String clientIp;
+
+    @Column(name = "user_agent", length = 255)
     private String userAgent;
 
     public enum TokenType { ACCESS, REFRESH }

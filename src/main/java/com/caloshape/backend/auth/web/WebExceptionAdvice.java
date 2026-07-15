@@ -1,7 +1,14 @@
 package com.caloshape.backend.auth.web;
 
+import com.caloshape.backend.auth.service.EmailAuthRateLimitException;
+import com.caloshape.backend.auth.service.EmailAuthUnavailableException;
+import com.caloshape.backend.common.web.RequestIdFilter;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -17,6 +24,26 @@ import java.util.Map;
 @RestControllerAdvice(basePackages = "com.caloshape.backend.auth")
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class WebExceptionAdvice {
+
+    private static final Logger log = LoggerFactory.getLogger(WebExceptionAdvice.class);
+
+    @ExceptionHandler(EmailAuthRateLimitException.class)
+    public ResponseEntity<Map<String, Object>> handleRateLimited(EmailAuthRateLimitException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSec()))
+                .body(Map.of(
+                        "code", "TOO_MANY_ATTEMPTS",
+                        "message", "Too many attempts. Please try again later."
+                ));
+    }
+
+    @ExceptionHandler(EmailAuthUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleAuthUnavailable() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "code", "AUTH_TEMPORARILY_UNAVAILABLE",
+                "message", "Authentication is temporarily unavailable. Please try again later."
+        ));
+    }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArg(IllegalArgumentException e) {
@@ -36,8 +63,14 @@ public class WebExceptionAdvice {
     }
 
     @ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<Map<String, Object>> handleRSE(ResponseStatusException e) {
+    public ResponseEntity<Map<String, Object>> handleRSE(
+            ResponseStatusException e,
+            HttpServletRequest req
+    ) {
         HttpStatus status = (HttpStatus) e.getStatusCode();
+        if (status.is5xxServerError()) {
+            return handleGeneric(e, req);
+        }
         String msg = (e.getReason() == null) ? status.getReasonPhrase() : e.getReason();
         String code = switch (status) {
             case BAD_REQUEST -> "BAD_REQUEST";
@@ -66,10 +99,21 @@ public class WebExceptionAdvice {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleGeneric(Exception e) {
+    public ResponseEntity<Map<String, Object>> handleGeneric(
+            Exception e,
+            HttpServletRequest req
+    ) {
+        String requestId = RequestIdFilter.getOrCreate(req);
+        log.error(
+                "Unhandled auth request failure method={} path={} exceptionType={}",
+                req.getMethod(),
+                req.getRequestURI(),
+                e.getClass().getName()
+        );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                 "code", "INTERNAL_ERROR",
-                "message", "Unexpected error"
+                "message", "Unexpected error",
+                "requestId", requestId
         ));
     }
 }

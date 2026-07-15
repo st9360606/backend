@@ -29,7 +29,7 @@ public class WorkoutAliasEvent {
     @JoinColumn(name="matched_dict_id")
     private WorkoutDictionary matchedDict;
 
-    @Column(name="score")
+    @Column(name="score", columnDefinition = "DECIMAL(6,5)")
     private Double score;
 
     @Column(name="used_generic", nullable=false)

@@ -2,9 +2,12 @@ package com.caloshape.backend.auth.repo;
 
 import com.caloshape.backend.auth.email.EmailLoginCode;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -14,6 +17,7 @@ public interface EmailLoginCodeRepository extends JpaRepository<EmailLoginCode, 
     /**
      * 只取最新一筆有效碼（避免 NonUniqueResultException）
      */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<EmailLoginCode> findFirstByEmailAndPurposeAndConsumedAtIsNullAndExpiresAtGreaterThanEqualOrderByIdDesc(
             String email,
             String purpose,

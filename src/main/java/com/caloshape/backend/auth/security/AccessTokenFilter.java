@@ -51,8 +51,7 @@ public class AccessTokenFilter extends OncePerRequestFilter {
                 || "/error".equals(path)
                 || path.startsWith("/auth")
                 || path.startsWith("/actuator")
-                || path.startsWith("/internal")
-                || path.startsWith("/static/weight-photos/");
+                || path.startsWith("/internal");
     }
 
     @Override

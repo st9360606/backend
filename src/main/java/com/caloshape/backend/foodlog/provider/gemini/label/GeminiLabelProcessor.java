@@ -31,7 +31,6 @@ import java.util.Locale;
 @GeminiEnabledComponent
 public class GeminiLabelProcessor implements GeminiModeProcessor {
 
-    private static final int PREVIEW_LEN = 200;
 
     private final ObjectMapper om;
     private final ProviderTelemetry telemetry;
@@ -104,13 +103,12 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
             parsed = unwrapRootObjectOrNull(parsed);
 
             log.info(
-                    "gemini_call_1_main_end foodLogId={} hasFunctionArgs={} parsedNull={} nutrientCount={} confidence={} textPreview={}",
+                    "gemini_call_1_main_end foodLogId={} hasFunctionArgs={} parsedNull={} nutrientCount={} confidence={}",
                     entity.getId(),
                     r1.functionArgs() != null,
                     parsed == null,
                     nutrientCountSafe(parsed),
-                    confidenceOrNull(parsed),
-                    previewOrEmpty(r1.text())
+                    confidenceOrNull(parsed)
             );
 
             // 只允許本地 repair / extract，不再做第二次 Gemini
@@ -439,19 +437,6 @@ public class GeminiLabelProcessor implements GeminiModeProcessor {
 
     private boolean isJsonTruncated(String text) {
         return jsonParsingSupport.isJsonTruncated(text);
-    }
-
-    private static String previewOrEmpty(String s) {
-        String v = safeOneLine200(s);
-        return v == null ? "" : v;
-    }
-
-    private static String safeOneLine200(String s) {
-        if (s == null) {
-            return null;
-        }
-        String t = s.replace("\r", " ").replace("\n", " ").trim();
-        return (t.length() > PREVIEW_LEN) ? t.substring(0, PREVIEW_LEN) : t;
     }
 
     private static long msSince(long t0) {

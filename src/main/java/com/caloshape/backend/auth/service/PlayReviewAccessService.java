@@ -41,8 +41,8 @@ public class PlayReviewAccessService {
         if (reviewEmail.isBlank()) {
             throw new IllegalStateException("Play review email must be configured when review access is enabled");
         }
-        if (properties.getCode() == null || !properties.getCode().matches("\\d{4}")) {
-            throw new IllegalStateException("Play review code must contain exactly 4 digits");
+        if (properties.getCode() == null || !properties.getCode().matches("\\d{6}")) {
+            throw new IllegalStateException("Play review code must contain exactly 6 digits");
         }
         if (properties.getEntitlementValidity() == null
                 || properties.getEntitlementValidity().isZero()

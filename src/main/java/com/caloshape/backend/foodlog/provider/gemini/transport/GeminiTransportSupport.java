@@ -23,7 +23,6 @@ import org.springframework.web.client.RestClientResponseException;
 @GeminiEnabledComponent
 public final class GeminiTransportSupport {
 
-    private static final int PREVIEW_LEN = 200;
     private static final String FN_EMIT_NUTRITION = "emitNutrition";
 
     private final RestClient http;
@@ -86,8 +85,8 @@ public final class GeminiTransportSupport {
             log.debug("geminiFnArgs foodLogId={} modelId={} keys={}",
                     foodLogIdForLog, modelId, fnArgs.fieldNames().hasNext() ? "HAS_FIELDS" : "EMPTY");
         } else {
-            log.debug("geminiTextPreview foodLogId={} modelId={} preview={}",
-                    foodLogIdForLog, modelId, safeOneLine200(text));
+            log.debug("gemini_output_mode foodLogId={} modelId={} mode=TEXT",
+                    foodLogIdForLog, modelId);
         }
 
         return new CallResult(tok, text, fnArgs);
@@ -232,14 +231,6 @@ public final class GeminiTransportSupport {
         }
 
         return new Tok(p, c, t);
-    }
-
-    private static String safeOneLine200(String s) {
-        if (s == null) {
-            return null;
-        }
-        String t = s.replace("\r", " ").replace("\n", " ").trim();
-        return (t.length() > PREVIEW_LEN) ? t.substring(0, PREVIEW_LEN) : t;
     }
 
     public record CallResult(Tok tok, String text, JsonNode functionArgs) {}

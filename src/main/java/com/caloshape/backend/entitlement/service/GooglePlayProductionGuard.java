@@ -21,14 +21,34 @@ public class GooglePlayProductionGuard {
 
     private final Environment environment;
     private final GooglePlayVerifierProperties props;
+    private final PurchaseTokenCrypto purchaseTokenCrypto;
 
     @PostConstruct
-    void validateProductionFakeTokenConfig() {
-        if (isProductionProfileEnabled() && props.isDevFakeTokensEnabled()) {
+    void validateProductionConfig() {
+        if (!isProductionProfileEnabled()) {
+            return;
+        }
+        if (props.isDevFakeTokensEnabled()) {
             throw new IllegalStateException(
                     "dev fake Google Play tokens must be disabled in production"
             );
         }
+        boolean hasPath = hasText(props.getServiceAccountJsonPath());
+        boolean hasBase64 = hasText(props.getServiceAccountJsonBase64());
+        if (hasPath == hasBase64) {
+            throw new IllegalStateException(
+                    "Production requires exactly one Google Play service-account credential source"
+            );
+        }
+        if (!purchaseTokenCrypto.enabled()) {
+            throw new IllegalStateException(
+                    "Google Play purchase-token encryption key must be valid in production"
+            );
+        }
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private boolean isProductionProfileEnabled() {

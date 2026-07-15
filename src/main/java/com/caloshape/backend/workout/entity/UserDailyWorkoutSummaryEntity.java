@@ -30,13 +30,13 @@ public class UserDailyWorkoutSummaryEntity {
     @Column(nullable = false, length = 64)
     private String timezone;
 
-    @Column(name = "workout_kcal", nullable = false)
+    @Column(name = "workout_kcal", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double workoutKcal;
 
-    @Column(name = "activity_kcal", nullable = false)
+    @Column(name = "activity_kcal", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double activityKcal;
 
-    @Column(name = "total_burned_kcal", nullable = false)
+    @Column(name = "total_burned_kcal", nullable = false, columnDefinition = "DECIMAL(12,3)")
     private Double totalBurnedKcal;
 
     @Column(name = "workout_session_count", nullable = false)

@@ -349,7 +349,11 @@ public class EntitlementSyncService {
         e.setValidToUtc(resolveValidToUtcToStore(e, v, rawPurchaseToken, now, transferredFromDeletedUser));
         e.setLastVerifiedAtUtc(now);
         e.setLastGoogleVerifiedAtUtc(now);
-        e.setPurchaseTokenCiphertext(purchaseTokenCrypto.encryptOrNull(rawPurchaseToken));
+        String purchaseTokenCiphertext = purchaseTokenCrypto.encryptOrNull(rawPurchaseToken);
+        if (purchaseTokenCiphertext == null || purchaseTokenCiphertext.isBlank()) {
+            throw new IllegalStateException("PURCHASE_TOKEN_ENCRYPTION_FAILED");
+        }
+        e.setPurchaseTokenCiphertext(purchaseTokenCiphertext);
         e.setSource("GOOGLE_PLAY");
         String subscriptionStateToStore = resolveSubscriptionStateToStore(e, v, rawPurchaseToken, now);
         String paymentStateToStore = paymentState(subscriptionStateToStore);

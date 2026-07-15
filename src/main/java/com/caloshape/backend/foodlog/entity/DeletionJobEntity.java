@@ -22,16 +22,16 @@ public class DeletionJobEntity {
     public enum JobStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED }
 
     @Id
-    @Column(length = 36, nullable = false)
+    @Column(length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String id;
 
-    @Column(name = "food_log_id", length = 36, nullable = false)
+    @Column(name = "food_log_id", length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String foodLogId;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(length = 64)
+    @Column(length = 64, columnDefinition = "CHAR(64)")
     private String sha256;
 
     @Column(length = 8)

@@ -29,7 +29,7 @@ import java.util.UUID;
 public class FoodLogEntity {
 
     @Id
-    @Column(length = 36, nullable = false)
+    @Column(length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String id;
 
     @Column(name = "user_id", nullable = false)
@@ -70,7 +70,7 @@ public class FoodLogEntity {
     @Column(name = "image_object_key", columnDefinition = "TEXT")
     private String imageObjectKey;
 
-    @Column(name = "image_sha256", length = 64)
+    @Column(name = "image_sha256", length = 64, columnDefinition = "CHAR(64)")
     private String imageSha256;
 
     @Column(name = "image_content_type", length = 64)

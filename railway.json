@@ -1,0 +1,15 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "sh mvnw -B -DskipTests package"
+  },
+  "deploy": {
+    "startCommand": "java -jar target/backend-0.0.1-SNAPSHOT.jar",
+    "healthcheckPath": "/healthz",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3,
+    "drainingSeconds": "30"
+  }
+}

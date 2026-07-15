@@ -21,11 +21,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -74,7 +76,7 @@ class EntitlementSyncServiceReferralScenarioTest {
                 entitlementTransferAuditRepository
         );
 
-        when(entitlementRepo.findActiveBestFirst(any(), any(Instant.class), any(PageRequest.class)))
+        lenient().when(entitlementRepo.findActiveBestFirst(any(), any(Instant.class), any(PageRequest.class)))
                 .thenReturn(List.of());
     }
 
@@ -210,6 +212,75 @@ class EntitlementSyncServiceReferralScenarioTest {
                 eq(false),
                 eq(false)
         );
+    }
+
+    @Test
+    void sync_shouldFailWithoutSavingWhenPurchaseTokenEncryptionFails() throws Exception {
+        String token = "encryption-failure-token";
+        String tokenHash = EntitlementSyncService.sha256Hex(token);
+        Instant expiry = Instant.parse("2026-06-01T00:00:00Z");
+
+        when(verifier.verify(token)).thenReturn(new SubscriptionVerifier.VerifiedSubscription(
+                true,
+                "monthly.product",
+                expiry,
+                false,
+                "SUBSCRIPTION_STATE_ACTIVE",
+                "ACKNOWLEDGEMENT_STATE_PENDING",
+                true,
+                "BASE",
+                "order-encryption-failure",
+                null,
+                false,
+                false
+        ));
+        when(entitlementRepo.findTopByPurchaseTokenHashOrderByUpdatedAtUtcDesc(tokenHash))
+                .thenReturn(Optional.empty());
+        when(entitlementRepo.existsAnyGooglePlayPaidSubscriptionHistory(200L))
+                .thenReturn(false);
+        when(purchaseTokenCrypto.encryptOrNull(token)).thenReturn(null);
+
+        assertThatThrownBy(() -> service.sync(200L, new EntitlementSyncRequest(List.of(
+                new EntitlementSyncRequest.PurchaseTokenPayload("monthly.product", token)
+        ))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("PURCHASE_TOKEN_ENCRYPTION_FAILED");
+
+        verify(entitlementRepo, never()).save(any(UserEntitlementEntity.class));
+        verify(purchaseAcknowledger, never()).acknowledgeWithRetry(anyString(), anyString(), any());
+        verify(referralBillingBridgeService, never()).onFirstPaidSubscriptionVerified(
+                any(),
+                anyString(),
+                any(),
+                anyBoolean(),
+                anyBoolean(),
+                anyBoolean()
+        );
+    }
+
+    @Test
+    void retryAcknowledgeForStoredToken_shouldNotCallGoogleWhenCiphertextIsMissing() {
+        UserEntitlementEntity entitlement = new UserEntitlementEntity();
+        entitlement.setId("entitlement-missing-ciphertext");
+        entitlement.setUserId(200L);
+        entitlement.setSource("GOOGLE_PLAY");
+        entitlement.setStatus("ACTIVE");
+        entitlement.setProductId("monthly.product");
+        entitlement.setAcknowledgementState("ACKNOWLEDGEMENT_STATE_PENDING");
+        entitlement.setPurchaseTokenHash("token-hash");
+        entitlement.setPurchaseTokenCiphertext(null);
+
+        when(entitlementRepo.findById("entitlement-missing-ciphertext"))
+                .thenReturn(Optional.of(entitlement));
+        when(purchaseTokenCrypto.decryptOrNull(null)).thenReturn(null);
+
+        service.retryAcknowledgeForStoredToken(
+                "entitlement-missing-ciphertext",
+                Instant.parse("2026-06-01T00:00:00Z")
+        );
+
+        verify(purchaseAcknowledger, never()).acknowledgeWithRetry(anyString(), anyString(), any());
+        verify(entitlementRepo, never()).save(any(UserEntitlementEntity.class));
     }
 
     @Test

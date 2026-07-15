@@ -11,6 +11,10 @@ class DurationParserTest {
         assertEquals(135, DurationParser.parseMinutes("2 h 15 minutes"));
     }
 
+    @Test void danish_and_norwegian_minutes() {
+        assertEquals(30, DurationParser.parseMinutes("30 minutter"));
+    }
+
     @Test void chinese_japanese_korean() {
         assertEquals(30, DurationParser.parseMinutes("30 分鐘"));
         assertEquals(60, DurationParser.parseMinutes("1 小時"));

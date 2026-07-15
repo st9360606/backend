@@ -4,6 +4,7 @@ import com.caloshape.backend.foodlog.quota.repo.UserAiQuotaStateRepository;
 import com.caloshape.backend.foodlog.repo.FoodLogTaskRepository;
 import com.caloshape.backend.foodlog.job.worker.FoodLogTaskWorker;
 import com.caloshape.backend.testsupport.config.TestAuthConfig;
+import com.caloshape.backend.testsupport.db.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc(addFilters = false)
 @Import(TestAuthConfig.class)
-public class FoodLogDedupQuotaIT {
+public class FoodLogDedupQuotaIT extends MySqlContainerBaseTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper om;

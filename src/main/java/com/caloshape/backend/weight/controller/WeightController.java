@@ -1,9 +1,10 @@
 package com.caloshape.backend.weight.controller;
 
 import com.caloshape.backend.auth.security.AuthContext;
-import com.caloshape.backend.common.storage.LocalImageStorage;
 import com.caloshape.backend.weight.dto.*;
 import com.caloshape.backend.weight.service.WeightService;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,10 +19,10 @@ import java.time.ZoneId;
 public class WeightController {
     private final AuthContext auth;
     private final WeightService svc;
-    private final LocalImageStorage images;
 
-    public WeightController(AuthContext auth, WeightService svc, LocalImageStorage images) {
-        this.auth = auth; this.svc = svc; this.images = images;
+    public WeightController(AuthContext auth, WeightService svc) {
+        this.auth = auth;
+        this.svc = svc;
     }
 
     @PostMapping(value = "/baseline", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -83,5 +84,18 @@ public class WeightController {
         var zone = svc.parseZoneOrUtc(tzHeader);
         var today = LocalDate.now(zone);
         return ResponseEntity.ok(svc.summaryForRange(uid, range, today));
+    }
+
+    @GetMapping(value = "/photos/{filename:.+}")
+    public ResponseEntity<Resource> photo(@PathVariable String filename) {
+        Long uid = auth.requireUserId();
+        return svc.findOwnedPhoto(uid, filename)
+                .map(photo -> ResponseEntity.ok()
+                        .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .contentType(photo.mediaType())
+                        .contentLength(photo.contentLength())
+                        .body(photo.resource()))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

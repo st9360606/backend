@@ -145,7 +145,8 @@ class UserEntitlementRepositoryScenarioTest {
     @Test
     void findAckPendingGooglePlayEntitlements_shouldReturnOnlyActiveUnblockedUnacknowledgedRows() {
         Instant old = now.minusSeconds(3600);
-        UserEntitlementEntity ackNeeded = entitlement("ack-needed", 106L, "MONTHLY", "ACTIVE", "GOOGLE_PLAY", "SUBSCRIPTION_STATE_ACTIVE", "OK", now.plusSeconds(86400), "cipher-ack", "ACKNOWLEDGEMENT_STATE_PENDING");
+        String ackNeededId = "00000000-0000-0000-0000-000000000106";
+        UserEntitlementEntity ackNeeded = entitlement(ackNeededId, 106L, "MONTHLY", "ACTIVE", "GOOGLE_PLAY", "SUBSCRIPTION_STATE_ACTIVE", "OK", now.plusSeconds(86400), "cipher-ack", "ACKNOWLEDGEMENT_STATE_PENDING");
         ackNeeded.setUpdatedAtUtc(old);
         repository.save(ackNeeded);
 
@@ -164,7 +165,7 @@ class UserEntitlementRepositoryScenarioTest {
 
         assertThat(rows)
                 .extracting(UserEntitlementEntity::getId)
-                .containsExactly("ack-needed");
+                .containsExactly(ackNeededId);
     }
 
     @Test

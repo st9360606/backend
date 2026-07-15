@@ -37,7 +37,7 @@ class EmailAuthServicePlayReviewTest {
         ArgumentCaptor<EmailLoginCode> captor = ArgumentCaptor.forClass(EmailLoginCode.class);
         verify(codes).save(captor.capture());
         assertThat(captor.getValue().getEmail()).isEqualTo("play-review@caloshape.com");
-        assertThat(captor.getValue().getCodeHash()).isEqualTo(sha256("4827"));
+        assertThat(captor.getValue().getCodeHash()).isEqualTo(sha256("482731"));
         verify(events, never()).publishEvent(any(Object.class));
     }
 
@@ -48,11 +48,13 @@ class EmailAuthServicePlayReviewTest {
         PlayReviewAccessProperties properties = new PlayReviewAccessProperties();
         properties.setEnabled(true);
         properties.setEmail("play-review@caloshape.com");
-        properties.setCode("4827");
+        properties.setCode("482731");
         properties.setEntitlementValidity(Duration.ofDays(3650));
 
         EmailAuthService service = new EmailAuthService(
                 codes,
+                mock(EmailOtpChallengeService.class),
+                mock(EmailAuthRateLimiter.class),
                 mock(UserRepo.class),
                 mock(TokenService.class),
                 mock(FastingPlanService.class),
@@ -62,7 +64,7 @@ class EmailAuthServicePlayReviewTest {
                 mock(PlayReviewEntitlementService.class)
         );
         service.enabled = true;
-        service.otpLen = 4;
+        service.otpLen = 6;
         service.ttlMin = 10;
         return service;
     }

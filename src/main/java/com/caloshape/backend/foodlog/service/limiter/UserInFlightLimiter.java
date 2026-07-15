@@ -149,8 +149,8 @@ public class UserInFlightLimiter {
                     String.valueOf(leaseTtlMillis)
             );
         } catch (Exception ex) {
-            log.error("inflight_acquire_redis_error userId={} key={} message={}",
-                    userId, key, ex.getMessage(), ex);
+            log.error("inflight_acquire_redis_error userId={} key={} errorType={}",
+                    userId, key, ex.getClass().getSimpleName());
             throw new IllegalStateException("INFLIGHT_LIMITER_REDIS_FAILED", ex);
         }
 
@@ -161,14 +161,14 @@ public class UserInFlightLimiter {
 
         String[] parts = raw.split(":", 3);
         if (parts.length != 3) {
-            log.error("inflight_acquire_failed userId={} key={} raw={}", userId, key, raw);
+            log.error("inflight_acquire_failed userId={} key={} reason=invalid_redis_result", userId, key);
             throw new IllegalStateException("INFLIGHT_LIMITER_REDIS_FAILED");
         }
 
         if ("1".equals(parts[0])) {
             if (log.isDebugEnabled()) {
-                log.debug("inflight_acquired userId={} key={} token={} expiresAtMs={}",
-                        userId, key, token, expiresAtMs);
+                log.debug("inflight_acquired userId={} key={} expiresAtMs={}",
+                        userId, key, expiresAtMs);
             }
             return new Lease(userId, token);
         }
@@ -207,12 +207,12 @@ public class UserInFlightLimiter {
             );
 
             if (log.isDebugEnabled()) {
-                log.debug("inflight_released userId={} key={} token={} result={}",
-                        lease.userId(), key, lease.token(), raw);
+                log.debug("inflight_released userId={} key={} result={}",
+                        lease.userId(), key, raw);
             }
         } catch (Exception ex) {
-            log.warn("inflight_release_failed userId={} key={} token={} message={}",
-                    lease.userId(), key, lease.token(), ex.getMessage(), ex);
+            log.warn("inflight_release_failed userId={} key={} errorType={}",
+                    lease.userId(), key, ex.getClass().getSimpleName());
         }
     }
 

@@ -2,14 +2,12 @@ package com.caloshape.backend.entitlement.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.api.services.androidpublisher.AndroidPublisherScopes;
 import com.google.auth.oauth2.GoogleCredentials;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
-import java.io.FileInputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -18,7 +16,6 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 @RequiredArgsConstructor
@@ -30,6 +27,7 @@ public class GooglePlaySubscriptionDeferralService {
             "https://androidpublisher.googleapis.com/androidpublisher/v3/applications";
 
     private final GooglePlayVerifierProperties props;
+    private final GooglePlayCredentialsLoader credentialsLoader;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
@@ -300,18 +298,7 @@ public class GooglePlaySubscriptionDeferralService {
     }
 
     private String accessToken() throws Exception {
-        GoogleCredentials credentials;
-
-        if (props.getServiceAccountJsonPath() != null
-                && !props.getServiceAccountJsonPath().isBlank()) {
-            try (FileInputStream in = new FileInputStream(props.getServiceAccountJsonPath())) {
-                credentials = GoogleCredentials.fromStream(in);
-            }
-        } else {
-            credentials = GoogleCredentials.getApplicationDefault();
-        }
-
-        credentials = credentials.createScoped(List.of(AndroidPublisherScopes.ANDROIDPUBLISHER));
+        GoogleCredentials credentials = credentialsLoader.loadScoped();
         credentials.refreshIfExpired();
 
         return credentials.getAccessToken().getTokenValue();

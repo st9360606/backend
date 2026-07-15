@@ -16,7 +16,7 @@ class PlayReviewAccessServiceTest {
         PlayReviewAccessService service = new PlayReviewAccessService(properties);
 
         assertThat(service.fixedCodeFor(" PLAY-REVIEW@CALOSHAPE.COM "))
-                .contains("4827");
+                .contains("482731");
         assertThat(service.fixedCodeFor("someone@example.com"))
                 .isEmpty();
     }
@@ -39,14 +39,14 @@ class PlayReviewAccessServiceTest {
 
         assertThatThrownBy(() -> new PlayReviewAccessService(properties))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("exactly 4 digits");
+                .hasMessageContaining("exactly 6 digits");
     }
 
     private static PlayReviewAccessProperties validProperties() {
         PlayReviewAccessProperties properties = new PlayReviewAccessProperties();
         properties.setEnabled(true);
         properties.setEmail("play-review@caloshape.com");
-        properties.setCode("4827");
+        properties.setCode("482731");
         properties.setEntitlementValidity(Duration.ofDays(3650));
         return properties;
     }

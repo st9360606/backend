@@ -25,7 +25,7 @@ spring:
     password: root
   jpa:
     hibernate:
-      ddl-auto: none             # 無自動建表；請用 Flyway/Liquibase
+      ddl-auto: validate         # Flyway owns schema changes; Hibernate only validates mappings.
     open-in-view: false
     show-sql: false
     properties:
@@ -33,6 +33,12 @@ spring:
         format_sql: false
         jdbc:
           time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true   # Adopt the existing local schema at V1 without replaying initialization.
+    baseline-version: 1
+    validate-on-migrate: true
+    clean-disabled: true
   data:
     redis:
       host: localhost
@@ -69,6 +75,8 @@ management:
       show-details: when_authorized
 
 app:
+  runtime:
+    profile-marker: dev
   referral:
     dev:
       allow-test-purchase-rewards: true
@@ -154,8 +162,14 @@ app:
       enabled: true
       package-name: "com.caloshape.app"
       service-account-json-path: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH:}"  # dev 可用
+      service-account-json-base64: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64:}"
       dev-fake-tokens-enabled: true  # prod 不可用
       purchase-token-encryption-key: "${GOOGLE_PLAY_PURCHASE_TOKEN_AES_KEY:}"
+      rtdn:
+        oidc-enabled: false
+        oidc-audience: ""
+        oidc-service-account-email: ""
+        legacy-internal-token-enabled: true
     web-client-id: "${GOOGLE_WEB_CLIENT_ID_DEV}"
   billing:
     products:
@@ -180,6 +194,17 @@ app:
   auth:
     access-ttl-sec: 900
     refresh-ttl-sec: 2592000
+    email-rate-limit:
+      redis-prefix: "caloshape-dev"
+      window: "PT15M"
+      start:
+        email-limit: 3
+        ip-limit: 20
+        device-limit: 5
+      verify:
+        email-limit: 10
+        ip-limit: 60
+        device-limit: 20
     play-review:
       enabled: "${PLAY_REVIEW_ENABLED:false}"
       email: "${PLAY_REVIEW_EMAIL:}"
@@ -189,8 +214,9 @@ app:
     allow-origins: "*"
   email:
     enabled: true
-    otp-length: 4
+    otp-length: 6
     ttl-minutes: 10
+    max-attempts: 5
     # 若使用 Gmail SMTP，from 最好等於 username；否則容易被覆寫或遭拒收
     sender: "${APP_EMAIL_SENDER:${SMTP_USERNAME}}"
     # 若要用自家網域 no-reply@caloshape.app，建議改用 SendGrid/SES 並設定 SPF/DKIM/DMARC

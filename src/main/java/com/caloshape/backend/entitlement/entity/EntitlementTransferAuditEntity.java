@@ -23,7 +23,7 @@ public class EntitlementTransferAuditEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "purchase_token_hash", length = 64, nullable = false)
+    @Column(name = "purchase_token_hash", length = 64, nullable = false, columnDefinition = "CHAR(64)")
     private String purchaseTokenHash;
 
     @Column(name = "old_user_id", nullable = false)

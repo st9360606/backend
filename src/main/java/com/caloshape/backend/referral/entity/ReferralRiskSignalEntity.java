@@ -19,13 +19,13 @@ public class ReferralRiskSignalEntity {
     @Column(name = "claim_id", nullable = false)
     private Long claimId;
 
-    @Column(name = "device_hash", length = 64)
+    @Column(name = "device_hash", length = 64, columnDefinition = "CHAR(64)")
     private String deviceHash;
 
-    @Column(name = "ip_hash", length = 64)
+    @Column(name = "ip_hash", length = 64, columnDefinition = "CHAR(64)")
     private String ipHash;
 
-    @Column(name = "payment_fingerprint_hash", length = 64)
+    @Column(name = "payment_fingerprint_hash", length = 64, columnDefinition = "CHAR(64)")
     private String paymentFingerprintHash;
 
     @Column(name = "risk_score", nullable = false)

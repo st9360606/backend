@@ -43,7 +43,7 @@ public class MembershipRewardLedgerEntity {
     @Column(name = "reward_channel", length = 32)
     private String rewardChannel;
 
-    @Column(name = "google_purchase_token_hash", length = 64)
+    @Column(name = "google_purchase_token_hash", length = 64, columnDefinition = "CHAR(64)")
     private String googlePurchaseTokenHash;
 
     @Column(name = "google_defer_status", length = 32)

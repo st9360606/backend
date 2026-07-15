@@ -1,8 +1,10 @@
 package com.caloshape.backend.entitlement.rtdn;
 
-import com.caloshape.backend.internal.InternalApiGuard;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
@@ -11,20 +13,21 @@ import java.util.Map;
 @RequestMapping("/internal/google")
 public class GoogleRtdnController {
 
-    private final InternalApiGuard internalApiGuard;
+    private final GoogleRtdnRequestAuthenticator requestAuthenticator;
     private final GoogleRtdnService googleRtdnService;
 
     @PostMapping("/rtdn")
     public Map<String, Object> receiveRtdn(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
             @RequestHeader(value = "X-Internal-Token", required = false) String internalToken,
             @RequestBody PubSubPushRequest request
     ) {
-        internalApiGuard.requireValidToken(internalToken);
+        requestAuthenticator.requireAuthorized(authorization, internalToken);
 
         if (request == null || request.message() == null) {
-            return Map.of(
-                    "ok", false,
-                    "message", "EMPTY_PUBSUB_MESSAGE"
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "EMPTY_PUBSUB_MESSAGE"
             );
         }
 

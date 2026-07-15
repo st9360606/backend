@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -317,7 +318,7 @@ public class WorkoutService {
                 + "minutos|minuto|minuta|"
                 + "minutes|minute|mins|min|"
                 // 其他語系（維持你原本的清單，但把短的放後面）
-                + "minuty|minut|minuten|minuut|minuter|"
+                + "minutter|minuty|minut|minuten|minuut|minuter|"
                 + "dakika|"
                 + "минуты|минута|минут|мин|"
                 + "دقائق|دقيقة|"
@@ -350,12 +351,19 @@ public class WorkoutService {
 
 
     private Map<String, List<String>> builtinSynonyms() {
-        return Map.of(
+        Map<String, List<String>> synonyms = new HashMap<>(Map.of(
                 "running",  List.of("run","running","jog","慢跑","跑步","ラン","ジョグ","달리기","correr","corrida","кросс"),
                 "walking",  List.of("walk","散步","走路","步行","歩く","걷기","paseo","caminata"),
                 "cycling",  List.of("cycle","bike","biking","騎車","單車","骑车","自転車","자전거","ciclismo","vélo"),
                 "swimming", List.of("swim","游泳","수영","natación","natação")
-        );
+        ));
+        synonyms.put("hiit_bodyweight_moderate", List.of("hiit"));
+        synonyms.put("golf_walking", List.of("golf"));
+        synonyms.put("standup_paddleboard", List.of("paddle boarding"));
+        synonyms.put("core_weighted_circuit", List.of("core training"));
+        synonyms.put("calisthenics_light", List.of("plank", "push-ups", "lunges"));
+        synonyms.put("calisthenics_vigorous", List.of("pull-ups"));
+        return Map.copyOf(synonyms);
     }
 
     private void upsertApprovedAlias(String lang, String phraseLower, WorkoutDictionary dict) {

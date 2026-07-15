@@ -28,12 +28,9 @@ public class BarcodeLookupCacheEntity {
     @Column(name = "provider", length = 32, nullable = false)
     private String provider;
 
-    /**
-     * ✅ 用文字存 JSON，避免 Hibernate JSON 型別與 Dialect（H2/MySQL）踩坑
-     * ✅ 不要寫 columnDefinition="LONGTEXT"，讓 @Lob + Dialect 自己決定（H2 會用 CLOB、MySQL 會用 TEXT/LONGTEXT）
-     */
+    /** Cached provider response JSON; the canonical MySQL schema uses LONGTEXT. */
     @Lob
-    @Column(name = "payload_text")
+    @Column(name = "payload_text", columnDefinition = "LONGTEXT")
     private String payloadText;
 
     @Column(name = "expires_at_utc", nullable = false)

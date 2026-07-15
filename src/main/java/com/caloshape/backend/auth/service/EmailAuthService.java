@@ -13,6 +13,7 @@ import com.caloshape.backend.fasting.service.FastingPlanService;
 import com.caloshape.backend.fasting.support.ClientTimeZoneResolver;
 import com.caloshape.backend.users.user.entity.User;
 import com.caloshape.backend.users.user.repo.UserRepo;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -20,18 +21,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Locale;
 
 @Service
 public class EmailAuthService {
 
     private static final String PURPOSE_LOGIN = "LOGIN";
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final EmailLoginCodeRepository codes;
+    private final EmailOtpChallengeService otpChallenges;
+    private final EmailAuthRateLimiter rateLimiter;
     private final UserRepo users;
     private final TokenService tokens;
     private final FastingPlanService fastingPlans;
@@ -42,6 +42,8 @@ public class EmailAuthService {
 
     public EmailAuthService(
             EmailLoginCodeRepository codes,
+            EmailOtpChallengeService otpChallenges,
+            EmailAuthRateLimiter rateLimiter,
             UserRepo users,
             TokenService tokens,
             FastingPlanService fastingPlans,
@@ -51,6 +53,8 @@ public class EmailAuthService {
             PlayReviewEntitlementService playReviewEntitlements
     ) {
         this.codes = codes;
+        this.otpChallenges = otpChallenges;
+        this.rateLimiter = rateLimiter;
         this.users = users;
         this.tokens = tokens;
         this.fastingPlans = fastingPlans;
@@ -63,7 +67,7 @@ public class EmailAuthService {
     @Value("${app.email.enabled:true}")
     boolean enabled;
 
-    @Value("${app.email.otp-length:4}")
+    @Value("${app.email.otp-length:6}")
     int otpLen;
 
     @Value("${app.email.ttl-minutes:10}")
@@ -75,17 +79,35 @@ public class EmailAuthService {
     @Value("${app.auth.refresh-ttl-sec:2592000}")
     long refreshTtlSeconds;
 
+    @PostConstruct
+    void validateConfiguration() {
+        if (otpLen < 6) {
+            throw new IllegalStateException("app.email.otp-length must be at least 6");
+        }
+        if (ttlMin < 1) {
+            throw new IllegalStateException("app.email.ttl-minutes must be positive");
+        }
+    }
+
     @Transactional
     public StartResponse start(StartRequest req, String ip, String ua) {
+        return start(req, null, ip, ua);
+    }
+
+    @Transactional
+    public StartResponse start(StartRequest req, String deviceId, String ip, String ua) {
         if (!enabled) return new StartResponse(false);
 
-        final String email = req.email().trim().toLowerCase();
+        final String email = normalizeEmail(req.email());
         final Instant now = Instant.now();
+
+        rateLimiter.checkStart(email, ip, deviceId, now);
 
         codes.consumeAllActive(email, PURPOSE_LOGIN, now);
 
-        final String code = playReviewAccess.fixedCodeFor(email).orElseGet(() -> genCode(otpLen));
-        final String hash = sha256(code);
+        final String code = playReviewAccess.fixedCodeFor(email)
+                .orElseGet(() -> EmailOtpCodeSupport.generateNumeric(otpLen));
+        final String hash = EmailOtpCodeSupport.sha256(code);
 
         var ent = new EmailLoginCode();
         ent.setEmail(email);
@@ -108,21 +130,28 @@ public class EmailAuthService {
     @Transactional
     public AuthResponse verify(VerifyRequest req, String deviceId, String ip, String ua) {
         final Instant now = Instant.now();
-        final String email = req.email().trim().toLowerCase();
+        final String email = normalizeEmail(req.email());
 
-        var latest = codes.findFirstByEmailAndPurposeAndConsumedAtIsNullAndExpiresAtGreaterThanEqualOrderByIdDesc(
-                email, PURPOSE_LOGIN, now
-        ).orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Code expired or not found"));
+        rateLimiter.checkVerify(email, ip, deviceId, now);
 
-        latest.setAttemptCnt((latest.getAttemptCnt() == null ? 0 : latest.getAttemptCnt()) + 1);
-        codes.save(latest);
-
-        if (!latest.getCodeHash().equals(sha256(req.code()))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid code");
+        EmailOtpChallengeService.Result challengeResult = otpChallenges.verify(
+                email,
+                PURPOSE_LOGIN,
+                req.code(),
+                now
+        );
+        switch (challengeResult.status()) {
+            case VERIFIED -> {
+                // Continue with login completion below.
+            }
+            case TOO_MANY_ATTEMPTS -> throw new EmailAuthRateLimitException(
+                    challengeResult.retryAfterSec()
+            );
+            case INVALID, INVALID_OR_EXPIRED -> throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid or expired code"
+            );
         }
-
-        latest.setConsumedAt(now);
-        codes.save(latest);
 
         // 以 email 取回或建立帳號
         User user = users.findByEmailIgnoreCase(email).orElseGet(() -> {
@@ -162,25 +191,10 @@ public class EmailAuthService {
         return verify(req, null, null, null);
     }
 
-    private static String genCode(int len) {
-        var sb = new StringBuilder(len);
-        for (int i = 0; i < len; i++) {
-            sb.append((char) ('0' + SECURE_RANDOM.nextInt(10)));
+    private static String normalizeEmail(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("Email is required");
         }
-        return sb.toString();
-    }
-
-    private static String sha256(String s) {
-        try {
-            var md = MessageDigest.getInstance("SHA-256");
-            byte[] d = md.digest(s.getBytes(StandardCharsets.UTF_8));
-            var hex = new StringBuilder();
-            for (byte b : d) {
-                hex.append(String.format("%02x", b));
-            }
-            return hex.toString();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        return raw.trim().toLowerCase(Locale.ROOT);
     }
 }

@@ -54,7 +54,7 @@ public class PurchaseTokenCrypto {
 
             return Base64.getEncoder().encodeToString(out);
         } catch (Exception ex) {
-            log.warn("purchase_token_encrypt_failed error={}", ex.toString());
+            log.warn("purchase_token_encrypt_failed errorType={}", ex.getClass().getSimpleName());
             return null;
         }
     }
@@ -81,7 +81,7 @@ public class PurchaseTokenCrypto {
                     java.nio.charset.StandardCharsets.UTF_8
             );
         } catch (Exception ex) {
-            log.warn("purchase_token_decrypt_failed error={}", ex.toString());
+            log.warn("purchase_token_decrypt_failed errorType={}", ex.getClass().getSimpleName());
             return null;
         }
     }
@@ -93,12 +93,12 @@ public class PurchaseTokenCrypto {
 
         try {
             byte[] key = Base64.getDecoder().decode(base64Key.trim());
-            if (key.length != 16 && key.length != 24 && key.length != 32) {
-                throw new IllegalArgumentException("AES key must be 16, 24, or 32 bytes");
+            if (key.length != 32) {
+                throw new IllegalArgumentException("AES-256 key must be 32 bytes");
             }
             return new SecretKeySpec(key, ALGO);
         } catch (Exception ex) {
-            log.warn("purchase_token_crypto_disabled_invalid_key error={}", ex.toString());
+            log.warn("purchase_token_crypto_disabled_invalid_key errorType={}", ex.getClass().getSimpleName());
             return null;
         }
     }

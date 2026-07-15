@@ -1,6 +1,9 @@
 package com.caloshape.backend.common.web;
 
 import com.caloshape.backend.users.auto_generate_goals.dto.MissingFieldsResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -24,6 +27,9 @@ import java.util.NoSuchElementException;
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+    private static final String INTERNAL_ERROR_MESSAGE = "Unexpected error";
 
     // ===== 400 Bad Request =====
 
@@ -49,8 +55,14 @@ public class ApiExceptionHandler {
 
 
     @ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(
+            ResponseStatusException ex,
+            HttpServletRequest req
+    ) {
         HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
+        if (status.is5xxServerError()) {
+            return internalError(ex, req);
+        }
         String code = switch (status) {
             case BAD_REQUEST -> "BAD_REQUEST";
             case UNAUTHORIZED -> "UNAUTHORIZED";
@@ -69,7 +81,10 @@ public class ApiExceptionHandler {
     // ===== 404 / 422 / 500 from IllegalStateException codes =====
 
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, Object>> handleIllegalState(IllegalStateException ex) {
+    public ResponseEntity<Map<String, Object>> handleIllegalState(
+            IllegalStateException ex,
+            HttpServletRequest req
+    ) {
         String code = (ex.getMessage() == null || ex.getMessage().isBlank())
                 ? "ILLEGAL_STATE"
                 : ex.getMessage().trim();
@@ -81,6 +96,9 @@ public class ApiExceptionHandler {
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
 
+        if (status.is5xxServerError()) {
+            return internalError(ex, req);
+        }
         return ResponseEntity.status(status).body(err(code, ex.getMessage()));
     }
 
@@ -114,9 +132,28 @@ public class ApiExceptionHandler {
     // ===== 500 Fallback =====
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleUnknown(Exception ex) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(err("INTERNAL_ERROR", ex.getMessage()));
+    public ResponseEntity<Map<String, Object>> handleUnknown(
+            Exception ex,
+            HttpServletRequest req
+    ) {
+        return internalError(ex, req);
+    }
+
+    private ResponseEntity<Map<String, Object>> internalError(
+            Exception ex,
+            HttpServletRequest req
+    ) {
+        String requestId = RequestIdFilter.getOrCreate(req);
+        log.error(
+                "Unhandled request failure method={} path={} exceptionType={}",
+                req.getMethod(),
+                req.getRequestURI(),
+                ex.getClass().getName()
+        );
+
+        Map<String, Object> body = err("INTERNAL_ERROR", INTERNAL_ERROR_MESSAGE);
+        body.put("requestId", requestId);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }
 
     private static Map<String, Object> err(String code, String message) {

@@ -39,11 +39,11 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers("/error").permitAll()
 
+                        // Minimal, detail-free readiness endpoint used by the deployment platform.
+                        .requestMatchers(HttpMethod.GET, "/healthz").permitAll()
+
                         // CORS preflight 不需要 Bearer token。
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-
-                        // 公開讀取：體重照片，只放行 GET。
-                        .requestMatchers(HttpMethod.GET, "/static/weight-photos/**").permitAll()
 
                         // Auth API 公開。
                         .requestMatchers("/auth/**").permitAll()

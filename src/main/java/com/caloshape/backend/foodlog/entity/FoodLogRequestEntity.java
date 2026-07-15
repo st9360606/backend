@@ -31,7 +31,7 @@ public class FoodLogRequestEntity {
     @Column(name = "request_id", length = 64, nullable = false)
     private String requestId;
 
-    @Column(name = "food_log_id", length = 36)
+    @Column(name = "food_log_id", length = 36, columnDefinition = "CHAR(36)")
     private String foodLogId;
 
     @Enumerated(EnumType.STRING)

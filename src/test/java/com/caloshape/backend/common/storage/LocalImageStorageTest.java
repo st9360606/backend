@@ -22,12 +22,16 @@ class LocalImageStorageTest {
                 "photo", "a.jpg", "image/jpeg", "hello".getBytes()
         );
 
-        String url = storage.save(12L, LocalDate.of(2025, 11, 27), file, "jpg");
+        String url = storage.save(LocalDate.of(2025, 11, 27), file.getBytes(), "jpg");
         assertTrue(url.startsWith(LocalImageStorage.PUBLIC_PREFIX));
 
         String fn = storage.filenameFromUrl(url).orElseThrow();
-        assertTrue(fn.startsWith("20251127_12_"));
+        assertTrue(fn.startsWith("20251127_"));
+        assertFalse(fn.contains("_12_"));
         assertTrue(fn.endsWith(".jpg"));
+        assertEquals(LocalImageStorage.PROTECTED_PREFIX + fn, storage.protectedUrlFromStoredUrl(url));
+        assertTrue(storage.findResource(fn).isPresent());
+        assertTrue(storage.findResource("../" + fn).isEmpty());
 
         // 刪掉應成功（不丟例外）
         storage.deleteByUrl(url);

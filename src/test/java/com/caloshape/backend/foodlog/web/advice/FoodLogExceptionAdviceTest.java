@@ -32,6 +32,8 @@ import java.io.ByteArrayInputStream;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -120,6 +122,21 @@ class FoodLogExceptionAdviceTest {
                 .andExpect(header().string("X-Request-Id", "RID-409"))
                 .andExpect(jsonPath("$.code").value("IMAGE_OBJECT_KEY_MISSING"))
                 .andExpect(jsonPath("$.requestId").value("RID-409"));
+    }
+
+    @Test
+    void unknown_internal_error_should_be_sanitized_with_requestId() throws Exception {
+        Mockito.when(auth.requireUserId()).thenReturn(1L);
+        Mockito.when(service.getOne(eq(1L), eq("fail"), anyString()))
+                .thenThrow(new RuntimeException("gemini api key=secret provider payload"));
+
+        mvc.perform(get("/api/v1/food-logs/fail").header("X-Request-Id", "RID-500"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(header().string("X-Request-Id", "RID-500"))
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.message").value("Unexpected error"))
+                .andExpect(jsonPath("$.requestId").value("RID-500"))
+                .andExpect(content().string(not(containsString("gemini api key=secret"))));
     }
 
     @Test

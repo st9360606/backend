@@ -21,11 +21,11 @@ public class FastingPlanEntity {
     @Column(nullable = false, length = 16)
     private String planCode; // '16:8'
 
-    @Column(nullable = false, length = 5)
+    @Column(nullable = false, length = 5, columnDefinition = "CHAR(5)")
     @Convert(converter = LocalTimeStringConverter.class)
     private LocalTime startTime;
 
-    @Column(nullable = false, length = 5)
+    @Column(nullable = false, length = 5, columnDefinition = "CHAR(5)")
     @Convert(converter = LocalTimeStringConverter.class)
     private LocalTime endTime;
 

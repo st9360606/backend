@@ -2,15 +2,16 @@ package com.caloshape.backend.workout.web;
 
 import com.caloshape.backend.BackendApplication;
 import com.caloshape.backend.auth.security.AuthContext;
+import com.caloshape.backend.testsupport.db.MySqlContainerBaseTest;
 import com.caloshape.backend.workout.nlp.DurationParser;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -18,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javax.sql.DataSource;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -25,33 +28,50 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(classes = BackendApplication.class)
 @AutoConfigureMockMvc(addFilters = false)
-@ActiveProfiles("dev")
 @TestPropertySource(properties = {
         "app.email.enabled=false",
         "spring.mail.test-connection=false",
         "server.error.include-message=always",
         "server.error.include-exception=true"
 })
-@TestInstance(Lifecycle.PER_CLASS)
-class WorkoutEstimateMultiLocaleApiIT {
+class WorkoutEstimateMultiLocaleApiIT extends MySqlContainerBaseTest {
 
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
+    @Autowired DataSource dataSource;
 
     @MockitoBean
     AuthContext authContext;
 
     private static final Long TEST_UID = 1L;
+    private static final AtomicBoolean SEEDED = new AtomicBoolean(false);
 
-    @BeforeAll
+    @BeforeEach
     void seedAndAssert() {
+        if (SEEDED.get()) {
+            return;
+        }
+        // Hibernate's create-drop schema does not copy SQL DEFAULT clauses from
+        // entity field initializers, while the production seed files rely on them.
+        jdbc.execute("ALTER TABLE workout_dictionary MODIFY created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
+        jdbc.execute("ALTER TABLE workout_alias MODIFY created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
+        // Replace the five-row generic test seed so the production seed's
+        // stable explicit IDs cannot collide with different canonical keys.
+        jdbc.update("DELETE FROM workout_alias");
+        jdbc.update("DELETE FROM workout_dictionary");
+        ResourceDatabasePopulator workoutSeed = new ResourceDatabasePopulator(
+                new ClassPathResource("sql/caloshape/workout_dictionary.sql"),
+                new ClassPathResource("sql/caloshape/workout_alias.sql")
+        );
+        workoutSeed.execute(dataSource);
+
         String db = jdbc.queryForObject("select database()", String.class);
         System.out.println("[WorkoutEstimateMultiLocaleApiIT] database() = " + db);
 
         // ① users：簡單 upsert（不做任何子查詢；不動 email）
         jdbc.update("""
-            INSERT INTO users (id, email, created_at, updated_at)
-            VALUES (?, 'test+u1@example.local', NOW(), NOW())
+            INSERT INTO users (id, email, status, created_at, updated_at)
+            VALUES (?, 'test+u1@example.local', 'ACTIVE', NOW(), NOW())
             ON DUPLICATE KEY UPDATE 
               updated_at = NOW()
         """, TEST_UID);
@@ -61,8 +81,16 @@ class WorkoutEstimateMultiLocaleApiIT {
         //             +[UPDATE 區]  kg,   lbs,  locale, tz
         jdbc.update("""
             INSERT INTO user_profiles
-              (user_id, weight_kg, weight_lbs, locale, timezone, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+              (user_id, weight_kg, weight_lbs, locale, timezone,
+               daily_step_goal, unit_preference, daily_workout_goal_kcal,
+               kcal, carbs_g, protein_g, fat_g, fiber_g, sugar_g, sodium_mg,
+               water_ml, water_mode, bmi, bmi_class, plan_mode, calc_version,
+               created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?,
+                    10000, 'KG', 450,
+                    0, 0, 0, 0, 35, 0, 2300,
+                    0, 'AUTO', 0, 'UNKNOWN', 'AUTO', 'healthcalc_v1',
+                    NOW(), NOW())
             ON DUPLICATE KEY UPDATE
               weight_kg  = COALESCE(user_profiles.weight_kg,  ?),
               weight_lbs = COALESCE(user_profiles.weight_lbs, ?),
@@ -71,6 +99,24 @@ class WorkoutEstimateMultiLocaleApiIT {
               updated_at = NOW()
         """, TEST_UID, 64.80, 143, "en", "Asia/Taipei",
                 64.80, 143, "en", "Asia/Taipei");
+
+        jdbc.update("""
+            INSERT INTO user_entitlements
+              (id, user_id, entitlement_type, status, valid_from_utc, valid_to_utc,
+               source, product_id, subscription_state, payment_state,
+               created_at_utc, updated_at_utc)
+            VALUES ('00000000-0000-0000-0000-000000000102', ?, 'YEARLY', 'ACTIVE',
+                    DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY),
+                    DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 DAY),
+                    'INTERNAL', 'workout-multilocale-test', 'TEST_ACTIVE', 'OK',
+                    UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+            ON DUPLICATE KEY UPDATE
+              valid_to_utc = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 DAY),
+              status = 'ACTIVE',
+              payment_state = 'OK',
+              updated_at_utc = UTC_TIMESTAMP(6)
+        """, TEST_UID);
+        SEEDED.set(true);
     }
 
     @BeforeEach

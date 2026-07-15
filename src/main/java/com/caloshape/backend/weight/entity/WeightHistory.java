@@ -34,7 +34,7 @@ public class WeightHistory {
     private String timezone;
 
     /** 可為 null */
-    @Column(name="photo_url")
+    @Column(name="photo_url", columnDefinition = "TEXT")
     private String photoUrl;
 
     @Column(name="created_at", nullable=false)

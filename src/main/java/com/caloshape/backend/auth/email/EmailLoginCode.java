@@ -15,7 +15,7 @@ public class EmailLoginCode {
     private Long id;
 
     private String email;
-    @Column(name = "code_hash", length = 64, nullable = false)
+    @Column(name = "code_hash", length = 64, nullable = false, columnDefinition = "CHAR(64)")
     private String codeHash;
 
     private String purpose; // "LOGIN"

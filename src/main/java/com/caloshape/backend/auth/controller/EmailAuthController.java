@@ -6,6 +6,7 @@ import com.caloshape.backend.auth.dto.StartResponse;
 import com.caloshape.backend.auth.dto.VerifyRequest;
 import com.caloshape.backend.auth.service.EmailAuthService; // ✅ 確認這個 import
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,15 +23,19 @@ public class EmailAuthController {
     }
 
     @PostMapping("/start")
-    public ResponseEntity<StartResponse> start(@RequestBody StartRequest req, HttpServletRequest http) {
+    public ResponseEntity<StartResponse> start(
+            @Valid @RequestBody StartRequest req,
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId,
+            HttpServletRequest http
+    ) {
         String ip = clientIp(http);
         String ua = Optional.ofNullable(http.getHeader("User-Agent")).orElse("");
-        return ResponseEntity.ok(service.start(req, ip, ua));
+        return ResponseEntity.ok(service.start(req, deviceId, ip, ua));
     }
 
     @PostMapping("/verify")
     public ResponseEntity<AuthResponse> verify(
-            @RequestBody VerifyRequest req,
+            @Valid @RequestBody VerifyRequest req,
             @RequestHeader(value = "X-Device-Id", required = false) String deviceId,
             HttpServletRequest http
     ) {

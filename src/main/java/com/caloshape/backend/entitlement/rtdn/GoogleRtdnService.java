@@ -1,6 +1,7 @@
 package com.caloshape.backend.entitlement.rtdn;
 
 import com.caloshape.backend.entitlement.service.EntitlementSyncService;
+import com.caloshape.backend.entitlement.service.GooglePlayVerifierProperties;
 import com.caloshape.backend.referral.service.ReferralBillingBridgeService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,13 +33,14 @@ public class GoogleRtdnService {
     private static final int SUBSCRIPTION_PENDING_PURCHASE_CANCELED = 20;
 
     private final ObjectMapper objectMapper;
+    private final GooglePlayVerifierProperties googlePlayProperties;
     private final ReferralBillingBridgeService referralBillingBridgeService;
     private final EntitlementSyncService entitlementSyncService;
 
     public void handlePubSubMessage(String base64Data, String messageId) {
         if (base64Data == null || base64Data.isBlank()) {
             log.warn("rtdn_empty_data messageId={}", messageId);
-            return;
+            throw new IllegalArgumentException("RTDN_EMPTY_DATA");
         }
 
         try {
@@ -48,6 +50,7 @@ public class GoogleRtdnService {
             );
 
             JsonNode root = objectMapper.readTree(json);
+            requireExpectedPackage(root, messageId);
             Instant eventTime = resolveEventTime(root);
 
             if (root.hasNonNull("subscriptionNotification")) {
@@ -73,10 +76,26 @@ public class GoogleRtdnService {
                 return;
             }
 
-            log.info("rtdn_ignored messageId={} payload={}", messageId, json);
+            log.info("rtdn_ignored messageId={}", messageId);
         } catch (Exception ex) {
-            log.warn("rtdn_handle_failed messageId={} error={}", messageId, ex.toString());
+            log.warn(
+                    "rtdn_handle_failed messageId={} errorType={}",
+                    messageId,
+                    ex.getClass().getSimpleName()
+            );
             throw new IllegalArgumentException("RTDN_HANDLE_FAILED", ex);
+        }
+    }
+
+    private void requireExpectedPackage(JsonNode root, String messageId) {
+        String expectedPackage = googlePlayProperties.getPackageName();
+        String actualPackage = root.path("packageName").asText(null);
+        if (expectedPackage == null
+                || expectedPackage.isBlank()
+                || actualPackage == null
+                || !expectedPackage.equals(actualPackage)) {
+            log.warn("rtdn_package_mismatch messageId={}", messageId);
+            throw new IllegalArgumentException("RTDN_PACKAGE_MISMATCH");
         }
     }
 

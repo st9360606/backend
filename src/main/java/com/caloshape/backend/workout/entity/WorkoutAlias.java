@@ -22,10 +22,14 @@ public class WorkoutAlias {
     @Column(name="lang_tag", nullable=false, length = 16)
     private String langTag;
 
-    @Column(name="phrase_lower", nullable=false, length = 256)
+    @Column(name="phrase_lower", nullable=false, length = 191)
     private String phraseLower;
 
-    @Column(name="status", nullable=false, length = 16) // "APPROVED","PENDING","REJECTED"
+    @Column(
+            name = "status",
+            nullable = false,
+            columnDefinition = "ENUM('APPROVED','PENDING','REJECTED')"
+    )
     private String status;
 
     @Column(name="created_by_user")
@@ -41,7 +45,7 @@ public class WorkoutAlias {
     @Column(name="distinct_users")
     private Integer distinctUsers; // 最近窗口內人數
 
-    @Column(name="confidence_median")
+    @Column(name="confidence_median", columnDefinition = "DECIMAL(6,4)")
     private Double confidenceMedian; // 中位數分數 0..1
 
     @Column(name="last_seen")

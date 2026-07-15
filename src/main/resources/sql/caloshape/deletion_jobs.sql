@@ -1,5 +1,5 @@
 -- === deletion_jobs（刪圖/刪 payload 任務）===
-DROP TABLE IF EXISTS deletion_jobs;
+-- Production migrations must never drop this table; cleanup code owns row deletion.
 
 CREATE TABLE IF NOT EXISTS deletion_jobs
 (

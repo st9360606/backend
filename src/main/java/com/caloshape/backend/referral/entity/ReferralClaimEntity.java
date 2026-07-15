@@ -68,7 +68,7 @@ public class ReferralClaimEntity {
     @Column(name = "auto_renew_status", length = 16)
     private String autoRenewStatus;
 
-    @Column(name = "purchase_token_hash", length = 64)
+    @Column(name = "purchase_token_hash", length = 64, columnDefinition = "CHAR(64)")
     private String purchaseTokenHash;
 
     @Column(name = "risk_score")

@@ -3,6 +3,7 @@ package com.caloshape.backend.foodlog.integration;
 
 import com.caloshape.backend.foodlog.job.worker.FoodLogTaskWorker;
 import com.caloshape.backend.testsupport.config.TestAuthConfig;
+import com.caloshape.backend.testsupport.db.MySqlContainerBaseTest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -27,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc(addFilters = false) // ✅ 先讓 H-01 不被 Security 擋
 @Import(TestAuthConfig.class)             // ✅ 固定 auth.requireUserId() = 1L
-public class FoodLogFlowIT {
+public class FoodLogFlowIT extends MySqlContainerBaseTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper om;

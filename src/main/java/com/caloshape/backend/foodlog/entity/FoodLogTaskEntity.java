@@ -18,10 +18,10 @@ public class FoodLogTaskEntity {
     public enum TaskStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED }
 
     @Id
-    @Column(length = 36, nullable = false)
+    @Column(length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String id;
 
-    @Column(name = "food_log_id", length = 36, nullable = false)
+    @Column(name = "food_log_id", length = 36, nullable = false, columnDefinition = "CHAR(36)")
     private String foodLogId;
 
     @Enumerated(EnumType.STRING)

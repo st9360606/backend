@@ -47,6 +47,8 @@ server:
   port: 0
 
 app:
+  runtime:
+    profile-marker: test
   ai:
     modelTiers:
       MODEL_TIER_HIGH:
@@ -67,6 +69,14 @@ app:
     web-client-id: "test-dummy"
     play:
       enabled: false
+      # Deterministic test-only AES-256 key. Integration tests that persist a
+      # Google Play token must never depend on a developer machine secret.
+      purchase-token-encryption-key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      rtdn:
+        oidc-enabled: false
+        oidc-audience: ""
+        oidc-service-account-email: ""
+        legacy-internal-token-enabled: true
 
   foodlog:
     provider: "STUB"       # ✅ 測試預設 STUB，避免被 GEMINI 汙染
