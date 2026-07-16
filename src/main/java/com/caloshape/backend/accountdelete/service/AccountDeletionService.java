@@ -16,10 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
-import java.util.HexFormat;
 
 @RequiredArgsConstructor
 @Service
@@ -33,6 +30,7 @@ public class AccountDeletionService {
     private final AuthTokenRepo authTokenRepo;
     private final UserEntitlementRepository entitlementRepository;
     private final JdbcTemplate jdbc;
+    private final AccountDeletionPseudonymizer pseudonymizer;
 
     @Transactional(readOnly = true)
     public AccountDeletionPreviewResponse getDeletionPreview(Long userId) {
@@ -90,7 +88,7 @@ public class AccountDeletionService {
 
         String email = u.getEmail();
         if (email != null && !email.isBlank()) {
-            u.setDeletedEmailHash(sha256Hex(email.toLowerCase()));
+            u.setDeletedEmailHash(pseudonymizer.emailHash(email.toLowerCase()));
             deleteEmailLoginCodes(email);
         }
 
@@ -151,13 +149,4 @@ public class AccountDeletionService {
         jdbc.update("DELETE FROM email_login_codes WHERE email = ?", email.toLowerCase());
     }
 
-    private static String sha256Hex(String s) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] out = md.digest(s.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(out);
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }

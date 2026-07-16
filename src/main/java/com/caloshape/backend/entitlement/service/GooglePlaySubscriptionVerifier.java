@@ -41,7 +41,7 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
             return inactive(
                     v2.getSubscriptionState(),
                     v2.getAcknowledgementState(),
-                    v2.getLatestOrderId(),
+                    resolveLatestOrderId(v2, null),
                     v2.getLinkedPurchaseToken(),
                     v2.getTestPurchase() != null,
                     isPendingState(v2.getSubscriptionState())
@@ -57,7 +57,7 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
             return inactive(
                     v2.getSubscriptionState(),
                     v2.getAcknowledgementState(),
-                    v2.getLatestOrderId(),
+                    resolveLatestOrderId(v2, null),
                     v2.getLinkedPurchaseToken(),
                     v2.getTestPurchase() != null,
                     isPendingState(v2.getSubscriptionState())
@@ -84,7 +84,7 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
                 v2.getAcknowledgementState(),
                 autoRenewEnabled,
                 offerPhaseCode,
-                v2.getLatestOrderId(),
+                resolveLatestOrderId(v2, best),
                 v2.getLinkedPurchaseToken(),
                 v2.getTestPurchase() != null,
                 isPendingState(state)
@@ -184,6 +184,21 @@ public class GooglePlaySubscriptionVerifier implements SubscriptionVerifier {
     private static boolean isPendingState(String state) {
         return "SUBSCRIPTION_STATE_PENDING".equals(state)
                 || "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED".equals(state);
+    }
+
+    static String resolveLatestOrderId(
+            SubscriptionPurchaseV2 purchase,
+            SubscriptionPurchaseLineItem lineItem
+    ) {
+        if (lineItem != null) {
+            String latestSuccessfulOrderId = lineItem.getLatestSuccessfulOrderId();
+            if (latestSuccessfulOrderId != null && !latestSuccessfulOrderId.isBlank()) {
+                return latestSuccessfulOrderId;
+            }
+        }
+
+        Object legacyOrderId = readDynamicField(purchase, "latestOrderId");
+        return legacyOrderId instanceof String orderId && !orderId.isBlank() ? orderId : null;
     }
 
     /**

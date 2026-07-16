@@ -12,12 +12,13 @@ import com.caloshape.backend.foodlog.service.ImageBlobService;
 import com.caloshape.backend.users.user.entity.User;
 import com.caloshape.backend.users.user.repo.UserRepo;
 import com.caloshape.backend.accountdelete.service.UserDataPurgeDao;
+import com.caloshape.backend.accountdelete.service.AccountDeletionPseudonymizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -35,26 +36,51 @@ public class AccountDeletionWorker {
     private final UserRepo userRepo;
 
     private final UserDataPurgeDao purgeDao;
+    private final AccountDeletionPseudonymizer pseudonymizer;
+    private final TransactionTemplate transactionTemplate;
 
     private final FoodLogRepository foodLogRepo;
     private final DeletionJobRepository deletionJobRepo;
     private final ImageBlobService blobService;
 
     @Scheduled(fixedDelay = 30_000, initialDelay = 10_000)
-    @Transactional
     public void runOnce() {
         if (!props.isEnabled()) return;
 
         Instant now = Instant.now();
-        List<AccountDeletionRequestEntity> reqs = reqRepo.claimRunnableForUpdate(now, props.getClaimLimit());
-        if (reqs.isEmpty()) return;
+        List<String> requestIds = transactionTemplate.execute(status -> {
+            List<AccountDeletionRequestEntity> claimed =
+                    reqRepo.claimRunnableForUpdate(now, props.getClaimLimit());
+            for (AccountDeletionRequestEntity req : claimed) {
+                req.setReqStatus("RUNNING");
+                req.setStartedAtUtc(req.getStartedAtUtc() == null ? now : req.getStartedAtUtc());
+                req.setAttempts(req.getAttempts() + 1);
+                req.setLastError(null);
+                req.setNextRetryAtUtc(now.plus(props.getCheckInterval()));
+            }
+            reqRepo.saveAll(claimed);
+            return claimed.stream().map(AccountDeletionRequestEntity::getId).toList();
+        });
+        if (requestIds == null || requestIds.isEmpty()) return;
 
-        for (AccountDeletionRequestEntity req : reqs) {
+        for (String requestId : requestIds) {
             try {
-                processOne(req, now);
+                transactionTemplate.executeWithoutResult(status -> {
+                    AccountDeletionRequestEntity req = reqRepo.findByIdForUpdate(requestId)
+                            .orElseThrow(() -> new IllegalStateException("ACCOUNT_DELETION_REQUEST_NOT_FOUND"));
+                    processOne(req, now);
+                });
             } catch (Exception e) {
-                log.warn("account deletion worker failed. reqId={} userId={}", req.getId(), req.getUserId(), e);
-                markFailed(req, now, e);
+                log.warn(
+                        "account deletion worker failed. reqId={} errorType={}",
+                        requestId,
+                        e.getClass().getSimpleName()
+                );
+                transactionTemplate.executeWithoutResult(status -> {
+                    AccountDeletionRequestEntity req = reqRepo.findByIdForUpdate(requestId)
+                            .orElseThrow(() -> new IllegalStateException("ACCOUNT_DELETION_REQUEST_NOT_FOUND"));
+                    markFailed(req, now, e);
+                });
             }
         }
     }
@@ -63,15 +89,6 @@ public class AccountDeletionWorker {
         Long userId = req.getUserId();
 
         // 0) 標記 RUNNING
-        if (!"RUNNING".equalsIgnoreCase(req.getReqStatus())) {
-            req.setReqStatus("RUNNING");
-            req.setStartedAtUtc(req.getStartedAtUtc() == null ? now : req.getStartedAtUtc());
-        }
-        req.setAttempts(req.getAttempts() + 1);
-        req.setLastError(null);
-        req.setNextRetryAtUtc(now.plus(props.getCheckInterval()));
-        reqRepo.save(req);
-
         // 1) 分批刪：與 food 無關（每次少量，跑多輪）
         int limit = props.getPerTableDeleteLimit();
 
@@ -130,6 +147,11 @@ public class AccountDeletionWorker {
                 u.setStatus("DELETED");
                 userRepo.save(u);
             }
+
+            purgeDao.pseudonymizeRetainedCommercialData(
+                    userId,
+                    pseudonymizer.userId(userId)
+            );
 
             req.setReqStatus("DONE");
             req.setCompletedAtUtc(now);
@@ -223,7 +245,7 @@ public class AccountDeletionWorker {
 
     private void markFailed(AccountDeletionRequestEntity req, Instant now, Exception e) {
         req.setReqStatus("FAILED");
-        req.setLastError((e.getMessage() == null || e.getMessage().isBlank()) ? e.getClass().getSimpleName() : e.getMessage());
+        req.setLastError(e.getClass().getSimpleName());
 
         Duration base = props.getBaseRetryDelay();
         int attempts = Math.max(1, req.getAttempts());

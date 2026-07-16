@@ -480,6 +480,9 @@ public class EntitlementSyncService {
         }
 
         User oldOwner = userRepo.findById(existingEntitlement.getUserId()).orElse(null);
+        if (existingEntitlement.getUserId() != null && existingEntitlement.getUserId() < 0) {
+            return true;
+        }
         if (oldOwner == null || oldOwner.getStatus() == null) {
             return false;
         }

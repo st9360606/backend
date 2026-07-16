@@ -20,6 +20,10 @@ public interface AccountDeletionRequestRepository extends JpaRepository<AccountD
     @Query("select r from AccountDeletionRequestEntity r where r.userId = :userId")
     Optional<AccountDeletionRequestEntity> findByUserIdForUpdate(@Param("userId") Long userId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from AccountDeletionRequestEntity r where r.id = :id")
+    Optional<AccountDeletionRequestEntity> findByIdForUpdate(@Param("id") String id);
+
     @Query(value = """
               SELECT *
               FROM account_deletion_requests

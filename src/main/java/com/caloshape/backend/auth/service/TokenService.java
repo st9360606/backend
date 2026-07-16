@@ -35,7 +35,7 @@ public class TokenService {
         var now = Instant.now();
 
         var access = new AuthToken();
-        access.setToken(at);
+        access.setToken(AuthTokenHash.sha256(at));
         access.setUser(user);
         access.setType(AuthToken.TokenType.ACCESS);
         access.setExpiresAt(now.plusSeconds(accessTtlSeconds));
@@ -43,7 +43,7 @@ public class TokenService {
         repo.save(access);
 
         var refresh = new AuthToken();
-        refresh.setToken(rt);
+        refresh.setToken(AuthTokenHash.sha256(rt));
         refresh.setUser(user);
         refresh.setType(AuthToken.TokenType.REFRESH);
         refresh.setExpiresAt(now.plusSeconds(refreshTtlSeconds));
@@ -55,7 +55,7 @@ public class TokenService {
 
     @Transactional
     public AuthPair rotateRefresh(String oldRefreshToken, String deviceId, String ip, String ua) {
-        var tk = repo.findByToken(oldRefreshToken)
+        var tk = repo.findByTokenForUpdate(AuthTokenHash.sha256(oldRefreshToken))
                 .orElseThrow(() -> new IllegalArgumentException("refresh token not found"));
         if (tk.isRevoked() || tk.getType() != AuthToken.TokenType.REFRESH
                 || tk.getExpiresAt().isBefore(Instant.now())) {
@@ -64,12 +64,12 @@ public class TokenService {
         // 旋轉：撤銷舊 RT，發新 AT/RT
         tk.setRevoked(true);
         var pair = issue(tk.getUser(), deviceId, ip, ua);
-        tk.setReplacedBy(pair.refreshToken());
+        tk.setReplacedBy(AuthTokenHash.sha256(pair.refreshToken()));
         return pair;
     }
 
     public User validateAccess(String token) {
-        var tk = repo.findByToken(token).orElse(null);
+        var tk = repo.findByToken(AuthTokenHash.sha256(token)).orElse(null);
         if (tk == null || tk.isRevoked() || tk.getType() != AuthToken.TokenType.ACCESS) return null;
         if (tk.getExpiresAt().isBefore(Instant.now())) return null;
         return tk.getUser();
@@ -77,7 +77,11 @@ public class TokenService {
 
     @Transactional
     public void revokeToken(String token) {
-        repo.findByToken(token).ifPresent(t -> { t.setRevoked(true); repo.save(t); });
+        repo.findByTokenForUpdate(AuthTokenHash.sha256(token))
+                .ifPresent(t -> {
+                    t.setRevoked(true);
+                    repo.save(t);
+                });
     }
 
     public record AuthPair(String accessToken, String refreshToken) {}

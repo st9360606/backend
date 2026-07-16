@@ -47,6 +47,8 @@ server:
   port: 0
 
 app:
+  account-deletion:
+    pseudonym-key: "test-account-deletion-pseudonym-key-32-chars"
   runtime:
     profile-marker: test
   ai:

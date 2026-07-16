@@ -19,6 +19,10 @@ public class GooglePlayAcknowledgeRetryWorker {
     private final UserEntitlementRepository entitlementRepository;
     private final EntitlementSyncService entitlementSyncService;
     private final PurchaseTokenCrypto purchaseTokenCrypto;
+    private final EntitlementWorkerLease workerLease;
+
+    @Value("${app.entitlement.google-play-ack-retry.lease-ttl:PT15M}")
+    private Duration leaseTtl;
 
     @Value("${app.entitlement.google-play-ack-retry.stale-after:PT10M}")
     private Duration staleAfter;
@@ -32,6 +36,21 @@ public class GooglePlayAcknowledgeRetryWorker {
             log.warn("google_play_ack_retry_skipped token_crypto_disabled=true");
             return;
         }
+
+        EntitlementWorkerLease.Lease lease = workerLease.tryAcquire("google-play-ack-retry", leaseTtl);
+        if (lease == null) {
+            log.info("google_play_ack_retry_skipped lease_not_acquired=true");
+            return;
+        }
+
+        try {
+            retryPendingAcknowledgementsWithLease();
+        } finally {
+            workerLease.release(lease);
+        }
+    }
+
+    private void retryPendingAcknowledgementsWithLease() {
 
         Instant now = Instant.now();
         Instant updatedBefore = now.minus(staleAfter);
@@ -49,7 +68,7 @@ public class GooglePlayAcknowledgeRetryWorker {
                         "google_play_ack_retry_failed entitlementId={} userId={} error={}",
                         row.getId(),
                         row.getUserId(),
-                        ex.toString()
+                        ex.getClass().getSimpleName()
                 );
             }
         }

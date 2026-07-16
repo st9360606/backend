@@ -7,6 +7,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.userdetails.*;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -29,9 +30,12 @@ public class ActuatorSecurityConfig {
             @Value("${app.actuator.user:actuator}") String user,
             @Value("${app.actuator.pass:change-me}") String pass
     ) {
+        String encodedPassword = PasswordEncoderFactories
+                .createDelegatingPasswordEncoder()
+                .encode(pass);
         return new InMemoryUserDetailsManager(
                 User.withUsername(user)
-                        .password("{noop}" + pass) // MVP：先 noop；上線可改成 bcrypt
+                        .password(encodedPassword)
                         .roles("ACTUATOR")
                         .build()
         );

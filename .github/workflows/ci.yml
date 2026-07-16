@@ -31,10 +31,10 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Run tests
+      - name: Run unit and integration verification
         env:
           GEMINI_API_KEY: "dummy"
           APP_FEATURES_DEV_DEBUG_ENDPOINTS: "false"
           APP_FEATURES_DEV_IMAGE_ENDPOINT: "false"
           TESTCONTAINERS_RYUK_DISABLED: "false"
-        run: mvn -q test
+        run: mvn -q verify

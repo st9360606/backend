@@ -20,6 +20,10 @@ public class GooglePlayEntitlementReverifyWorker {
     private final UserEntitlementRepository entitlementRepository;
     private final EntitlementSyncService entitlementSyncService;
     private final PurchaseTokenCrypto purchaseTokenCrypto;
+    private final EntitlementWorkerLease workerLease;
+
+    @Value("${app.entitlement.google-play-reverify.lease-ttl:PT45M}")
+    private Duration leaseTtl;
 
     @Value("${app.entitlement.google-play-reverify.stale-after:PT6H}")
     private Duration staleAfter;
@@ -37,6 +41,21 @@ public class GooglePlayEntitlementReverifyWorker {
             log.warn("google_play_reverify_skipped token_crypto_disabled=true");
             return;
         }
+
+        EntitlementWorkerLease.Lease lease = workerLease.tryAcquire("google-play-reverify", leaseTtl);
+        if (lease == null) {
+            log.info("google_play_reverify_skipped lease_not_acquired=true");
+            return;
+        }
+
+        try {
+            reverifyActiveGooglePlayEntitlementsWithLease();
+        } finally {
+            workerLease.release(lease);
+        }
+    }
+
+    private void reverifyActiveGooglePlayEntitlementsWithLease() {
 
         Instant now = Instant.now();
         Instant verifiedBefore = now.minus(staleAfter);
@@ -70,7 +89,7 @@ public class GooglePlayEntitlementReverifyWorker {
                         e.getId(),
                         e.getUserId(),
                         e.getPurchaseTokenHash(),
-                        ex.toString()
+                        ex.getClass().getSimpleName()
                 );
             }
         }

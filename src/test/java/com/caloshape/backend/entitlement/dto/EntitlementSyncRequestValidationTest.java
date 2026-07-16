@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,7 +55,7 @@ class EntitlementSyncRequestValidationTest {
 
     @Test
     void rejectsNullBlankAndOversizedPurchaseFields() {
-        var request = new EntitlementSyncRequest(List.of(
+        var request = new EntitlementSyncRequest(Arrays.asList(
                 null,
                 new EntitlementSyncRequest.PurchaseTokenPayload(" ", " "),
                 new EntitlementSyncRequest.PurchaseTokenPayload("p".repeat(201), "t".repeat(8193))

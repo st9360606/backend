@@ -32,6 +32,9 @@ class GooglePlayAcknowledgeRetryWorkerScenarioTest {
     @Mock
     private PurchaseTokenCrypto purchaseTokenCrypto;
 
+    @Mock
+    private EntitlementWorkerLease workerLease;
+
     private GooglePlayAcknowledgeRetryWorker worker;
 
     @BeforeEach
@@ -39,10 +42,12 @@ class GooglePlayAcknowledgeRetryWorkerScenarioTest {
         worker = new GooglePlayAcknowledgeRetryWorker(
                 entitlementRepository,
                 entitlementSyncService,
-                purchaseTokenCrypto
+                purchaseTokenCrypto,
+                workerLease
         );
         ReflectionTestUtils.setField(worker, "staleAfter", Duration.ofMinutes(10));
         ReflectionTestUtils.setField(worker, "batchSize", 50);
+        ReflectionTestUtils.setField(worker, "leaseTtl", Duration.ofMinutes(15));
     }
 
     @Test
@@ -58,6 +63,9 @@ class GooglePlayAcknowledgeRetryWorkerScenarioTest {
     @Test
     void retryPendingAcknowledgements_shouldRetryRowsReturnedByRepository() {
         when(purchaseTokenCrypto.enabled()).thenReturn(true);
+        when(workerLease.tryAcquire(any(), any())).thenReturn(
+                new EntitlementWorkerLease.Lease("lease-key", "owner")
+        );
 
         UserEntitlementEntity first = row("ent-1", 101L);
         UserEntitlementEntity second = row("ent-2", 102L);
@@ -73,6 +81,9 @@ class GooglePlayAcknowledgeRetryWorkerScenarioTest {
     @Test
     void retryPendingAcknowledgements_shouldContinueWhenOneRowFails() {
         when(purchaseTokenCrypto.enabled()).thenReturn(true);
+        when(workerLease.tryAcquire(any(), any())).thenReturn(
+                new EntitlementWorkerLease.Lease("lease-key", "owner")
+        );
 
         UserEntitlementEntity first = row("ent-1", 101L);
         UserEntitlementEntity second = row("ent-2", 102L);

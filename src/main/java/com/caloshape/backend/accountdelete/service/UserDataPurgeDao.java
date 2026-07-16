@@ -125,5 +125,35 @@ public class UserDataPurgeDao {
         return !r.isEmpty();
     }
 
+    public void pseudonymizeRetainedCommercialData(Long userId, long pseudonymousUserId) {
+        jdbc.update("""
+                UPDATE referral_claims
+                   SET inviter_user_id = CASE WHEN inviter_user_id = ? THEN ? ELSE inviter_user_id END,
+                       invitee_user_id = CASE WHEN invitee_user_id = ? THEN ? ELSE invitee_user_id END
+                 WHERE inviter_user_id = ? OR invitee_user_id = ?
+                """, userId, pseudonymousUserId, userId, pseudonymousUserId, userId, userId);
+        jdbc.update(
+                "UPDATE referral_case_snapshot SET inviter_user_id=? WHERE inviter_user_id=?",
+                pseudonymousUserId,
+                userId
+        );
+        jdbc.update(
+                "UPDATE membership_reward_ledger SET user_id=? WHERE user_id=?",
+                pseudonymousUserId,
+                userId
+        );
+        jdbc.update("""
+                UPDATE entitlement_transfer_audit
+                   SET old_user_id = CASE WHEN old_user_id = ? THEN ? ELSE old_user_id END,
+                       new_user_id = CASE WHEN new_user_id = ? THEN ? ELSE new_user_id END
+                 WHERE old_user_id = ? OR new_user_id = ?
+                """, userId, pseudonymousUserId, userId, pseudonymousUserId, userId, userId);
+        jdbc.update(
+                "UPDATE user_entitlements SET user_id=? WHERE user_id=?",
+                pseudonymousUserId,
+                userId
+        );
+    }
+
 
 }
