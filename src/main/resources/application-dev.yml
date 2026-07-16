@@ -162,7 +162,7 @@ app:
       enabled: true
       package-name: "com.caloshape.app"
       service-account-json-path: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH:}"  # dev 可用
-      service-account-json-base64: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64:}"
+      service-account-json-base64: "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64:}" #Railway 使用的
       dev-fake-tokens-enabled: true  # prod 不可用
       purchase-token-encryption-key: "${GOOGLE_PLAY_PURCHASE_TOKEN_AES_KEY:}"
       rtdn:
