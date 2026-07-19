@@ -2,6 +2,7 @@ package com.caloshape.backend.auth.security;
 
 import com.caloshape.backend.auth.entity.AuthToken;
 import com.caloshape.backend.auth.repo.AuthTokenRepo;
+import com.caloshape.backend.auth.service.AuthTokenHash;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -80,7 +81,7 @@ public class AccessTokenFilter extends OncePerRequestFilter {
             return;
         }
 
-        Optional<AuthToken> found = tokens.findByToken(raw);
+        Optional<AuthToken> found = tokens.findByToken(AuthTokenHash.sha256(raw));
         if (found.isEmpty()) {
             unauthorized(res, "Invalid or expired access token");
             return;
@@ -88,7 +89,8 @@ public class AccessTokenFilter extends OncePerRequestFilter {
 
         AuthToken at = found.get();
 
-        boolean active = !at.isRevoked()
+        boolean active = at.getType() == AuthToken.TokenType.ACCESS
+                && !at.isRevoked()
                 && at.getExpiresAt() != null
                 && at.getExpiresAt().isAfter(Instant.now());
 

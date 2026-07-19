@@ -257,6 +257,15 @@ app:
         delete-empty-dirs: false    # sha256 通常是平面檔案目錄，先關閉即可
 
   retention:
+    commercial:
+      enabled: true
+      batch-size: 500
+      encrypted-purchase-token-retention: "P180D"
+      billing-audit-retention-years: 5
+      referral-reward-retention-years: 5
+      standard-risk-retention-months: 24
+      denied-risk-retention-years: 5
+      deletion-request-retention-years: 3
     foodlog:
       enabled: true
       keep-original-image: "PT72H"           # 一般原始圖片 3 天

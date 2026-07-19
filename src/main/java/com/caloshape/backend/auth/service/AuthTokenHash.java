@@ -5,11 +5,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
-final class AuthTokenHash {
+public final class AuthTokenHash {
 
     private AuthTokenHash() {}
 
-    static String sha256(String rawToken) {
+    public static String sha256(String rawToken) {
         if (rawToken == null || rawToken.isBlank()) return null;
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")

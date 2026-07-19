@@ -138,7 +138,14 @@ public class UserDataPurgeDao {
                 userId
         );
         jdbc.update(
-                "UPDATE membership_reward_ledger SET user_id=? WHERE user_id=?",
+                """
+                UPDATE membership_reward_ledger
+                   SET user_id=?,
+                       google_defer_request_json=NULL,
+                       google_defer_response_json=NULL,
+                       error_message=NULL
+                 WHERE user_id=?
+                """,
                 pseudonymousUserId,
                 userId
         );
@@ -150,6 +157,11 @@ public class UserDataPurgeDao {
                 """, userId, pseudonymousUserId, userId, pseudonymousUserId, userId, userId);
         jdbc.update(
                 "UPDATE user_entitlements SET user_id=? WHERE user_id=?",
+                pseudonymousUserId,
+                userId
+        );
+        jdbc.update(
+                "UPDATE account_deletion_requests SET user_id=? WHERE user_id=?",
                 pseudonymousUserId,
                 userId
         );

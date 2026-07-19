@@ -148,10 +148,11 @@ public class AccountDeletionWorker {
                 userRepo.save(u);
             }
 
-            purgeDao.pseudonymizeRetainedCommercialData(
-                    userId,
-                    pseudonymizer.userId(userId)
-            );
+            long pseudonymousUserId = pseudonymizer.userId(userId);
+            purgeDao.pseudonymizeRetainedCommercialData(userId, pseudonymousUserId);
+            // The native update above does not update this managed entity. Keep
+            // it in sync so reqRepo.save(req) cannot restore the original ID.
+            req.setUserId(pseudonymousUserId);
 
             req.setReqStatus("DONE");
             req.setCompletedAtUtc(now);
