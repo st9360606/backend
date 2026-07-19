@@ -60,3 +60,24 @@
 - Data transmitted over HTTPS
 - Access control on backend services
 - Retention & deletion jobs to minimize storage
+
+---
+
+## E) Commercial, referral and deletion-request retention
+
+The following records are minimized or pseudonymized at account deletion and
+are retained only for the stated operational, financial, fraud-prevention or
+compliance purpose. They are not anonymous data.
+
+| Record | Account-deletion treatment | Retention limit |
+| --- | --- | --- |
+| Google Play entitlement audit | Pseudonymize account identifier; retain product, state, dates and purchase-token hash | Five calendar years after the terminal subscription event |
+| Encrypted raw Google Play purchase token | Keep only for re-verification, acknowledgement and refund handling | Terminal subscription event plus 180 days |
+| Referral reward ledger and terminal referral claim | Pseudonymize deleted party; remove request/response payloads and free-text error | Five calendar years after the terminal outcome |
+| Routine referral risk signal | Keep hashed identifiers only | 24 months |
+| Denied referral risk signal | Keep hashed identifiers only | Five calendar years |
+| Completed account-deletion request | Pseudonymize account identifier | Three calendar years after completion |
+
+The backend retention worker runs daily in UTC, uses bounded batches, and does
+not delete active subscriptions or retryable referral rewards. Legal holds are
+handled only for a documented, approved and time-bounded obligation.
