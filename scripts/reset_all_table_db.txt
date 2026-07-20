@@ -1,0 +1,19 @@
+已建立一鍵本機重建腳本：Reset-LocalCaloshapeDatabase.ps1
+
+在 C:\Users\wistronits\Desktop\Projects\calai\backend\backend 開啟 PowerShell，
+先停止正在跑的本機 Backend，然後執行：
+.\scripts\Reset-LocalCaloshapeDatabase.ps1 -Force
+
+
+若 PowerShell 擋住執行政策，改用：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Reset-LocalCaloshapeDatabase.ps1 -Force
+
+
+它會：
+確認 Docker Desktop 正常、且只找到本機 3307 的 MySQL。
+永久刪除本機 MySQL 的 caloshape database。
+重建空白的 caloshape database。
+啟動 Dev Backend。
+由 Flyway 執行 Java V1、V2 migration，依 sql/caloshape 內 SQL 重建所有 table。
+腳本有安全限制：如果 Backend 已在 8080 運行，會停止並要求你先手動關掉，避免刪庫時 App 仍在讀寫資料。
+這次沒有新增 table、欄位或 SQL migration；只新增一個本機開發用 PowerShell 腳本，且我沒有替你執行刪庫。
