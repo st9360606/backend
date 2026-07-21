@@ -44,13 +44,29 @@ WHERE email = (CONVERT(@qa_email USING utf8mb4) COLLATE utf8mb4_unicode_ci)
 LIMIT 1;
 
 -- TABLE: food_log_overrides / food_log_tasks / food_log_requests / food_logs
-DELETE o FROM food_log_overrides o
-JOIN food_logs f ON f.id = o.food_log_id
-WHERE f.user_id = @qa_user_id;
+-- Workbench Safe Updates only accepts a primary-key predicate at the outer
+-- DELETE level. The derived tables keep this scoped to the fixture's logs.
+DELETE FROM food_log_overrides
+WHERE id IN (
+    SELECT target_id
+    FROM (
+        SELECT o.id AS target_id
+        FROM food_log_overrides o
+        INNER JOIN food_logs f ON f.id = o.food_log_id
+        WHERE f.user_id = @qa_user_id
+    ) AS override_targets
+) LIMIT 100000;
 
-DELETE t FROM food_log_tasks t
-JOIN food_logs f ON f.id = t.food_log_id
-WHERE f.user_id = @qa_user_id;
+DELETE FROM food_log_tasks
+WHERE id IN (
+    SELECT target_id
+    FROM (
+        SELECT t.id AS target_id
+        FROM food_log_tasks t
+        INNER JOIN food_logs f ON f.id = t.food_log_id
+        WHERE f.user_id = @qa_user_id
+    ) AS task_targets
+) LIMIT 100000;
 
 DELETE r FROM food_log_requests r WHERE r.user_id = @qa_user_id;
 DELETE FROM food_logs WHERE user_id = @qa_user_id;
@@ -402,7 +418,9 @@ INSERT INTO email_login_codes (
 INSERT INTO auth_tokens (
     token, user_id, type, expires_at, created_at, revoked, replaced_by, device_id, client_ip, user_agent
 ) VALUES (
-    SHA2('QA-EXPIRED-REFRESH-NOT-USABLE', 256), @qa_user_id, 'REFRESH',
+    -- Include the fixture account identity: auth_tokens.token is globally unique,
+    -- so separate QA accounts must never share the same deterministic hash.
+    SHA2(CONCAT('QA-EXPIRED-REFRESH-NOT-USABLE:', @qa_email), 256), @qa_user_id, 'REFRESH',
     NOW() - INTERVAL 60 DAY, NOW() - INTERVAL 90 DAY, 1, NULL,
     'qa-fixture-device', '127.0.0.1', 'qa-fixture'
 );
